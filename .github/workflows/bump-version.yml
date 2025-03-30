@@ -9,30 +9,30 @@ on:
 jobs:
   bump-version:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      - name: Install requirements (if any)
-        run: pip install -r requirements.txt || true
-
       - name: Get commit messages
-        id: commits
+        id: get_commits
         run: |
-          echo "COMMITS<<EOF" >> $GITHUB_ENV
-          git log origin/${{ github.base_ref }}..HEAD --pretty=format:%s >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          echo "COMMITS=$(git log origin/${{ github.base_ref }}..HEAD --pretty=format:%s | tr '\n' ' ')" >> $GITHUB_ENV
 
-      - name: Run bump script
+      - name: Bump version
         run: python .github/scripts/bump_version.py "$COMMITS"
 
-      - name: Commit version bump
+      - name: Commit version bump (if changed)
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git commit -am "ci: auto-bump version"
-          git push
+          if git diff --quiet; then
+            echo "No version change — skipping commit."
+          else
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git commit -am "ci: auto-bump version"
+            git push
