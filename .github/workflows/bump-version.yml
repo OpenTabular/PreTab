@@ -1,0 +1,38 @@
+name: Auto Bump Version on PR to Release
+
+on:
+  pull_request:
+    branches:
+      - release
+    types: [opened, synchronize, reopened]
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install requirements (if any)
+        run: pip install -r requirements.txt || true
+
+      - name: Get commit messages
+        id: commits
+        run: |
+          echo "COMMITS<<EOF" >> $GITHUB_ENV
+          git log origin/${{ github.base_ref }}..HEAD --pretty=format:%s >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Run bump script
+        run: python .github/scripts/bump_version.py "$COMMITS"
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git commit -am "ci: auto-bump version"
+          git push
