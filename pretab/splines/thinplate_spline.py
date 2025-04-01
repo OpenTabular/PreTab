@@ -3,7 +3,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from scipy.spatial.distance import cdist
 from scipy.linalg import eigh
 
-class ExactThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
+class ThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
     """
     Exact 1D Thin Plate Regression Spline (TPRS) basis, matching mgcv's bs="tp".
     Uses full data as knots, projects out the null space, and reduces rank via eigendecomposition.
