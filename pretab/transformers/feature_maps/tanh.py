@@ -2,7 +2,7 @@ import numpy as np
 import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array
-from ...utils.utils import center_identification_using_decision_tree
+from ..utils.utils import center_identification_using_decision_tree
 
 
 class TanhExpansionTransformer(BaseEstimator, TransformerMixin):

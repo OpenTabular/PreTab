@@ -8,9 +8,11 @@ from .tree_to_code import tree_to_code
 
 
 class PLETransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, n_bins=20, tree_params=None, task="regression", conditions=None):
+
+    def __init__(self, n_bins=20, task="regression", conditions=None, **kwargs):
+        super().__init__(**kwargs)
         self.task = task
-        self.tree_params = tree_params or {}
+
         self.n_bins = n_bins
         self.conditions = conditions
         self.pattern = r"-?\d+\.?\d*[eE]?[+-]?\d*"
@@ -30,11 +32,11 @@ class PLETransformer(BaseEstimator, TransformerMixin):
             x_feat = X[:, [i]]
             if self.task == "regression":
                 dt = DecisionTreeRegressor(
-                    max_leaf_nodes=self.n_bins, **self.tree_params
+                    max_leaf_nodes=self.n_bins,
                 )
             elif self.task == "classification":
                 dt = DecisionTreeClassifier(
-                    max_leaf_nodes=self.n_bins, **self.tree_params
+                    max_leaf_nodes=self.n_bins,
                 )
             else:
                 raise ValueError("This task is not supported")
