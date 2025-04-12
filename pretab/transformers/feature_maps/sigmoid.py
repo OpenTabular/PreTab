@@ -6,6 +6,42 @@ from ..utils.utils import center_identification_using_decision_tree
 
 
 class SigmoidExpansionTransformer(BaseEstimator, TransformerMixin):
+    """
+    Applies sigmoid basis expansion to input features using specified or data-driven center placement.
+
+    Each feature is expanded using a set of sigmoid functions centered at various locations, creating
+    a smooth, nonlinear transformation that is especially useful for capturing saturating or threshold-like behavior.
+
+    Parameters
+    ----------
+    n_centers : int, default=10
+        Number of sigmoid centers per feature.
+
+    scale : float, default=1.0
+        Controls the sharpness of the sigmoid transition. Smaller values yield sharper transitions.
+
+    use_decision_tree : bool, default=True
+        If True, uses a decision tree to determine the center locations based on the input `X` and target `y`.
+
+    task : {"regression", "classification"}, default="regression"
+        Type of prediction task. Required for decision tree-based center selection.
+
+    strategy : {"uniform", "quantile"}, default="uniform"
+        Strategy to determine center placement when `use_decision_tree=False`.
+
+    Attributes
+    ----------
+    centers_ : list of ndarray
+        A list containing the sigmoid center locations for each input feature.
+
+    Notes
+    -----
+    For a feature `x`, and center `c`, the transformation is defined as:
+        sigmoid((x - c) / scale) = 1 / (1 + exp(-(x - c) / scale))
+
+    This results in `n_centers` new features per original feature.
+    """
+
     def __init__(
         self,
         n_centers=10,

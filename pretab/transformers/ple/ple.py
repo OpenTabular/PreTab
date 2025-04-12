@@ -8,6 +8,46 @@ from .tree_to_code import tree_to_code
 
 
 class PLETransformer(BaseEstimator, TransformerMixin):
+    """
+    Piecewise Linear Encoding (PLE) transformer for numerical features using decision tree-derived binning.
+
+    This transformer encodes each feature by discretizing it using a decision tree and applying piecewise
+    linear transformations within each bin. It is particularly useful for capturing nonlinear feature-target
+    relationships while maintaining interpretability and continuity.
+
+    Parameters
+    ----------
+    n_bins : int, default=20
+        The maximum number of leaf nodes (bins) the decision tree should use per feature.
+
+    task : {"regression", "classification"}, default="regression"
+        Specifies the type of task for tree construction. This determines whether a `DecisionTreeRegressor`
+        or `DecisionTreeClassifier` is used for identifying bin splits.
+
+    conditions : list of str or None, default=None
+        Optionally supply pre-defined conditions for the tree splits. If None, conditions are learned during fitting.
+
+    **kwargs : dict
+        Additional keyword arguments passed to the BaseEstimator.
+
+    Attributes
+    ----------
+    conditions_ : list of list of str
+        Each element is a list of Python expressions representing the tree-based conditions for one input feature.
+
+    n_features_in_ : int
+        The number of features seen during `fit`.
+
+    pattern : str
+        Regular expression pattern used for extracting numerical values from tree split conditions.
+
+    Notes
+    -----
+    For each feature, the transformer builds a decision tree to identify split thresholds. These splits are
+    then used to encode the feature into a piecewise linear vector representation with increasing cumulative
+    effects across bins. Each transformed feature is represented with (n_bins - 1) + 1 features, where values
+    below the first threshold are sparse and values above the last threshold are linearly scaled.
+    """
 
     def __init__(self, n_bins=20, task="regression", conditions=None, **kwargs):
         super().__init__(**kwargs)

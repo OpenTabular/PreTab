@@ -6,6 +6,36 @@ from ..utils.utils import center_identification_using_decision_tree
 
 
 class ReLUExpansionTransformer(BaseEstimator, TransformerMixin):
+    """
+    Applies ReLU basis expansion to input features using fixed or data-driven center placement.
+
+    This transformer expands each feature using a set of ReLU activation functions centered at fixed positions,
+    which can be either uniformly/quantile spaced or determined by a decision tree based on the target.
+
+    Parameters
+    ----------
+    n_centers : int, default=10
+        Number of ReLU centers per feature.
+
+    use_decision_tree : bool, default=True
+        If True, uses a decision tree to determine center locations based on the input `X` and target `y`.
+
+    task : {"regression", "classification"}, default="regression"
+        Task type used for center selection when `use_decision_tree=True`.
+
+    strategy : {"uniform", "quantile"}, default="uniform"
+        Strategy used to determine center locations when `use_decision_tree=False`.
+
+    Attributes
+    ----------
+    centers_ : list of ndarray
+        A list of arrays containing the center locations for each input feature.
+
+    Notes
+    -----
+    For a feature `x`, and centers `c`, this transformer produces `max(0, x - c_i)` for all `c_i` in centers.
+    """
+
     def __init__(
         self,
         n_centers=10,

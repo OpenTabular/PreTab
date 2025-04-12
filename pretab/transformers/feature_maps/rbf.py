@@ -6,6 +6,47 @@ import warnings
 
 
 class RBFExpansionTransformer(BaseEstimator, TransformerMixin):
+    """
+    Radial Basis Function (RBF) feature expansion for numerical tabular data.
+
+    This transformer expands each feature into a set of RBF (Gaussian) basis functions
+    centered at fixed points. The centers can be determined either by a decision tree
+    (based on supervised splits) or based on quantiles or uniform spacing.
+
+    Parameters
+    ----------
+    n_centers : int, default=10
+        Number of RBF centers per feature.
+
+    gamma : float, default=1.0
+        Width parameter of the RBF kernel. Larger values make the kernel narrower.
+
+    use_decision_tree : bool, default=True
+        Whether to use a decision tree to select center locations based on `y`.
+
+    task : {"regression", "classification"}, default="regression"
+        Type of task for the decision tree used to find center locations.
+
+    strategy : {"uniform", "quantile"}, default="uniform"
+        Strategy for choosing centers when not using a decision tree.
+
+    Attributes
+    ----------
+    centers_ : list of ndarray
+        List of arrays containing center locations for each feature.
+
+    Examples
+    --------
+    >>> from prefab.transformers import RBFExpansionTransformer
+    >>> import numpy as np
+    >>> X = np.array([[1.], [2.], [3.]])
+    >>> transformer = RBFExpansionTransformer(n_centers=3, gamma=0.5, use_decision_tree=False)
+    >>> transformer.fit(X)
+    RBFExpansionTransformer(...)
+    >>> transformer.transform(X).shape
+    (3, 3)
+    """
+
     def __init__(
         self,
         n_centers=10,

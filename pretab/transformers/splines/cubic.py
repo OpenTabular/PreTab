@@ -5,6 +5,54 @@ import warnings
 
 
 class CubicSplineTransformer(BaseEstimator, TransformerMixin):
+    """
+    Cubic Spline Transformer for one-dimensional or multi-dimensional input features.
+
+    This transformer applies cubic spline basis expansions to continuous features using uniformly spaced knots.
+    The output includes standard polynomial features up to cubic degree and cubic spline basis functions derived
+    from shifted knot positions. Optionally, a bias term can be included.
+
+    Parameters
+    ----------
+    n_knots : int, default=10
+        Number of internal knots to place uniformly between the minimum and maximum of each feature.
+
+    degree : int, default=3
+        Degree of the polynomial spline. Currently fixed to 3 (cubic), included for compatibility.
+
+    include_bias : bool, default=False
+        Whether to include a bias (intercept) term in the output feature set.
+
+    Attributes
+    ----------
+    knots_ : list of ndarray
+        List of arrays containing the knots used for each feature.
+
+    designs_ : list of ndarray
+        List of design matrices (spline basis evaluations) for each input feature during fitting.
+
+    n_features_in_ : int
+        Number of input features seen during `fit`.
+
+    Methods
+    -------
+    get_penalty_matrix(feature_index=0)
+        Returns the penalty matrix for regularization of the spline basis functions of a specific feature.
+        Penalizes the second derivative (i.e., curvature) of the spline for smoothness.
+
+    Notes
+    -----
+    The basis includes:
+    - Polynomial terms: x, x^2, x^3
+    - Truncated power basis functions: (x - knot)^3_+
+
+    The implementation is based on B-spline basis functions but follows a truncated power basis formulation.
+    Each transformed feature is expanded to a higher-dimensional representation depending on `n_knots` and
+    whether bias is included.
+
+    This transformer supports multidimensional input and stacks all expanded features horizontally.
+    """
+
     def __init__(self, n_knots=10, degree=3, include_bias=False):
         self.n_knots = n_knots
         self.degree = degree

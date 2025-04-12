@@ -7,6 +7,54 @@ from scipy.linalg import eigh
 
 
 class ThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
+    """
+    Thin Plate Spline Transformer for smooth univariate basis expansion.
+
+    This transformer constructs a smooth, nonparametric basis using eigen-decomposed thin plate spline (TPS) kernels.
+    It supports only univariate input and is useful for modeling smooth nonlinear functions in regression tasks.
+    The basis functions are derived from the principal components of the projected TPS kernel matrix.
+
+    Parameters
+    ----------
+    n_basis : int, default=10
+        Number of basis functions to extract from the eigen-decomposition of the TPS kernel.
+
+    Attributes
+    ----------
+    x_ : ndarray of shape (n_samples, 1)
+        Training input used to compute the TPS kernel and projection matrix.
+
+    Z_ : ndarray of shape (n_samples, 2)
+        Matrix containing intercept and linear term (used for null space projection).
+
+    eigvals_ : ndarray of shape (n_basis,)
+        Top eigenvalues from the projected kernel matrix.
+
+    basis_ : ndarray of shape (n_samples, n_basis)
+        Orthogonal basis functions corresponding to the top eigenvectors.
+
+    penalty_ : ndarray of shape (n_basis, n_basis)
+        Diagonal penalty matrix containing eigenvalues (used for smoothing regularization).
+
+    Methods
+    -------
+    get_penalty_matrix()
+        Returns the penalty matrix associated with the fitted basis, useful for regularization or smoothing.
+
+    Notes
+    -----
+    - Input must be univariate. Multivariate input will raise a ValueError.
+    - Basis functions are derived from a kernel matrix projected onto the orthogonal complement of the null space
+      of the linear terms (intercept and slope).
+    - The transformer uses an eigendecomposition of the projected TPS kernel to define the basis.
+
+    References
+    ----------
+    - Wahba, G. (1990). "Spline Models for Observational Data". SIAM.
+    - Wood, S.N. (2003). "Thin plate regression splines". Journal of the Royal Statistical Society: Series B.
+
+    """
+
     def __init__(self, n_basis=10):
         self.n_basis = n_basis
 

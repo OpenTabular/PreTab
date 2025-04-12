@@ -2,7 +2,6 @@ import numpy as np
 import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array
-from itertools import product
 
 
 def bspline_basis(x, knots, degree, i):
@@ -27,6 +26,60 @@ def bspline_basis(x, knots, degree, i):
 
 
 class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
+    """
+    Tensor Product Spline Transformer for multivariate smooth basis expansion.
+
+    This transformer generates tensor-product B-spline basis functions for multivariate input,
+    allowing for smooth modeling of complex feature interactions. It supports regularization
+    via difference penalties in each marginal dimension, suitable for additive models and
+    structured regression.
+
+    Parameters
+    ----------
+    n_knots : int, default=5
+        Number of interior knots per input feature (per marginal dimension).
+
+    degree : int, default=3
+        Degree of the B-spline basis functions.
+
+    diff_order : int, default=2
+        Order of the finite difference penalty used to enforce smoothness along each input dimension.
+
+    Attributes
+    ----------
+    dim_ : int
+        Number of input features (marginal dimensions).
+
+    knots_ : list of ndarray
+        List of knot sequences for each marginal dimension.
+
+    bases_ : list of ndarray
+        List of B-spline basis matrices (n_samples x n_basis) for each input feature.
+
+    penalties_ : list of ndarray
+        List of univariate penalty matrices for each marginal basis.
+
+    X_design_ : ndarray of shape (n_samples, n_total_basis)
+        Full tensor-product design matrix, computed during `fit`.
+
+    Methods
+    -------
+    get_penalty_matrices()
+        Returns a list of full Kronecker-structured penalty matrices, one for each marginal direction.
+        These can be used for anisotropic penalization in multivariate smooth modeling.
+
+    Notes
+    -----
+    - Uses einsum-based reshaping to build the tensor product basis efficiently.
+    - Supports arbitrary number of input dimensions.
+    - Commonly used in structured additive models and GAMs where smooth surfaces are desired.
+
+    References
+    ----------
+    - Eilers, P.H.C. and Marx, B.D. (2003). "Multivariate calibration with temperature interaction using two-dimensional penalized signal regression".
+    - Wood, S.N. (2017). "Generalized Additive Models: An Introduction with R".
+    """
+
     def __init__(self, n_knots=5, degree=3, diff_order=2):
         self.n_knots = n_knots
         self.degree = degree

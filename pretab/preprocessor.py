@@ -12,6 +12,84 @@ from .utils import (
 
 
 class Preprocessor(TransformerMixin):
+    """
+    Preprocessor class for automated tabular feature preprocessing using scikit-learn-compatible pipelines.
+
+    This class provides a flexible interface for preprocessing tabular datasets containing numerical and
+    categorical features. It automatically detects feature types, applies user-defined or default preprocessing
+    strategies, and supports both dictionary and array-style outputs. It also supports integration with external
+    embedding vectors.
+
+    Features
+    --------
+    - Supports a wide range of preprocessing methods for numerical and categorical features.
+    - Automatically detects feature types (numerical vs. categorical).
+    - Compatible with both pandas DataFrames and NumPy arrays.
+    - Handles external embedding arrays for models that require learned representations.
+    - Returns either a dictionary of transformed feature blocks or a single NumPy array.
+    - Fully compatible with scikit-learn transformers and pipelines.
+
+    Parameters
+    ----------
+    feature_preprocessing : dict, optional
+        Dictionary mapping feature names to specific preprocessing methods. Overrides global defaults.
+    n_bins : int, default=64
+        Number of bins used for binning-based preprocessing (e.g., for discretizers or PLE).
+    numerical_preprocessing : str, default="ple"
+        Preprocessing method for numerical features (e.g., "standardization", "minmax", "ple", "rbf", etc.).
+    categorical_preprocessing : str, default="int"
+        Preprocessing method for categorical features (e.g., "int", "ordinal", "onehot").
+    use_decision_tree_bins : bool, default=False
+        Whether to use decision tree binning for numerical discretization.
+    binning_strategy : str, default="uniform"
+        Strategy for bin placement when not using tree-based methods. Options: "uniform", "quantile".
+    task : str, default="regression"
+        Problem type used to guide preprocessing (e.g., "regression" or "classification").
+    cat_cutoff : float or int, default=0.03
+        Threshold to determine whether integer-valued features are treated as categorical.
+    treat_all_integers_as_numerical : bool, default=False
+        If True, treat all integer-typed columns as numerical regardless of cardinality.
+    degree : int, default=3
+        Degree of polynomial or spline basis functions where applicable.
+    scaling_strategy : str, default="minmax"
+        Strategy for feature scaling (e.g., "standardization", "minmax", etc.).
+    n_knots : int, default=64
+        Number of knots used in spline-based feature expansions.
+    use_decision_tree_knots : bool, default=True
+        Whether to use decision tree-based knot placement for spline transformations.
+    knots_strategy : str, default="uniform"
+        Strategy for placing knots for splines ("uniform" or "quantile").
+    spline_implementation : str, default="sklearn"
+        Which spline backend implementation to use (e.g., "sklearn", "custom").
+    min_unique_vals : int, default=5
+        Minimum number of unique values required for a feature to be treated as numerical.
+
+    Attributes
+    ----------
+    column_transformer : ColumnTransformer
+        The internal scikit-learn column transformer that handles feature-wise preprocessing.
+    fitted : bool
+        Whether the preprocessor has been fitted.
+    embeddings : bool
+        Whether embedding vectors are expected and used in transformation.
+    embedding_dimensions : dict
+        Dictionary of embedding feature names to their expected dimensionality.
+
+    Examples
+    --------
+    >>> from prefab import Preprocessor
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({
+    ...     "age": [25, 32, 47],
+    ...     "gender": ["M", "F", "F"]
+    ... })
+    >>> pre = Preprocessor()
+    >>> pre.fit(df)
+    >>> out = pre.transform(df)
+    >>> out.keys()
+    dict_keys(['num_age', 'cat_gender'])
+    """
+
     def __init__(
         self,
         feature_preprocessing=None,
@@ -31,6 +109,45 @@ class Preprocessor(TransformerMixin):
         spline_implementation="sklearn",
         min_unique_vals=5,
     ):
+        """
+        Initialize the Preprocessor with various transformation options for tabular data.
+
+        Parameters
+        ----------
+        feature_preprocessing : dict, optional
+            Dictionary specifying preprocessing methods per feature. If None, global settings are used.
+        n_bins : int, default=64
+            Number of bins to use for binning-based transformations.
+        numerical_preprocessing : str, default="ple"
+            Preprocessing strategy for numerical features.
+        categorical_preprocessing : str, default="int"
+            Preprocessing strategy for categorical features.
+        use_decision_tree_bins : bool, default=False
+            Whether to use decision tree-based binning for numerical features.
+        binning_strategy : str, default="uniform"
+            Strategy for determining bin edges ("uniform", "quantile").
+        task : str, default="regression"
+            Task type for decision tree splitting ("regression", "classification").
+        cat_cutoff : float or int, default=0.03
+            Threshold to determine whether integer-valued columns are treated as categorical.
+        treat_all_integers_as_numerical : bool, default=False
+            If True, treat all integer columns as numerical.
+        degree : int, default=3
+            Degree of polynomial or spline basis expansion.
+        scaling_strategy : str, default="minmax"
+            Scaling method for numerical data ("standardization", "minmax", etc.).
+        n_knots : int, default=64
+            Number of knots for spline transformations.
+        use_decision_tree_knots : bool, default=True
+            Use decision tree-based knot placement for splines.
+        knots_strategy : str, default="uniform"
+            Strategy for placing spline knots.
+        spline_implementation : str, default="sklearn"
+            Backend implementation to use for splines.
+        min_unique_vals : int, default=5
+            Minimum number of unique values required for numerical processing.
+        """
+
         self.n_bins = n_bins
         self.numerical_preprocessing = (
             numerical_preprocessing.lower()
@@ -62,6 +179,22 @@ class Preprocessor(TransformerMixin):
         self.embedding_dimensions = {}
 
     def _detect_column_types(self, X):
+        """
+        Detects categorical and numerical features in the input data.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame, numpy.ndarray, or dict
+            The input data to analyze.
+
+        Returns
+        -------
+        numerical_features : list of str
+            Column names detected as numerical features.
+        categorical_features : list of str
+            Column names detected as categorical features.
+        """
+
         categorical_features = []
         numerical_features = []
 
@@ -98,6 +231,24 @@ class Preprocessor(TransformerMixin):
         return numerical_features, categorical_features
 
     def fit(self, X, y=None, embeddings=None):
+        """
+        Fit the preprocessor to the input data and target labels.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame, numpy.ndarray, or dict
+            The input features.
+        y : array-like, default=None
+            Target values (used for decision tree-based methods).
+        embeddings : np.ndarray or list of np.ndarray, optional
+            External embedding arrays to be passed and validated.
+
+        Returns
+        -------
+        self : Preprocessor
+            Fitted instance of the preprocessor.
+        """
+
         if isinstance(X, dict):
             X = pd.DataFrame(X)
         elif isinstance(X, np.ndarray):
@@ -148,6 +299,24 @@ class Preprocessor(TransformerMixin):
         return self
 
     def transform(self, X, embeddings=None, return_array=False):
+        """
+        Transform the input data using the fitted column transformer.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame, numpy.ndarray, or dict
+            Input features to transform.
+        embeddings : np.ndarray or list of np.ndarray, optional
+            Optional external embeddings to attach to the transformation.
+        return_array : bool, default=False
+            If True, return a single stacked NumPy array. If False, return a dict of transformed arrays.
+
+        Returns
+        -------
+        dict or np.ndarray
+            Transformed data. A dictionary if return_array=False, else a NumPy array.
+        """
+
         if not self.fitted:
             raise NotFittedError(
                 "Preprocessor must be fitted before calling transform."
@@ -189,11 +358,56 @@ class Preprocessor(TransformerMixin):
         return transformed_dict
 
     def fit_transform(self, X, y=None, embeddings=None, return_array=False):
+        """
+        Convenience method that fits the preprocessor and transforms the data.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame, numpy.ndarray, or dict
+            Input features.
+        y : array-like, optional
+            Target values.
+        embeddings : np.ndarray or list of np.ndarray, optional
+            Optional embedding arrays.
+        return_array : bool, default=False
+            Whether to return a stacked NumPy array or a dictionary of arrays.
+
+        Returns
+        -------
+        dict or np.ndarray
+            Transformed dataset in the specified output format.
+        """
+
         return self.fit(X, y, embeddings=embeddings).transform(
             X, embeddings, return_array
         )
 
     def get_feature_info(self, verbose=True):
+        """
+        Retrieves metadata about the transformed features.
+
+        Provides detailed information for each input feature, including:
+        - preprocessing applied
+        - output dimensionality
+        - number of categories (for categorical features)
+        - embedding dimensions (if any)
+
+        Parameters
+        ----------
+        verbose : bool, default=True
+            If True, prints detailed information for each feature.
+
+        Returns
+        -------
+        tuple of dicts
+            numerical_feature_info : dict
+                Metadata for numerical features.
+            categorical_feature_info : dict
+                Metadata for categorical features.
+            embedding_feature_info : dict
+                Metadata for embedding features, if used.
+        """
+
         if not self.fitted:
             raise NotFittedError(
                 "Preprocessor must be fitted before calling get_feature_info."

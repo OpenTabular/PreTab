@@ -5,6 +5,50 @@ from sklearn.utils.validation import check_array
 
 
 class NaturalCubicSplineTransformer(BaseEstimator, TransformerMixin):
+    """
+    Natural Cubic Spline Transformer for continuous features.
+
+    This transformer expands each input feature using a natural cubic spline basis. Natural cubic splines are
+    piecewise cubic polynomials that are linear beyond the boundary knots, ensuring smooth extrapolation.
+
+    The resulting transformation includes:
+    - A linear component (and optionally a bias term),
+    - Several non-linear basis functions constrained to produce a natural spline.
+
+    Parameters
+    ----------
+    n_knots : int, default=5
+        Number of knots to place uniformly across the range of each feature.
+        The spline basis functions are derived from these knots.
+
+    include_bias : bool, default=False
+        If True, includes a constant bias (intercept) column in the output.
+
+    Attributes
+    ----------
+    knots_ : list of ndarray
+        List of knot vectors used for each feature.
+
+    designs_ : list of ndarray
+        Cached spline basis design matrices (used for penalty computation or inspection).
+
+    n_features_in_ : int
+        Number of input features seen during `fit`.
+
+    Methods
+    -------
+    get_penalty_matrix(feature_index=0)
+        Returns the penalty matrix for the second derivative (curvature) of the spline basis for a specific feature.
+        Useful for regularization or smoothing in generalized additive models.
+
+    Notes
+    -----
+    The basis is constructed to satisfy the natural spline constraint: the second derivative of the spline is zero
+    at the boundary knots. This reduces the tendency to overfit at the boundaries and improves extrapolation.
+
+    Each feature is transformed independently and their expanded outputs are concatenated.
+    """
+
     def __init__(self, n_knots=5, include_bias=False):
         self.n_knots = n_knots
         self.include_bias = include_bias

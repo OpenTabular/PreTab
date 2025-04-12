@@ -28,6 +28,52 @@ def bspline_basis(x, knots, degree, i):
 
 
 class PSplineTransformer(BaseEstimator, TransformerMixin):
+    """
+    P-spline Transformer for smooth spline basis expansion with penalization.
+
+    This transformer expands each input feature into a set of B-spline basis functions
+    and stores a corresponding penalty matrix for regularization. It is useful in
+    Generalized Additive Models (GAMs) where smoothness is enforced through penalties.
+
+    Parameters
+    ----------
+    n_knots : int, default=20
+        Number of interior knots to place uniformly across the range of each feature.
+
+    degree : int, default=3
+        Degree of the B-spline basis functions (e.g., 3 for cubic splines).
+
+    diff_order : int, default=2
+        The order of the difference penalty used to compute the smoothness penalty matrix.
+        For example, 2 corresponds to a second-order difference penalty (encouraging smooth second derivatives).
+
+    Attributes
+    ----------
+    knots_ : list of ndarray
+        List of extended knot sequences (with added boundary knots) for each feature.
+
+    penalty_ : list of ndarray
+        List of penalty matrices (D^T D) for each feature, where D is the differencing matrix.
+
+    n_basis_ : list of int
+        Number of B-spline basis functions generated for each feature.
+
+    n_features_in_ : int
+        Number of input features seen during `fit`.
+
+    Methods
+    -------
+    get_penalty_matrix(feature_index=0)
+        Returns the penalty matrix associated with the specified feature. This matrix
+        can be used for Tikhonov-style regularization to enforce smoothness of the fitted spline.
+
+    Notes
+    -----
+    - Boundary knots are added automatically to ensure proper spline behavior near the edges.
+    - Internally, this transformer uses recursive B-spline basis construction.
+    - This implementation supports multi-dimensional inputs and stacks transformed features horizontally.
+    """
+
     def __init__(self, n_knots=20, degree=3, diff_order=2):
         self.n_knots = n_knots
         self.degree = degree

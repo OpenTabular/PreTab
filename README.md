@@ -116,6 +116,37 @@ pretab includes both sklearn-native and custom-built transformers:
 
 > Plus: **any `sklearn` transformer** can be passed directly with full support for hyperparameters.
 
+### Using Transformers
+Using the transformers follows the standard sklearn.preprocessing steps. I.e. using PLE
+```python
+import numpy as np
+from pretab.transformers import PLETransformer
+
+x = np.random.randn(100, 1)
+y = np.random.randn(100, 1)
+
+x_ple = PLETransformer(n_bins=15, task="regression").fit_transform(x, y)
+
+assert x_ple.shape[1] == 15
+```
+
+For splines, the penalty matrices can be extracted via `.get_penalty_matrix()`
+
+```python
+import numpy as np
+from pretab.transformers import ThinPlateSplineTransformer
+
+x = np.random.randn(100, 1)
+
+tp = ThinPlateSplineTransformer(n_basis=15)
+
+x_tp = tp.fit_transform(x)
+
+assert x_tp.shape[1] == 15
+
+penalty = tp.get_penalty_matrix()
+```
+
 ---
 
 ## 🧪 Running Tests

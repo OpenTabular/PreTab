@@ -6,6 +6,42 @@ from ..utils.utils import center_identification_using_decision_tree
 
 
 class TanhExpansionTransformer(BaseEstimator, TransformerMixin):
+    """
+    Applies hyperbolic tangent (tanh) basis expansion to input features using specified or learned center locations.
+
+    This transformer expands each input feature into multiple tanh-activated features, useful for capturing
+    nonlinear and saturating patterns in the data.
+
+    Parameters
+    ----------
+    n_centers : int, default=10
+        Number of tanh centers per feature.
+
+    scale : float, default=1.0
+        Controls the sharpness of the tanh transitions. Smaller values make the activation sharper.
+
+    use_decision_tree : bool, default=True
+        If True, uses a decision tree to determine the tanh center locations based on the input `X` and target `y`.
+
+    task : {"regression", "classification"}, default="regression"
+        Type of prediction task. Required for decision tree-based center selection.
+
+    strategy : {"uniform", "quantile"}, default="uniform"
+        Strategy to determine center placement when `use_decision_tree=False`.
+
+    Attributes
+    ----------
+    centers_ : list of ndarray
+        A list of center values for each input feature used in the tanh expansion.
+
+    Notes
+    -----
+    Each original feature `x` is transformed into `n_centers` features of the form:
+        tanh((x - c) / scale)
+
+    where `c` is a center value and `scale` controls the spread of the activation.
+    """
+
     def __init__(
         self,
         n_centers=10,
