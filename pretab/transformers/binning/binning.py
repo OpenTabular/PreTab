@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
+import pandas as pd
 
 
 class CustomBinTransformer(TransformerMixin, BaseEstimator):
@@ -13,6 +14,13 @@ class CustomBinTransformer(TransformerMixin, BaseEstimator):
         return self
 
     def transform(self, X):
+        X = np.asarray(X)  # Ensures squeeze works and consistent input
+        if X.ndim != 2 or X.shape[1] != 1:
+            raise ValueError("Input must be a 2D array with shape (n_samples, 1).")
+
+        if X.shape[0] <= 2:
+            raise ValueError("Input must have more than 2 observations.")
+
         if isinstance(self.bins, int):
             # Calculate equal width bins based on the range of the data and number of bins
             _, bins = pd.cut(X.squeeze(), bins=self.bins, retbins=True)

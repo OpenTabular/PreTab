@@ -1,16 +1,13 @@
-from .b_spline import BSplineTransformer
 from .cubic import CubicSplineTransformer
-from .integrated_spline import ISplineTransformer
 from .natural_cubic import NaturalCubicSplineTransformer
 from .tensor_product import TensorProductSplineTransformer
-from .thinplate import ThinPlateSplineTransformer
+from .thinplate_spline import ThinPlateSplineTransformer
+from .p_spline import PSplineTransformer
 
 __all__ = [
-    "BSplineTransformer",
     "CubicSplineTransformer",
-    "ISplineTransformer",
     "NaturalCubicSplineTransformer",
     "TensorProductSplineTransformer",
     "ThinPlateSplineTransformer",
-    "PeriodicCubicSplineTransformer",
+    "PSplineTransformer",
 ]

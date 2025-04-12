@@ -1,28 +1,32 @@
 import numpy as np
+import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_array
 from itertools import product
 
 
 def bspline_basis(x, knots, degree, i):
-    """Cox–de Boor recursion for B-spline basis function B_{i,degree}(x)."""
     if degree == 0:
         return ((knots[i] <= x) & (x < knots[i + 1])).astype(float)
     else:
         denom1 = knots[i + degree] - knots[i]
         denom2 = knots[i + degree + 1] - knots[i + 1]
-        term1 = 0.0 if denom1 == 0 else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
-        term2 = 0.0 if denom2 == 0 else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1)
+        term1 = (
+            0.0
+            if denom1 == 0
+            else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
+        )
+        term2 = (
+            0.0
+            if denom2 == 0
+            else (knots[i + degree + 1] - x)
+            / denom2
+            * bspline_basis(x, knots, degree - 1, i + 1)
+        )
         return term1 + term2
 
 
 class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
-    """
-    Tensor product B-spline transformer matching mgcv::te smooth behavior.
-    Each marginal uses B-splines with a difference penalty, and the tensor
-    basis is constructed via Kronecker products. The total penalty is a sum
-    of marginal Kronecker penalties.
-    """
-
     def __init__(self, n_knots=5, degree=3, diff_order=2):
         self.n_knots = n_knots
         self.degree = degree
@@ -31,11 +35,9 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
     def _make_knots(self, x):
         xmin, xmax = np.min(x), np.max(x)
         inner = np.linspace(xmin, xmax, self.n_knots)
-        return np.concatenate((
-            np.repeat(inner[0], self.degree),
-            inner,
-            np.repeat(inner[-1], self.degree)
-        ))
+        return np.concatenate(
+            (np.repeat(inner[0], self.degree), inner, np.repeat(inner[-1], self.degree))
+        )
 
     def _basis_matrix(self, x, knots):
         n_basis = len(knots) - self.degree - 1
@@ -51,7 +53,16 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
         return D.T @ D
 
     def fit(self, X, y=None):
-        X = np.asarray(X)
+        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
+        X = check_array(
+            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
+        )
+        if X.shape[1] < original_dim:
+            warnings.warn(
+                "Some input features were dropped during check_array validation.",
+                UserWarning,
+            )
+
         self.dim_ = X.shape[1]
         self.knots_ = []
         self.bases_ = []
@@ -65,7 +76,6 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
             self.bases_.append(basis)
             self.penalties_.append(penalty)
 
-        # Tensor product basis: compute design matrix
         n_samples = X.shape[0]
         design = self.bases_[0]
         for b in self.bases_[1:]:
@@ -75,13 +85,21 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        X = np.asarray(X)
+        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
+        X = check_array(
+            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
+        )
+        if X.shape[1] < original_dim:
+            warnings.warn(
+                "Some input features were dropped during check_array validation.",
+                UserWarning,
+            )
+
         bases = []
         for d in range(self.dim_):
             basis = self._basis_matrix(X[:, d], self.knots_[d])
             bases.append(basis)
 
-        # Tensor product transform
         n_samples = X.shape[0]
         design = bases[0]
         for b in bases[1:]:
@@ -89,7 +107,6 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
         return design
 
     def get_penalty_matrices(self):
-        """Return list of Kronecker-structured penalty matrices (one per margin)."""
         kron_penalties = []
         for i, Si in enumerate(self.penalties_):
             mats = [np.eye(b.shape[1]) for j, b in enumerate(self.bases_) if j != i]
