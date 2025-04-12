@@ -6,7 +6,7 @@ from setuptools import find_packages, setup
 
 
 # Package meta-data.
-NAME = "stream_topic"
+NAME = "pretab"
 DESCRIPTION = "A python package for preprocessing tabular data"
 HOMEPAGE = "https://github.com/OpenTabular/PreTab"
 EMAIL = "antonthielmann@t-online.de.de"
