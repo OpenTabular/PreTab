@@ -45,10 +45,11 @@ def get_numerical_transformer_steps(
             ("imputer", SimpleImputer(strategy=imputer_strategy, **imputer_kwargs))
         )
 
-    if scaling == "standardization":
-        steps.append(("scaler", StandardScaler()))
-    elif scaling == "minmax":
-        steps.append(("minmax", MinMaxScaler(feature_range=(-1, 1))))
+    # Define scalers that could be added independently
+    scalers = {
+        "standardization": ("scaler", StandardScaler()),
+        "minmax": ("minmax", MinMaxScaler(feature_range=(-1, 1))),
+    }
 
     method_map = {
         "standardization": (StandardScaler, []),
@@ -92,6 +93,10 @@ def get_numerical_transformer_steps(
         "tprs": (ThinPlateSplineTransformer, ["n_basis"]),
         "none": (NoTransformer, []),
     }
+
+    # Add optional scaling step only if not already part of method
+    if scaling in scalers and scaling != method:
+        steps.append(scalers[scaling])
 
     if method not in method_map:
         raise ValueError(f"Unknown numerical transformer method: {method}")

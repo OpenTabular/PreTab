@@ -54,34 +54,43 @@ pip install -e .
 
 ```python
 import pandas as pd
-from pretab import Preprocessor
+import numpy as np
+from pretab.preprocessor import Preprocessor
 
+# Simulated tabular dataset
 df = pd.DataFrame({
-    "age": [22, 35, 46, 59],
-    "income": [40000, 52000, 98000, 87000],
-    "job": ["nurse", "engineer", "scientist", "teacher"]
+    "age": np.random.randint(18, 65, size=100),
+    "income": np.random.normal(60000, 15000, size=100).astype(int),
+    "job": np.random.choice(["nurse", "engineer", "scientist", "teacher", "artist", "manager"], size=100),
+    "city": np.random.choice(["Berlin", "Munich", "Hamburg", "Cologne"], size=100),
+    "experience": np.random.randint(0, 40, size=100)
 })
 
-# Optional feature-specific config
+y = np.random.randn(100, 1)
+
+# Optional feature-specific preprocessing config
 config = {
     "age": "ple",
     "income": "rbf",
-    "job": "one-hot"
+    "experience": "quantile",
+    "job": "one-hot",
+    "city": "none"
 }
 
+# Initialize Preprocessor
 preprocessor = Preprocessor(
     feature_preprocessing=config,
     task="regression"
 )
 
-# Fit and transform
-X_dict = preprocessor.fit_transform(df)
+# Fit and transform the data into a dictionary of feature arrays
+X_dict = preprocessor.fit_transform(df, y)
 
-# Optionally get stacked array
-X_array = preprocessor.transform(df, return_dict=False)
+# Optionally get a stacked array instead of a dictionary
+X_array = preprocessor.transform(df, return_array=True)
 
-# Get feature info
-preprocessor.get_feature_info()
+# Get feature metadata
+preprocessor.get_feature_info(verbose=True)
 ```
 
 ---
