@@ -45,10 +45,11 @@ def get_numerical_transformer_steps(
             ("imputer", SimpleImputer(strategy=imputer_strategy, **imputer_kwargs))
         )
 
-    if scaling == "standardization":
-        steps.append(("scaler", StandardScaler()))
-    elif scaling == "minmax":
-        steps.append(("minmax", MinMaxScaler(feature_range=(-1, 1))))
+    if scaling is not None:
+        if scaling == "standardization":
+            steps.append(("scaler", StandardScaler()))
+        elif scaling == "minmax":
+            steps.append(("minmax", MinMaxScaler(feature_range=(-1, 1))))
 
     method_map = {
         "standardization": (StandardScaler, []),
