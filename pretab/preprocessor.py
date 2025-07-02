@@ -178,6 +178,53 @@ class Preprocessor(TransformerMixin):
         self.embeddings = False
         self.embedding_dimensions = {}
 
+    def get_params(self, deep=True):
+        """Get parameters for the preprocessor.
+
+        Parameters
+        ----------
+        deep : bool, default=True
+            If True, will return parameters of subobjects that are estimators.
+
+        Returns
+        -------
+        params : dict
+            Parameter names mapped to their values.
+        """
+        params = {
+            "n_bins": self.n_bins,
+            "numerical_preprocessing": self.numerical_preprocessing,
+            "categorical_preprocessing": self.categorical_preprocessing,
+            "use_decision_tree_bins": self.use_decision_tree_bins,
+            "binning_strategy": self.binning_strategy,
+            "task": self.task,
+            "cat_cutoff": self.cat_cutoff,
+            "treat_all_integers_as_numerical": self.treat_all_integers_as_numerical,
+            "degree": self.degree,
+            "scaling_strategy": self.scaling_strategy,
+            "n_knots": self.n_knots,
+            "use_decision_tree_knots": self.use_decision_tree_knots,
+            "knots_strategy": self.knots_strategy,
+        }
+        return params
+
+    def set_params(self, **params):
+        """Set parameters for the preprocessor.
+
+        Parameters
+        ----------
+        **params : dict
+            Parameter names mapped to their new values.
+
+        Returns
+        -------
+        self : object
+            Preprocessor instance.
+        """
+        for key, value in params.items():
+            setattr(self, key, value)
+        return self
+
     def _detect_column_types(self, X):
         """
         Detects categorical and numerical features in the input data.
