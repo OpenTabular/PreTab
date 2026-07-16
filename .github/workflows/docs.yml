@@ -1,0 +1,67 @@
+name: Docs
+
+on:
+  workflow_dispatch:
+  pull_request:
+    # Only run on PRs that touch docs-related files to keep checks fast.
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "pyproject.toml"
+      - "pretab/**"
+      - ".github/workflows/docs.yml"
+  push:
+    # No paths filter here: tag pushes must always build docs regardless of
+    # which files changed in the tagged commit.
+    branches:
+      - main
+    tags:
+      - "v*"
+
+concurrency:
+  group: docs-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-docs:
+    name: Build docs (Sphinx)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Configure Poetry
+        run: poetry config virtualenvs.in-project true
+
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-docs-${{ runner.os }}-3.12-${{ hashFiles('poetry.lock') }}
+
+      - name: Install package and docs dependencies
+        run: poetry install --with docs
+
+      - name: Build Sphinx docs
+        run: poetry run sphinx-build -b html docs docs/_build/html -W --keep-going
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-docs
+          path: docs/_build/html
+
+      # RTD listens to its own webhook and publishes "latest" (on push to main)
+      # and versioned snapshots (on tag pushes) automatically. This workflow is
+      # a CI check plus a downloadable artifact; RTD performs the actual hosting.
+      - name: Note on publishing
+        if: github.event_name == 'push'
+        run: echo "Docs build succeeded. Read the Docs will publish automatically via its webhook."
