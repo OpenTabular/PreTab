@@ -9,8 +9,8 @@ per feature.
 
 By default, columns are classified automatically:
 
-- **Numerical** — continuous columns, and integer columns with enough distinct values.
-- **Categorical** — string/object columns, and low-cardinality integer columns.
+- **Numerical**: continuous columns, and integer columns with enough distinct values.
+- **Categorical**: string/object columns, and low-cardinality integer columns.
 
 The behaviour is controlled by several constructor arguments:
 

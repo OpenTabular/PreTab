@@ -72,6 +72,11 @@ x_ple = PLETransformer(n_bins=15, task="regression").fit_transform(x, y)
 assert x_ple.shape[1] == 15
 ```
 
+```{note}
+`PLETransformer` is supervised: it uses the target `y` during `fit` to place its bin
+edges. Always pass `y` when fitting it, or any pipeline that includes it.
+```
+
 For spline transformers, the penalty matrix can be extracted with
 `get_penalty_matrix()`:
 

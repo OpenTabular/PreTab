@@ -1,6 +1,6 @@
 # Installation
 
-pretab supports Python 3.10 – 3.13.
+pretab supports Python 3.10 to 3.13.
 
 ## From PyPI
 
@@ -16,6 +16,12 @@ extra (or the convenience `all` extra):
 
 ```bash
 pip install "pretab[embeddings]"
+```
+
+```{note}
+The `embeddings` extra installs `sentence-transformers` and its deep-learning
+dependencies (including PyTorch), so it is a sizeable download. Add it only if you plan
+to use the `pretrained` categorical strategy.
 ```
 
 ## From source

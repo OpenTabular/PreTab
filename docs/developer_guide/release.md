@@ -48,7 +48,7 @@ just docs     # docs build (warnings as errors)
 Preview the version commitizen infers from the commits since the last tag, then apply it:
 
 ```bash
-just bump-rc-preview     # dry run — inspect the proposed version and changelog
+just bump-rc-preview     # dry run to inspect the proposed version and changelog
 just bump-rc             # applies the bump: updates pyproject.toml + CHANGELOG.md, commits, tags vX.Y.ZrcN
 ```
 
@@ -108,6 +108,6 @@ GitHub Release notes.
 
 ```{tip}
 Need a build artifact without publishing? Run the `build-check.yml` workflow manually from
-the GitHub Actions tab — it builds the wheel and sdist, runs `twine check`, and performs an
+the GitHub Actions tab. It builds the wheel and sdist, runs `twine check`, and performs an
 import smoke test.
 ```
