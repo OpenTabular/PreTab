@@ -39,6 +39,11 @@ types:
 test:
     poetry run pytest --cov=pretab tests/
 
+# build the HTML docs locally (warnings treated as errors)
+docs:
+    rm -rf docs/_build
+    poetry run sphinx-build -b html docs docs/_build/html -W --keep-going
+
 # run all pre-commit hooks on all files including push-stage hooks (ruff, pyright, prettier)
 check:
     poetry run pre-commit run --hook-stage push --all-files
