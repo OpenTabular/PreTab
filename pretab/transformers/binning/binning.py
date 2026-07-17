@@ -1,9 +1,14 @@
+from typing import ClassVar
+
 import numpy as np
-from sklearn.base import BaseEstimator, TransformerMixin
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
+
+from ...core.exceptions import InvalidParamError
+from ...core.params import UNSET, AliasResolverMixin
 
 
-class CustomBinTransformer(TransformerMixin, BaseEstimator):
+class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
     """
     Custom binning transformer for one-dimensional numerical features.
 
@@ -37,8 +42,11 @@ class CustomBinTransformer(TransformerMixin, BaseEstimator):
     (10, 1)
     """
 
-    def __init__(self, bins):
-        # bins can be a scalar (number of bins) or array-like (bin edges)
+    _param_aliases: ClassVar[dict[str, str]] = {"bins": "n_basis"}
+
+    def __init__(self, n_basis=UNSET, bins=UNSET):
+        # A basis count (int) yields equal-width bins; an array-like is used as bin edges.
+        self.n_basis = n_basis
         self.bins = bins
 
     def fit(self, X, y=None):
@@ -84,12 +92,16 @@ class CustomBinTransformer(TransformerMixin, BaseEstimator):
         if X.shape[0] <= 2:
             raise ValueError("Input must have more than 2 observations.")
 
-        if isinstance(self.bins, int):
+        bins_spec = self._resolve_param("n_basis", default=UNSET)
+        if bins_spec is UNSET:
+            raise InvalidParamError("CustomBinTransformer requires 'n_basis' (or the legacy 'bins').")
+
+        if isinstance(bins_spec, int):
             # Calculate equal width bins based on the range of the data and number of bins
-            _, bins = pd.cut(X.squeeze(), bins=self.bins, retbins=True)
+            _, bins = pd.cut(X.squeeze(), bins=bins_spec, retbins=True)
         else:
             # Use predefined bins
-            bins = self.bins
+            bins = bins_spec
 
         # Apply the bins to the data
         binned_data = pd.cut(  # type: ignore
