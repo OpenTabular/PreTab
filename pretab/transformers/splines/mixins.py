@@ -10,7 +10,11 @@ sizes and the legacy ``_validate_allow_nan`` entry point) so each concrete
 transformer only has to implement its own basis math.
 """
 
+import numpy as np
+
 from ...core.base import BasePreTabTransformer
+from ...core.exceptions import IncompatibleParamsError
+from ...core.knots import spanning_knots
 
 
 class SplineBasisMixin(BasePreTabTransformer):
@@ -44,3 +48,26 @@ class SplineBasisMixin(BasePreTabTransformer):
     def _output_sizes(self) -> list[int]:
         """Number of output columns contributed by each input feature."""
         return [int(n) for n in self.n_basis_]
+
+    def _place_spanning_knots(self, x, y, n_basis, strategy, selector, task):
+        """Return a spanning knot vector (endpoints included) for one feature.
+
+        When ``selector`` is provided the internal knots come from the target-aware
+        selector and are bracketed by the feature's min/max; otherwise
+        ``n_basis`` knots are placed with :func:`pretab.core.knots.spanning_knots`.
+        ``strategy="uniform"`` reproduces the legacy ``np.linspace(min, max, n_basis)``
+        placement exactly.
+        """
+        x = np.asarray(x)
+        if selector is not None:
+            if y is None:
+                raise IncompatibleParamsError(
+                    "A knot selector requires y during fit for target-aware knot placement."
+                )
+            selected = np.asarray(
+                selector.get_knot_locations(x.reshape(-1, 1), y, task=task), dtype=float
+            )
+            x_min, x_max = x.min(), x.max()
+            selected = np.unique(selected[(selected > x_min) & (selected < x_max)])
+            return np.concatenate([[x_min], selected, [x_max]])
+        return spanning_knots(x, n_basis, strategy)
