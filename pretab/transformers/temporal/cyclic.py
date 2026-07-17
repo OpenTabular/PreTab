@@ -1,8 +1,10 @@
 import numpy as np
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
+from sklearn.utils.validation import check_is_fitted
 
-class CyclicalTimeTransformer(BaseEstimator, TransformerMixin):
+from ...core.base import BasePreTabTransformer
+
+
+class CyclicalTimeTransformer(BasePreTabTransformer):
     r"""Encode a cyclical time variable using sine and cosine components.
 
     Maps a periodic integer feature (such as hour of day or day of week) onto two
@@ -34,21 +36,25 @@ class CyclicalTimeTransformer(BaseEstimator, TransformerMixin):
     (4, 2)
     """
 
+    _allow_nan = False
+    _feature_suffix_value = "cyclic"
+
     def __init__(self, period: int):
         self.period = period
 
     def fit(self, X, y=None):
-        X = check_array(X, ensure_2d=True)
+        X = self._validate(X, reset=True)
         if not np.all((X >= 0) & (X <= self.period)):
             raise ValueError("Input should be within the range [0, period].")
         return self
 
     def transform(self, X):
-        X = check_array(X, ensure_2d=True)
+        check_is_fitted(self, "n_features_in_")
+        X = self._validate(X, reset=False)
         angle = 2 * np.pi * X / self.period
         sin = np.sin(angle)
         cos = np.cos(angle)
         return np.hstack([sin, cos])
 
-    def fit_transform(self, X, y=None):
-        return self.fit(X, y).transform(X)
+    def _output_sizes(self) -> list[int]:
+        return [2] * self.n_features_in_
