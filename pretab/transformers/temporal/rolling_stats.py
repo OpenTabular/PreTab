@@ -1,8 +1,10 @@
 import numpy as np
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
+from sklearn.utils.validation import check_is_fitted
 
-class RollingStatsTransformer(BaseEstimator, TransformerMixin):
+from ...core.base import BasePreTabTransformer
+
+
+class RollingStatsTransformer(BasePreTabTransformer):
     """Compute rolling-window statistics over time-series inputs.
 
     A sliding window of fixed size is moved across each feature and the requested
@@ -31,18 +33,22 @@ class RollingStatsTransformer(BaseEstimator, TransformerMixin):
     (8, 2)
     """
 
+    _allow_nan = False
+    _feature_suffix_value = "roll"
+
     def __init__(self, window_size=5, stats=("mean", "std")):
         self.window_size = window_size
         self.stats = stats
 
     def fit(self, X, y=None):
-        X = check_array(X, ensure_2d=True)
+        X = self._validate(X, reset=True)
         if X.shape[0] < self.window_size:
             raise ValueError("window_size must be less than number of samples.")
         return self
 
     def transform(self, X):
-        X = check_array(X, ensure_2d=True)
+        check_is_fitted(self, "n_features_in_")
+        X = self._validate(X, reset=False)
         n_samples = X.shape[0]
         if n_samples < self.window_size:
             raise ValueError("Insufficient samples for the given window size.")
@@ -64,5 +70,5 @@ class RollingStatsTransformer(BaseEstimator, TransformerMixin):
 
         return np.hstack(results)
 
-    def fit_transform(self, X, y=None):
-        return self.fit(X, y).transform(X)
+    def _output_sizes(self) -> list[int]:
+        return [len(self.stats)] * self.n_features_in_
