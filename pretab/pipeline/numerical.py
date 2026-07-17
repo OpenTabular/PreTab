@@ -13,6 +13,24 @@ SPLINE_EXPANSION_METHODS = ("bspline", "mspline", "ispline")
 _MIN_SPLINE_BASIS = 5
 _MAX_SPLINE_BASIS = 50
 
+# Legacy constructor argument names mapped to the canonical vocabulary. The
+# Preprocessor shares a single kwargs bag using historical names; renaming them
+# here keeps the transformer constructors on the canonical spelling and avoids
+# emitting deprecation warnings during normal pipeline use.
+_ARG_CANONICAL = {
+    "n_knots": "n_basis",
+    "n_bins": "n_basis",
+    "n_centers": "n_basis",
+    "bins": "n_basis",
+    "use_decision_tree": "use_target",
+    "knot_strategy": "strategy",
+}
+
+
+def _canonicalize(filtered):
+    """Rename legacy constructor argument keys to their canonical spelling."""
+    return {_ARG_CANONICAL.get(key, key): value for key, value in filtered.items()}
+
 
 def filter_kwargs(transformer_cls, kwargs, allowed=None):
     if allowed is not None:
@@ -68,7 +86,7 @@ def get_numerical_transformer_steps(
         raise ValueError(f"Unknown numerical transformer method: {method}")
 
     cls, allowed_args = NUMERICAL_METHODS[method]
-    filtered = filter_kwargs(cls, kwargs, allowed=allowed_args)
+    filtered = _canonicalize(filter_kwargs(cls, kwargs, allowed=allowed_args))
 
     if method == "box-cox":
         steps.append(("scale_positive", MinMaxScaler(feature_range=(1e-3, 1))))
@@ -80,14 +98,14 @@ def get_numerical_transformer_steps(
 
         n_knots = kwargs.get("n_knots")
         if n_knots is not None:
-            spline_kwargs["n_knots"] = _clamp_spline_basis(n_knots)
+            spline_kwargs["n_basis"] = _clamp_spline_basis(n_knots)
 
         strategy = kwargs.get("strategy")
         if strategy in ("uniform", "quantile"):
-            spline_kwargs["knot_strategy"] = strategy
+            spline_kwargs["strategy"] = strategy
 
         if kwargs.get("use_decision_tree"):
-            spline_kwargs["knot_selector"] = CARTKnotSelector(
+            spline_kwargs["selector"] = CARTKnotSelector(
                 degree=spline_kwargs.get("degree", 3),
                 spline_type=method,
             )
