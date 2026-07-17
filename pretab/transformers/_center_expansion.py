@@ -7,6 +7,8 @@ names, and estimator tags -- is identical. ``BaseCenterExpansion`` holds that
 shared machinery so each concrete transformer only implements ``_expand_column``.
 """
 
+from typing import ClassVar
+
 import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
@@ -17,6 +19,7 @@ from ..core.exceptions import (
     InvalidParamError,
     PretabDataError,
 )
+from ..core.params import UNSET, is_set
 
 
 class BaseCenterExpansion(BasePreTabTransformer):
@@ -33,17 +36,26 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     centers_: list
 
+    _param_aliases: ClassVar[dict[str, str]] = {
+        "n_centers": "n_basis",
+        "use_decision_tree": "use_target",
+    }
+
     def __init__(
         self,
-        n_centers=10,
-        use_decision_tree=True,
+        n_basis=UNSET,
+        use_target=UNSET,
         task: str = "regression",
         strategy="uniform",
+        n_centers=UNSET,
+        use_decision_tree=UNSET,
     ):
-        self.n_centers = n_centers
-        self.use_decision_tree = use_decision_tree
+        self.n_basis = n_basis
+        self.use_target = use_target
         self.task = task
         self.strategy = strategy
+        self.n_centers = n_centers
+        self.use_decision_tree = use_decision_tree
 
         if self.strategy not in ("uniform", "quantile"):
             raise InvalidParamError(
@@ -63,25 +75,27 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Place per-feature centers from a decision tree or quantile/uniform spacing."""
+        n_centers = self._resolve_param("n_basis", default=10)
+        use_target = self._resolve_param("use_target", default=True)
         X = self._validate(X, reset=True)
 
-        if self.use_decision_tree and y is None:
+        if use_target and y is None:
             raise IncompatibleParamsError(
                 "Target variable 'y' must be provided when use_decision_tree=True."
             )
 
-        if self.use_decision_tree:
+        if use_target:
             centers_list = center_identification_using_decision_tree(
-                X, y, self.task, self.n_centers
+                X, y, self.task, n_centers
             )
         elif self.strategy == "quantile":
             centers_list = [
-                np.percentile(X[:, i], np.linspace(0, 100, self.n_centers))
+                np.percentile(X[:, i], np.linspace(0, 100, n_centers))
                 for i in range(X.shape[1])
             ]
         else:  # uniform
             centers_list = [
-                np.linspace(X[:, i].min(), X[:, i].max(), self.n_centers)
+                np.linspace(X[:, i].min(), X[:, i].max(), n_centers)
                 for i in range(X.shape[1])
             ]
 
@@ -110,5 +124,11 @@ class BaseCenterExpansion(BasePreTabTransformer):
     def __sklearn_tags__(self):
         """Require ``y`` only when centers are placed with a decision tree."""
         tags = super().__sklearn_tags__()
-        tags.target_tags.required = bool(self.use_decision_tree)
+        if is_set(self.use_decision_tree):
+            use_target = self.use_decision_tree
+        elif is_set(self.use_target):
+            use_target = self.use_target
+        else:
+            use_target = True
+        tags.target_tags.required = bool(use_target)
         return tags

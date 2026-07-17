@@ -1,5 +1,6 @@
 import numpy as np
 
+from ...core.params import UNSET
 from .._center_expansion import BaseCenterExpansion
 
 
@@ -60,17 +61,21 @@ class RBFExpansionTransformer(BaseCenterExpansion):
 
     def __init__(
         self,
-        n_centers=10,
+        n_basis=UNSET,
         gamma: float = 1.0,
-        use_decision_tree=True,
+        use_target=UNSET,
         task: str = "regression",
         strategy="uniform",
+        n_centers=UNSET,
+        use_decision_tree=UNSET,
     ):
         super().__init__(
-            n_centers=n_centers,
-            use_decision_tree=use_decision_tree,
+            n_basis=n_basis,
+            use_target=use_target,
             task=task,
             strategy=strategy,
+            n_centers=n_centers,
+            use_decision_tree=use_decision_tree,
         )
         self.gamma = gamma
 

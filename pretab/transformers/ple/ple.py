@@ -7,12 +7,14 @@ generated strings and no regular-expression parsing of split conditions.
 """
 
 import warnings
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.utils.validation import check_array, check_is_fitted
+
+from ...core.params import UNSET, AliasResolverMixin
 
 
 def extract_thresholds_from_tree(tree) -> np.ndarray:
@@ -40,7 +42,7 @@ def extract_thresholds_from_tree(tree) -> np.ndarray:
     return np.unique(thresholds)
 
 
-class PLETransformer(BaseEstimator, TransformerMixin):
+class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
     """Piecewise Linear Encoding (PLE) transformer for numerical features.
 
     Each feature is discretized with a decision tree, and the split thresholds
@@ -107,9 +109,15 @@ class PLETransformer(BaseEstimator, TransformerMixin):
     >>> X_transformed = ple.fit_transform(X, y)
     """
 
+    _param_aliases: ClassVar[dict[str, str]] = {
+        "n_bins": "n_basis",
+        "min_bins": "min_basis",
+        "max_bins": "max_basis",
+    }
+
     def __init__(
         self,
-        n_bins: int = 20,
+        n_basis=UNSET,
         task: Literal["regression", "classification"] = "regression",
         max_depth: int | None = None,
         min_samples_split: int = 2,
@@ -117,10 +125,13 @@ class PLETransformer(BaseEstimator, TransformerMixin):
         random_state: int | None = 51,
         handle_missing: Literal["error", "median"] = "median",
         adaptive: bool = False,
-        min_bins: int | None = None,
-        max_bins: int | None = None,
+        min_basis=UNSET,
+        max_basis=UNSET,
+        n_bins=UNSET,
+        min_bins=UNSET,
+        max_bins=UNSET,
     ):
-        self.n_bins = n_bins
+        self.n_basis = n_basis
         self.task = task
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
@@ -128,6 +139,9 @@ class PLETransformer(BaseEstimator, TransformerMixin):
         self.random_state = random_state
         self.handle_missing = handle_missing
         self.adaptive = adaptive
+        self.min_basis = min_basis
+        self.max_basis = max_basis
+        self.n_bins = n_bins
         self.min_bins = min_bins
         self.max_bins = max_bins
 
@@ -178,12 +192,15 @@ class PLETransformer(BaseEstimator, TransformerMixin):
         self.n_bins_per_feature_ = []
         self.fill_values_ = []
 
-        min_bins, max_bins = self._resolve_bin_bounds()
+        n_bins = self._resolve_param("n_basis", default=20)
+        min_bins_req = self._resolve_param("min_basis", default=None)
+        max_bins_req = self._resolve_param("max_basis", default=None)
+        min_bins, max_bins = self._resolve_bin_bounds(n_bins, min_bins_req, max_bins_req)
 
         for i in range(X.shape[1]):
             x_feat = X[:, [i]]
 
-            tree_max_leaf_nodes = max_bins if self.adaptive else self.n_bins
+            tree_max_leaf_nodes = max_bins if self.adaptive else n_bins
 
             if self.task == "regression":
                 dt = DecisionTreeRegressor(
@@ -348,17 +365,17 @@ class PLETransformer(BaseEstimator, TransformerMixin):
 
         return np.array(feature_names_out)
 
-    def _resolve_bin_bounds(self) -> tuple[int, int]:
+    def _resolve_bin_bounds(self, n_bins: int, min_bins_req, max_bins_req) -> tuple[int, int]:
         if not self.adaptive:
-            if self.min_bins is not None and self.n_bins < self.min_bins:
+            if min_bins_req is not None and n_bins < min_bins_req:
                 raise ValueError("n_bins must be >= min_bins when adaptive=False")
-            if self.max_bins is not None and self.n_bins > self.max_bins:
+            if max_bins_req is not None and n_bins > max_bins_req:
                 raise ValueError("n_bins must be <= max_bins when adaptive=False")
-            min_bins = self.n_bins
-            max_bins = self.n_bins
+            min_bins = n_bins
+            max_bins = n_bins
         else:
-            min_bins = self.min_bins if self.min_bins is not None else self.n_bins
-            max_bins = self.max_bins if self.max_bins is not None else self.n_bins
+            min_bins = min_bins_req if min_bins_req is not None else n_bins
+            max_bins = max_bins_req if max_bins_req is not None else n_bins
 
         if min_bins < 1:
             raise ValueError(f"min_bins must be >= 1, got {min_bins}")

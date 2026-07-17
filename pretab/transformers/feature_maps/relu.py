@@ -1,5 +1,6 @@
 import numpy as np
 
+from ...core.params import UNSET
 from .._center_expansion import BaseCenterExpansion
 
 
@@ -56,16 +57,20 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
 
     def __init__(
         self,
-        n_centers=10,
-        use_decision_tree=True,
+        n_basis=UNSET,
+        use_target=UNSET,
         task: str = "regression",
         strategy="uniform",
+        n_centers=UNSET,
+        use_decision_tree=UNSET,
     ):
         super().__init__(
-            n_centers=n_centers,
-            use_decision_tree=use_decision_tree,
+            n_basis=n_basis,
+            use_target=use_target,
             task=task,
             strategy=strategy,
+            n_centers=n_centers,
+            use_decision_tree=use_decision_tree,
         )
 
     def _expand_column(self, x_col, centers):
