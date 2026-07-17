@@ -31,9 +31,13 @@ from .knots import (
     uniform_knots,
 )
 from .logging import get_logger
+from .params import CANONICAL_PARAMS, UNSET, AliasResolverMixin, is_set
 from .validation import validate_2d_allow_nan
 
 __all__ = [
+    "CANONICAL_PARAMS",
+    "UNSET",
+    "AliasResolverMixin",
     "BasePreTabTransformer",
     "ConfigWarning",
     "DataWarning",
@@ -53,6 +57,7 @@ __all__ = [
     "get_logger",
     "insufficient_samples_error",
     "invalid_param_error",
+    "is_set",
     "quantile_knots",
     "select_knots",
     "uniform_knots",
