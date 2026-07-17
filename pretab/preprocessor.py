@@ -77,7 +77,7 @@ class Preprocessor(TransformerMixin):
 
     Examples
     --------
-    >>> from prefab import Preprocessor
+    >>> from pretab import Preprocessor
     >>> import pandas as pd
     >>> df = pd.DataFrame({
     ...     "age": [25, 32, 47],

@@ -16,7 +16,7 @@ stacked array.
 import numpy as np
 import pandas as pd
 
-from pretab.preprocessor import Preprocessor
+from pretab import Preprocessor
 
 # Simulated tabular dataset
 df = pd.DataFrame({

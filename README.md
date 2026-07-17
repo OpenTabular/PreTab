@@ -46,7 +46,7 @@ its own.
 import numpy as np
 import pandas as pd
 
-from pretab.preprocessor import Preprocessor
+from pretab import Preprocessor
 
 df = pd.DataFrame({
     "age": np.random.randint(18, 65, size=100),
@@ -159,7 +159,7 @@ The `Preprocessor` is the high-level entry point. Set a global strategy per feat
 or override individual columns with `feature_preprocessing`.
 
 ```python
-from pretab.preprocessor import Preprocessor
+from pretab import Preprocessor
 
 # Per-feature configuration overrides the global defaults
 preprocessor = Preprocessor(

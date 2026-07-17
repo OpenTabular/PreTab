@@ -32,7 +32,7 @@ There are two ways to configure preprocessing:
    defaults for specific columns.
 
 ```python
-from pretab.preprocessor import Preprocessor
+from pretab import Preprocessor
 
 # Global strategy for every column of a given type
 preprocessor = Preprocessor(
