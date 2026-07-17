@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-import warnings
+from sklearn.exceptions import NotFittedError
+
 from pretab.transformers import TensorProductSplineTransformer
 
 
@@ -35,3 +36,35 @@ def test_tensorproduct_spline_penalty_matrices():
     for P in penalties:
         assert P.shape[0] == P.shape[1]
         assert np.allclose(P, P.T, atol=1e-6)
+
+
+def test_tensorproduct_feature_names_out():
+    X = np.random.rand(20, 2)
+    transformer = TensorProductSplineTransformer(n_knots=4)
+    Xt = transformer.fit_transform(X)
+
+    names = transformer.get_feature_names_out(["a", "b"])
+    assert len(names) == Xt.shape[1]
+    assert names[0] == "tp_a0_b0"
+    assert all(name.startswith("tp_") for name in names)
+
+
+def test_tensorproduct_feature_names_out_default_input():
+    X = np.random.rand(15, 2)
+    transformer = TensorProductSplineTransformer(n_knots=4).fit(X)
+
+    names = transformer.get_feature_names_out()
+    n_expected = transformer.bases_[0].shape[1] * transformer.bases_[1].shape[1]
+    assert len(names) == n_expected
+    assert names[0].startswith("tp_")
+
+
+def test_tensorproduct_allow_nan_tag():
+    tags = TensorProductSplineTransformer().__sklearn_tags__()
+    assert tags.input_tags.allow_nan is True
+
+
+def test_tensorproduct_transform_requires_fit():
+    transformer = TensorProductSplineTransformer()
+    with pytest.raises(NotFittedError):
+        transformer.transform(np.random.rand(5, 2))

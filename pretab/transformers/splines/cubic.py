@@ -1,10 +1,11 @@
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
-import warnings
+from sklearn.utils.validation import check_is_fitted
+
+from .mixins import SplineBasisMixin
 
 
-class CubicSplineTransformer(BaseEstimator, TransformerMixin):
+class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
     Cubic Spline Transformer for one-dimensional or multi-dimensional input features.
 
@@ -34,12 +35,6 @@ class CubicSplineTransformer(BaseEstimator, TransformerMixin):
     n_features_in_ : int
         Number of input features seen during `fit`.
 
-    Methods
-    -------
-    get_penalty_matrix(feature_index=0)
-        Returns the penalty matrix for regularization of the spline basis functions of a specific feature.
-        Penalizes the second derivative (i.e., curvature) of the spline for smoothness.
-
     Notes
     -----
     The basis includes:
@@ -51,7 +46,18 @@ class CubicSplineTransformer(BaseEstimator, TransformerMixin):
     whether bias is included.
 
     This transformer supports multidimensional input and stacks all expanded features horizontally.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import CubicSplineTransformer
+    >>> X = np.linspace(0, 1, 20).reshape(-1, 1)
+    >>> transformer = CubicSplineTransformer(n_knots=5)
+    >>> transformer.fit_transform(X).shape
+    (20, 8)
     """
+
+    _feature_suffix_value = "cs"
 
     def __init__(self, n_knots=10, degree=3, include_bias=False):
         self.n_knots = n_knots
@@ -73,15 +79,7 @@ class CubicSplineTransformer(BaseEstimator, TransformerMixin):
         return np.hstack(X)
 
     def fit(self, X, y=None):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        X = self._validate_allow_nan(X, reset=True)
 
         self.knots_ = []
         self.designs_ = []
@@ -92,19 +90,12 @@ class CubicSplineTransformer(BaseEstimator, TransformerMixin):
             self.knots_.append(knots)
             self.designs_.append(self._bspline_basis(xi, knots))
 
-        self.n_features_in_ = X.shape[1]
+        self.n_basis_ = [design.shape[1] for design in self.designs_]
         return self
 
     def transform(self, X):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        check_is_fitted(self, "n_basis_")
+        X = self._validate_allow_nan(X, reset=False)
 
         transformed = []
         for i in range(X.shape[1]):
@@ -118,6 +109,20 @@ class CubicSplineTransformer(BaseEstimator, TransformerMixin):
         return self.fit(X, y).transform(X)
 
     def get_penalty_matrix(self, feature_index=0):
+        """Return the curvature penalty matrix for a fitted feature.
+
+        Parameters
+        ----------
+        feature_index : int, default=0
+            Index of the feature whose penalty matrix is returned.
+
+        Returns
+        -------
+        P : ndarray of shape (n_basis, n_basis)
+            Penalty matrix that penalizes the second derivative (curvature) of
+            the spline basis for smoothness.
+        """
+        check_is_fitted(self, "designs_")
         n_basis = self.designs_[feature_index].shape[1]
         P = np.zeros((n_basis, n_basis))
         offset = 4 if self.include_bias else 3

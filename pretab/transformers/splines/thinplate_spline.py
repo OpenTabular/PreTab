@@ -1,12 +1,13 @@
 import numpy as np
-import warnings
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
-from scipy.spatial.distance import cdist
 from scipy.linalg import eigh
+from scipy.spatial.distance import cdist
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_is_fitted
+
+from .mixins import SplineBasisMixin
 
 
-class ThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
+class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
     Thin Plate Spline Transformer for smooth univariate basis expansion.
 
@@ -36,10 +37,8 @@ class ThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
     penalty_ : ndarray of shape (n_basis, n_basis)
         Diagonal penalty matrix containing eigenvalues (used for smoothing regularization).
 
-    Methods
-    -------
-    get_penalty_matrix()
-        Returns the penalty matrix associated with the fitted basis, useful for regularization or smoothing.
+    n_features_in_ : int
+        Number of input features seen during `fit`.
 
     Notes
     -----
@@ -50,10 +49,21 @@ class ThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
 
     References
     ----------
-    - Wahba, G. (1990). "Spline Models for Observational Data". SIAM.
-    - Wood, S.N. (2003). "Thin plate regression splines". Journal of the Royal Statistical Society: Series B.
+    .. [1] Wahba, G. (1990). "Spline Models for Observational Data". SIAM.
+    .. [2] Wood, S.N. (2003). "Thin plate regression splines". Journal of the
+       Royal Statistical Society: Series B.
 
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import ThinPlateSplineTransformer
+    >>> X = np.linspace(0, 1, 30).reshape(-1, 1)
+    >>> transformer = ThinPlateSplineTransformer(n_basis=6)
+    >>> transformer.fit_transform(X).shape
+    (30, 6)
     """
+
+    _feature_suffix_value = "tps"
 
     def __init__(self, n_basis=10):
         self.n_basis = n_basis
@@ -66,20 +76,10 @@ class ThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
         return K
 
     def fit(self, X, y=None):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        X = self._validate_allow_nan(X, reset=True)
 
         if X.shape[1] > 1:
-            raise ValueError(
-                "ThinPlateSplineTransformer supports only univariate input."
-            )
+            raise ValueError("ThinPlateSplineTransformer supports only univariate input.")
 
         x = X.reshape(-1, 1)
         self.x_ = x
@@ -103,17 +103,15 @@ class ThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
         self.eigvals_ = eigvals[: self.n_basis]
         self.basis_ = eigvecs[:, : self.n_basis] * np.sqrt(n)
         self.penalty_ = np.diag(self.eigvals_)
+        self.n_basis_ = [self.basis_.shape[1]]
 
         return self
 
     def transform(self, X):
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
+        check_is_fitted(self, "basis_")
+        X = self._validate_allow_nan(X, reset=False)
         if X.shape[1] > 1:
-            raise ValueError(
-                "ThinPlateSplineTransformer supports only univariate input."
-            )
+            raise ValueError("ThinPlateSplineTransformer supports only univariate input.")
 
         x_new = X.reshape(-1, 1)
         r_new = cdist(x_new, self.x_, metric="euclidean")
@@ -127,4 +125,12 @@ class ThinPlateSplineTransformer(BaseEstimator, TransformerMixin):
         return K_new_proj @ self.basis_
 
     def get_penalty_matrix(self):
+        """Return the smoothing penalty matrix for the fitted basis.
+
+        Returns
+        -------
+        penalty_ : ndarray of shape (n_basis, n_basis)
+            Diagonal penalty matrix of eigenvalues used for regularization.
+        """
+        check_is_fitted(self, "penalty_")
         return self.penalty_

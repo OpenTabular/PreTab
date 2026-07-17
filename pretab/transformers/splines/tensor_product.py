@@ -1,7 +1,8 @@
 import numpy as np
-import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
+from sklearn.utils.validation import check_is_fitted
+
+from .mixins import SplineBasisMixin
 
 
 def bspline_basis(x, knots, degree, i):
@@ -10,22 +11,14 @@ def bspline_basis(x, knots, degree, i):
     else:
         denom1 = knots[i + degree] - knots[i]
         denom2 = knots[i + degree + 1] - knots[i + 1]
-        term1 = (
-            0.0
-            if denom1 == 0
-            else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
-        )
+        term1 = 0.0 if denom1 == 0 else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
         term2 = (
-            0.0
-            if denom2 == 0
-            else (knots[i + degree + 1] - x)
-            / denom2
-            * bspline_basis(x, knots, degree - 1, i + 1)
+            0.0 if denom2 == 0 else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1)
         )
         return term1 + term2
 
 
-class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
+class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
     Tensor Product Spline Transformer for multivariate smooth basis expansion.
 
@@ -62,11 +55,8 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
     X_design_ : ndarray of shape (n_samples, n_total_basis)
         Full tensor-product design matrix, computed during `fit`.
 
-    Methods
-    -------
-    get_penalty_matrices()
-        Returns a list of full Kronecker-structured penalty matrices, one for each marginal direction.
-        These can be used for anisotropic penalization in multivariate smooth modeling.
+    n_features_in_ : int
+        Number of input features seen during `fit`.
 
     Notes
     -----
@@ -76,8 +66,18 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
 
     References
     ----------
-    - Eilers, P.H.C. and Marx, B.D. (2003). "Multivariate calibration with temperature interaction using two-dimensional penalized signal regression".
-    - Wood, S.N. (2017). "Generalized Additive Models: An Introduction with R".
+    .. [1] Eilers, P.H.C. and Marx, B.D. (2003). "Multivariate calibration with
+       temperature interaction using two-dimensional penalized signal regression".
+    .. [2] Wood, S.N. (2017). "Generalized Additive Models: An Introduction with R".
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import TensorProductSplineTransformer
+    >>> X = np.random.rand(20, 2)
+    >>> transformer = TensorProductSplineTransformer(n_knots=4)
+    >>> transformer.fit_transform(X).shape
+    (20, 36)
     """
 
     def __init__(self, n_knots=5, degree=3, diff_order=2):
@@ -88,9 +88,7 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
     def _make_knots(self, x):
         xmin, xmax = np.min(x), np.max(x)
         inner = np.linspace(xmin, xmax, self.n_knots)
-        return np.concatenate(
-            (np.repeat(inner[0], self.degree), inner, np.repeat(inner[-1], self.degree))
-        )
+        return np.concatenate((np.repeat(inner[0], self.degree), inner, np.repeat(inner[-1], self.degree)))
 
     def _basis_matrix(self, x, knots):
         n_basis = len(knots) - self.degree - 1
@@ -106,15 +104,7 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
         return D.T @ D
 
     def fit(self, X, y=None):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        X = self._validate_allow_nan(X, reset=True)
 
         self.dim_ = X.shape[1]
         self.knots_ = []
@@ -138,15 +128,8 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        check_is_fitted(self, "X_design_")
+        X = self._validate_allow_nan(X, reset=False)
 
         bases = []
         for d in range(self.dim_):
@@ -159,7 +142,28 @@ class TensorProductSplineTransformer(BaseEstimator, TransformerMixin):
             design = np.einsum("ni,nj->nij", design, b).reshape(n_samples, -1)
         return design
 
+    def get_feature_names_out(self, input_features=None):
+        """Return names for the interaction basis as ``tp_{feat0 i}_{feat1 j}...``."""
+        check_is_fitted(self, "bases_")
+        if input_features is None:
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        sizes = [b.shape[1] for b in self.bases_]
+        names = []
+        for multi_index in np.ndindex(*sizes):
+            parts = [f"{input_features[d]}{multi_index[d]}" for d in range(self.dim_)]
+            names.append("tp_" + "_".join(parts))
+        return np.asarray(names, dtype=object)
+
     def get_penalty_matrices(self):
+        """Return the Kronecker-structured penalty matrices.
+
+        Returns
+        -------
+        penalties : list of ndarray
+            One full penalty matrix per marginal direction, each formed as a
+            Kronecker product of a marginal difference penalty with identity
+            matrices for the remaining dimensions.
+        """
         kron_penalties = []
         for i, Si in enumerate(self.penalties_):
             mats = [np.eye(b.shape[1]) for j, b in enumerate(self.bases_) if j != i]

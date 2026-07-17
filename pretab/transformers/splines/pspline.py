@@ -1,7 +1,8 @@
 import numpy as np
-import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
+from sklearn.utils.validation import check_is_fitted
+
+from .mixins import SplineBasisMixin
 
 
 def bspline_basis(x, knots, degree, i):
@@ -11,23 +12,15 @@ def bspline_basis(x, knots, degree, i):
         denom1 = knots[i + degree] - knots[i]
         denom2 = knots[i + degree + 1] - knots[i + 1]
 
-        term1 = (
-            0.0
-            if denom1 == 0
-            else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
-        )
+        term1 = 0.0 if denom1 == 0 else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
         term2 = (
-            0.0
-            if denom2 == 0
-            else (knots[i + degree + 1] - x)
-            / denom2
-            * bspline_basis(x, knots, degree - 1, i + 1)
+            0.0 if denom2 == 0 else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1)
         )
 
         return term1 + term2
 
 
-class PSplineTransformer(BaseEstimator, TransformerMixin):
+class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
     P-spline Transformer for smooth spline basis expansion with penalization.
 
@@ -61,18 +54,23 @@ class PSplineTransformer(BaseEstimator, TransformerMixin):
     n_features_in_ : int
         Number of input features seen during `fit`.
 
-    Methods
-    -------
-    get_penalty_matrix(feature_index=0)
-        Returns the penalty matrix associated with the specified feature. This matrix
-        can be used for Tikhonov-style regularization to enforce smoothness of the fitted spline.
-
     Notes
     -----
     - Boundary knots are added automatically to ensure proper spline behavior near the edges.
     - Internally, this transformer uses recursive B-spline basis construction.
     - This implementation supports multi-dimensional inputs and stacks transformed features horizontally.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import PSplineTransformer
+    >>> X = np.linspace(0, 1, 30).reshape(-1, 1)
+    >>> transformer = PSplineTransformer(n_knots=6)
+    >>> transformer.fit_transform(X).shape
+    (30, 8)
     """
+
+    _feature_suffix_value = "ps"
 
     def __init__(self, n_knots=20, degree=3, diff_order=2):
         self.n_knots = n_knots
@@ -80,15 +78,7 @@ class PSplineTransformer(BaseEstimator, TransformerMixin):
         self.diff_order = diff_order
 
     def fit(self, X, y=None):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        X = self._validate_allow_nan(X, reset=True)
 
         self.knots_ = []
         self.penalty_ = []
@@ -113,19 +103,11 @@ class PSplineTransformer(BaseEstimator, TransformerMixin):
             self.n_basis_.append(n_basis)
             self.penalty_.append(D.T @ D)
 
-        self.n_features_in_ = X.shape[1]
         return self
 
     def transform(self, X):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        check_is_fitted(self, "n_basis_")
+        X = self._validate_allow_nan(X, reset=False)
 
         all_basis = []
         for i in range(X.shape[1]):
@@ -138,4 +120,18 @@ class PSplineTransformer(BaseEstimator, TransformerMixin):
         return np.hstack(all_basis)
 
     def get_penalty_matrix(self, feature_index=0):
+        """Return the difference penalty matrix for a fitted feature.
+
+        Parameters
+        ----------
+        feature_index : int, default=0
+            Index of the feature whose penalty matrix is returned.
+
+        Returns
+        -------
+        P : ndarray of shape (n_basis, n_basis)
+            Penalty matrix ``D.T @ D`` built from the finite-difference operator,
+            suitable for Tikhonov-style smoothness regularization.
+        """
+        check_is_fitted(self, "penalty_")
         return self.penalty_[feature_index]

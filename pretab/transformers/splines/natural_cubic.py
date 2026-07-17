@@ -1,10 +1,11 @@
 import numpy as np
-import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
+from sklearn.utils.validation import check_is_fitted
+
+from .mixins import SplineBasisMixin
 
 
-class NaturalCubicSplineTransformer(BaseEstimator, TransformerMixin):
+class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
     Natural Cubic Spline Transformer for continuous features.
 
@@ -35,19 +36,24 @@ class NaturalCubicSplineTransformer(BaseEstimator, TransformerMixin):
     n_features_in_ : int
         Number of input features seen during `fit`.
 
-    Methods
-    -------
-    get_penalty_matrix(feature_index=0)
-        Returns the penalty matrix for the second derivative (curvature) of the spline basis for a specific feature.
-        Useful for regularization or smoothing in generalized additive models.
-
     Notes
     -----
     The basis is constructed to satisfy the natural spline constraint: the second derivative of the spline is zero
     at the boundary knots. This reduces the tendency to overfit at the boundaries and improves extrapolation.
 
     Each feature is transformed independently and their expanded outputs are concatenated.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import NaturalCubicSplineTransformer
+    >>> X = np.linspace(0, 1, 20).reshape(-1, 1)
+    >>> transformer = NaturalCubicSplineTransformer(n_knots=5)
+    >>> transformer.fit_transform(X).shape
+    (20, 4)
     """
+
+    _feature_suffix_value = "ncs"
 
     def __init__(self, n_knots=5, include_bias=False):
         self.n_knots = n_knots
@@ -69,25 +75,12 @@ class NaturalCubicSplineTransformer(BaseEstimator, TransformerMixin):
             return omega(x, k) - omega(x, K[-1])
 
         denom = K[-1] - K[0]
-        D = np.array(
-            [
-                d(k) - ((K[-1] - k) / denom) * d(K[0]) - ((k - K[0]) / denom) * d(K[-1])
-                for k in K[1:-1]
-            ]
-        )
+        D = np.array([d(k) - ((K[-1] - k) / denom) * d(K[0]) - ((k - K[0]) / denom) * d(K[-1]) for k in K[1:-1]])
         basis.extend(list(D))
         return np.hstack(basis)
 
     def fit(self, X, y=None):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        X = self._validate_allow_nan(X, reset=True)
 
         self.knots_ = []
         self.designs_ = []
@@ -99,19 +92,12 @@ class NaturalCubicSplineTransformer(BaseEstimator, TransformerMixin):
             self.knots_.append(knots)
             self.designs_.append(self._basis(xi, knots))
 
-        self.n_features_in_ = X.shape[1]
+        self.n_basis_ = [design.shape[1] for design in self.designs_]
         return self
 
     def transform(self, X):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
-        )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        check_is_fitted(self, "n_basis_")
+        X = self._validate_allow_nan(X, reset=False)
 
         transformed = []
         for i in range(X.shape[1]):
@@ -125,6 +111,20 @@ class NaturalCubicSplineTransformer(BaseEstimator, TransformerMixin):
         return self.fit(X, y).transform(X)
 
     def get_penalty_matrix(self, feature_index=0):
+        """Return the curvature penalty matrix for a fitted feature.
+
+        Parameters
+        ----------
+        feature_index : int, default=0
+            Index of the feature whose penalty matrix is returned.
+
+        Returns
+        -------
+        P : ndarray of shape (n_basis, n_basis)
+            Penalty matrix approximating the integrated squared second derivative
+            of the natural cubic spline basis.
+        """
+        check_is_fitted(self, "knots_")
         knots = self.knots_[feature_index]
         B = self._basis(np.linspace(knots[0], knots[-1], 200), knots)
         B_dd = np.gradient(np.gradient(B, axis=0), axis=0)

@@ -1,6 +1,9 @@
+import warnings
+
 import numpy as np
 import pytest
-import warnings
+from sklearn.exceptions import NotFittedError
+
 from pretab.transformers import PSplineTransformer
 
 
@@ -42,3 +45,36 @@ def test_pspline_penalty_matrix_shape_and_symmetry():
 
     assert P.shape[0] == P.shape[1]
     assert np.allclose(P, P.T, atol=1e-6)
+
+
+def test_pspline_feature_names_out():
+    X = np.random.rand(20, 2)
+    transformer = PSplineTransformer(n_knots=5)
+    Xt = transformer.fit_transform(X)
+
+    names = transformer.get_feature_names_out(["a", "b"])
+    assert len(names) == Xt.shape[1]
+    assert names[0] == "a_ps0"
+    assert all(name.startswith(("a_ps", "b_ps")) for name in names)
+
+
+def test_pspline_feature_names_out_default_input():
+    X = np.random.rand(15, 2)
+    transformer = PSplineTransformer(n_knots=4).fit(X)
+
+    names = transformer.get_feature_names_out()
+    assert len(names) == sum(transformer.n_basis_)
+    assert names[0].startswith("x0_ps")
+
+
+def test_pspline_allow_nan_tag():
+    tags = PSplineTransformer().__sklearn_tags__()
+    assert tags.input_tags.allow_nan is True
+
+
+def test_pspline_transform_requires_fit():
+    transformer = PSplineTransformer()
+    with pytest.raises(NotFittedError):
+        transformer.transform(np.random.rand(5, 1))
+    with pytest.raises(NotFittedError):
+        transformer.get_penalty_matrix()

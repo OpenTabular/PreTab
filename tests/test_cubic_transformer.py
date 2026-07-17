@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-import warnings
+from sklearn.exceptions import NotFittedError
+
 from pretab.transformers import CubicSplineTransformer
 
 
@@ -44,3 +45,36 @@ def test_cubic_spline_penalty_matrix_shape():
     expected_dim = 3 + 7
     assert P.shape == (expected_dim, expected_dim)
     assert np.allclose(P, P.T, atol=1e-6)
+
+
+def test_cubic_feature_names_out():
+    X = np.random.rand(20, 2)
+    transformer = CubicSplineTransformer(n_knots=5)
+    Xt = transformer.fit_transform(X)
+
+    names = transformer.get_feature_names_out(["a", "b"])
+    assert len(names) == Xt.shape[1]
+    assert names[0] == "a_cs0"
+    assert all(name.startswith(("a_cs", "b_cs")) for name in names)
+
+
+def test_cubic_feature_names_out_default_input():
+    X = np.random.rand(15, 2)
+    transformer = CubicSplineTransformer(n_knots=4).fit(X)
+
+    names = transformer.get_feature_names_out()
+    assert len(names) == sum(transformer.n_basis_)
+    assert names[0].startswith("x0_cs")
+
+
+def test_cubic_allow_nan_tag():
+    tags = CubicSplineTransformer().__sklearn_tags__()
+    assert tags.input_tags.allow_nan is True
+
+
+def test_cubic_transform_requires_fit():
+    transformer = CubicSplineTransformer()
+    with pytest.raises(NotFittedError):
+        transformer.transform(np.random.rand(5, 1))
+    with pytest.raises(NotFittedError):
+        transformer.get_penalty_matrix()

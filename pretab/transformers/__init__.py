@@ -9,11 +9,14 @@ from .feature_maps import (
 from .onehot import OneHotFromOrdinalTransformer
 from .ple import PLETransformer
 from .splines import (
+    BSplineTransformer,
     CubicSplineTransformer,
-    ThinPlateSplineTransformer,
-    TensorProductSplineTransformer,
+    ISplineTransformer,
+    MSplineTransformer,
     NaturalCubicSplineTransformer,
     PSplineTransformer,
+    TensorProductSplineTransformer,
+    ThinPlateSplineTransformer,
 )
 from .temporal import (
     CyclicalTimeTransformer,
@@ -22,20 +25,23 @@ from .temporal import (
 )
 
 __all__ = [
+    "BSplineTransformer",
+    "CubicSplineTransformer",
     "CustomBinTransformer",
+    "CyclicalTimeTransformer",
+    "ISplineTransformer",
+    "LagFeatureTransformer",
     "LanguageEmbeddingTransformer",
-    "RBFExpansionTransformer",
-    "ReLUExpansionTransformer",
-    "SigmoidExpansionTransformer",
-    "TanhExpansionTransformer",
+    "MSplineTransformer",
+    "NaturalCubicSplineTransformer",
     "OneHotFromOrdinalTransformer",
     "PLETransformer",
-    "CubicSplineTransformer",
-    "ThinPlateSplineTransformer",
-    "TensorProductSplineTransformer",
-    "NaturalCubicSplineTransformer",
     "PSplineTransformer",
-    "CyclicalTimeTransformer",
-    "LagFeatureTransformer",
+    "RBFExpansionTransformer",
+    "ReLUExpansionTransformer",
     "RollingStatsTransformer",
+    "SigmoidExpansionTransformer",
+    "TanhExpansionTransformer",
+    "TensorProductSplineTransformer",
+    "ThinPlateSplineTransformer",
 ]
