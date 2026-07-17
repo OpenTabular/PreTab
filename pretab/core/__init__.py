@@ -28,6 +28,7 @@ from .knots import (
     generate_internal_knots,
     quantile_knots,
     select_knots,
+    spanning_knots,
     uniform_knots,
 )
 from .logging import get_logger
@@ -60,6 +61,7 @@ __all__ = [
     "is_set",
     "quantile_knots",
     "select_knots",
+    "spanning_knots",
     "uniform_knots",
     "validate_2d_allow_nan",
 ]

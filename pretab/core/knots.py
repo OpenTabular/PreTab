@@ -19,6 +19,7 @@ __all__ = [
     "generate_internal_knots",
     "quantile_knots",
     "select_knots",
+    "spanning_knots",
     "uniform_knots",
 ]
 
@@ -41,6 +42,34 @@ def quantile_knots(x: np.ndarray, n_knots: int) -> np.ndarray:
         return np.array([])
     quantiles = np.linspace(0, 1, n_knots + 2)[1:-1]
     return np.quantile(x, quantiles)
+
+
+def spanning_knots(x: np.ndarray, n_knots: int, strategy: str = "uniform") -> np.ndarray:
+    """Return ``n_knots`` knots spanning the full range of ``x``, endpoints included.
+
+    Unlike :func:`uniform_knots` / :func:`quantile_knots` (which return *interior*
+    knots for the B/M/I spline convention), the legacy spline families
+    (cubic, natural cubic, p-spline, tensor product) place ``n_knots`` points that
+    span the whole range, including the minimum and maximum.
+
+    Parameters
+    ----------
+    x : ndarray
+        Values of a single feature.
+    n_knots : int
+        Number of spanning knots to place; ``<= 0`` returns an empty array.
+    strategy : {"uniform", "quantile"}, default="uniform"
+        ``"uniform"`` reproduces ``np.linspace(x.min(), x.max(), n_knots)`` exactly;
+        ``"quantile"`` places the knots at evenly spaced data quantiles (also
+        including the 0th and 100th percentiles).
+    """
+    if n_knots <= 0:
+        return np.array([])
+    if strategy == "uniform":
+        return np.linspace(x.min(), x.max(), n_knots)
+    if strategy == "quantile":
+        return np.quantile(x, np.linspace(0, 1, n_knots))
+    raise ValueError(f"Unknown knot_strategy: {strategy}")
 
 
 def generate_internal_knots(
