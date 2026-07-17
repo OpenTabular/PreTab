@@ -19,6 +19,8 @@ from typing import Literal
 import numpy as np
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
+from ...core.knots import basis_to_knots, quantile_knots
+
 
 class BaseKnotSelector(ABC):
     """Abstract base class for knot selection strategies.
@@ -67,7 +69,7 @@ class BaseKnotSelector(ABC):
     def _basis_to_knots(self, n_basis: int) -> int:
         """Convert a number of basis functions into a number of internal knots."""
         if self.spline_type in ("bspline", "mspline", "ispline"):
-            return max(0, n_basis - self.degree - 1)
+            return basis_to_knots(n_basis, self.degree)
         raise ValueError(f"Unknown spline_type: {self.spline_type}")
 
     def _enforce_spacing(self, split_points: list[float], X: np.ndarray) -> list[float]:
@@ -87,18 +89,15 @@ class BaseKnotSelector(ABC):
 
     def _get_quantile_knots(self, X: np.ndarray, n_knots: int) -> np.ndarray:
         """Return quantile-spaced knots, used as a fallback."""
-        if n_knots <= 0:
-            return np.array([])
-        quantiles = np.linspace(0, 1, n_knots + 2)[1:-1]
-        return np.quantile(X, quantiles)
+        return quantile_knots(X, n_knots)
 
     def _supplement_knots(self, existing_knots: list[float], X: np.ndarray, target_count: int) -> list[float]:
         """Top up an under-filled knot set with quantile knots."""
         if target_count - len(existing_knots) <= 0:
             return existing_knots
 
-        quantile_knots = self._get_quantile_knots(X, target_count)
-        all_knots = set(existing_knots) | set(quantile_knots.tolist())
+        quantile_candidates = self._get_quantile_knots(X, target_count)
+        all_knots = set(existing_knots) | set(quantile_candidates.tolist())
         return sorted(all_knots)[:target_count]
 
 

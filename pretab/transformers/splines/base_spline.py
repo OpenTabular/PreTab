@@ -20,6 +20,13 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
+from ...core.knots import (
+    basis_to_knots,
+    generate_internal_knots,
+    quantile_knots,
+    select_knots,
+    uniform_knots,
+)
 from .knot_selectors import BaseKnotSelector
 
 
@@ -129,7 +136,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     def _basis_to_knots(self, n_basis: int) -> int:
         """Convert a basis-function count to the number of internal knots."""
-        return max(0, n_basis - self.degree - 1)
+        return basis_to_knots(n_basis, self.degree)
 
     def _resolve_basis_bounds(self, n_basis: int) -> tuple[int, int]:
         """Return the (min, max) number of basis functions to allow per feature."""
@@ -154,14 +161,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     def _generate_knots(self, x: np.ndarray, n_knots: int) -> np.ndarray:
         """Generate internal knots for a single feature using the chosen strategy."""
-        if n_knots <= 0:
-            return np.array([])
-        if self.knot_strategy == "uniform":
-            return np.linspace(x.min(), x.max(), n_knots + 2)[1:-1]
-        if self.knot_strategy == "quantile":
-            quantiles = np.linspace(0, 100, n_knots + 2)[1:-1]
-            return np.percentile(x, quantiles)
-        raise ValueError(f"Unknown knot_strategy: {self.knot_strategy}")
+        return generate_internal_knots(x, n_knots, self.knot_strategy)
 
     def _adjust_internal_knots(
         self, x: np.ndarray, internal_knots: np.ndarray, min_knots: int, max_knots: int
@@ -172,7 +172,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         if len(internal_knots) < min_knots:
             internal_knots = self._supplement_knots(x, internal_knots, min_knots)
         if len(internal_knots) > max_knots:
-            internal_knots = self._select_knots(internal_knots, max_knots)
+            internal_knots = select_knots(internal_knots, max_knots)
         return internal_knots
 
     def _supplement_knots(self, x: np.ndarray, internal_knots: np.ndarray, target_count: int) -> np.ndarray:
@@ -182,23 +182,14 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
         candidates = [internal_knots]
         if target_count > 0:
-            quantiles = np.linspace(0, 100, target_count + 2)[1:-1]
-            candidates.append(np.percentile(x, quantiles))
-            candidates.append(np.linspace(x.min(), x.max(), target_count + 2)[1:-1])
+            candidates.append(quantile_knots(x, target_count))
+            candidates.append(uniform_knots(x, target_count))
 
         combined = np.unique(np.concatenate(candidates))
         combined = np.sort(combined)
         if len(combined) < target_count:
-            combined = np.linspace(x.min(), x.max(), target_count + 2)[1:-1]
-        return self._select_knots(np.asarray(combined), target_count)
-
-    @staticmethod
-    def _select_knots(knots: np.ndarray, count: int) -> np.ndarray:
-        """Down-sample a knot vector to ``count`` evenly spaced entries."""
-        if len(knots) <= count:
-            return knots
-        idx = np.linspace(0, len(knots) - 1, count).round().astype(int)
-        return knots[idx]
+            combined = uniform_knots(x, target_count)
+        return select_knots(np.asarray(combined), target_count)
 
     def _column_knots(self, x_valid: np.ndarray, y_valid: np.ndarray | None, n_basis: int) -> np.ndarray:
         """Build the full knot vector for a single feature."""
