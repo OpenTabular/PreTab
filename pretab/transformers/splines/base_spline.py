@@ -14,18 +14,16 @@ Each concrete transformer only implements how a single column is turned into a
 basis matrix through the ``_design_matrix`` hook.
 """
 
-import warnings
 from typing import Literal
 
 import numpy as np
-from scipy.interpolate import BSpline
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
+from sklearn.utils.validation import check_is_fitted
 
+from ...core.base import BasePreTabTransformer
 from .knot_selectors import BaseKnotSelector
 
 
-class BaseSplineTransformer(BaseEstimator, TransformerMixin):
+class BaseSplineTransformer(BasePreTabTransformer):
     """
     Base class for spline basis expansions with target-aware knot placement.
 
@@ -243,15 +241,7 @@ class BaseSplineTransformer(BaseEstimator, TransformerMixin):
         if n_basis > 50:
             raise ValueError(f"n_basis_functions should be <= 50, got {n_basis}")
 
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        finite_policy: Literal["allow-nan"] | bool = "allow-nan"
-        X = check_array(X, dtype=np.float64, ensure_2d=True, ensure_all_finite=finite_policy)
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-                stacklevel=2,
-            )
+        X = self._validate(X, reset=True)
 
         y_arr = None if y is None else np.asarray(y).ravel()
 
@@ -266,23 +256,12 @@ class BaseSplineTransformer(BaseEstimator, TransformerMixin):
             self.knots_.append(self._column_knots(xi_valid, yi_valid, n_basis))
 
         self.n_basis_ = [len(knots) - self.degree - 1 for knots in self.knots_]
-        self.n_features_in_ = X.shape[1]
         return self
 
     def transform(self, X):
         """Expand each feature into its spline basis and stack the results."""
-        if not hasattr(self, "knots_"):
-            raise ValueError("Transformer must be fitted before transform")
-
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        finite_policy: Literal["allow-nan"] | bool = "allow-nan"
-        X = check_array(X, dtype=np.float64, ensure_2d=True, ensure_all_finite=finite_policy)
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-                stacklevel=2,
-            )
+        check_is_fitted(self, "knots_")
+        X = self._validate(X, reset=False)
 
         transformed = []
         for i in range(X.shape[1]):
@@ -307,27 +286,15 @@ class BaseSplineTransformer(BaseEstimator, TransformerMixin):
         """Suffix used when generating output feature names."""
         return "spline"
 
+    def _output_sizes(self) -> list[int]:
+        """Number of output columns per feature, including the optional bias."""
+        bias = 1 if self.include_bias else 0
+        return [int(n) + bias for n in self.n_basis_]
+
     def get_n_features_out(self) -> int:
         """Total number of output columns across all features."""
-        if not hasattr(self, "n_basis_"):
-            raise ValueError("Transformer must be fitted first")
-        bias = 1 if self.include_bias else 0
-        return int(sum(n + bias for n in self.n_basis_))
-
-    def get_feature_names_out(self, input_features=None):
-        """Return output feature names of the form ``{feature}_{suffix}{j}``."""
-        if not hasattr(self, "n_basis_"):
-            raise ValueError("Transformer must be fitted first")
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
-
-        suffix = self._feature_suffix()
-        names = []
-        for feature, n_basis in zip(input_features, self.n_basis_, strict=False):
-            n_cols = n_basis + (1 if self.include_bias else 0)
-            for j in range(n_cols):
-                names.append(f"{feature}_{suffix}{j}")
-        return np.asarray(names, dtype=object)
+        check_is_fitted(self, "n_basis_")
+        return int(sum(self._output_sizes()))
 
     def get_penalty_matrix(self, feature_index: int = 0, diff_order: int = 2):
         """
@@ -337,8 +304,7 @@ class BaseSplineTransformer(BaseEstimator, TransformerMixin):
         operator on the spline coefficients. When ``include_bias`` is enabled the
         bias column is left unpenalized (a leading zero row and column).
         """
-        if not hasattr(self, "n_basis_"):
-            raise ValueError("Transformer must be fitted first")
+        check_is_fitted(self, "n_basis_")
 
         n_basis = self.n_basis_[feature_index]
         D = np.eye(n_basis)
