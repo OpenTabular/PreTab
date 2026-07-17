@@ -6,6 +6,7 @@ user-facing transformers. It never defines user-facing transformers itself.
 """
 
 from .base import BasePreTabTransformer
+from .centers import center_identification_using_decision_tree
 from .exceptions import (
     ConfigWarning,
     DataWarning,
@@ -39,6 +40,7 @@ __all__ = [
     "PretabError",
     "PretabNotFittedError",
     "PretabWarning",
+    "center_identification_using_decision_tree",
     "get_logger",
     "insufficient_samples_error",
     "invalid_param_error",
