@@ -1,7 +1,10 @@
+from typing import ClassVar
+
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
 
@@ -80,14 +83,17 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     (20, 36)
     """
 
-    def __init__(self, n_knots=5, degree=3, diff_order=2):
-        self.n_knots = n_knots
+    _param_aliases: ClassVar[dict[str, str]] = {"n_knots": "n_basis"}
+
+    def __init__(self, n_basis=UNSET, degree=3, diff_order=2, n_knots=UNSET):
+        self.n_basis = n_basis
         self.degree = degree
         self.diff_order = diff_order
+        self.n_knots = n_knots
 
-    def _make_knots(self, x):
+    def _make_knots(self, x, n_basis):
         xmin, xmax = np.min(x), np.max(x)
-        inner = np.linspace(xmin, xmax, self.n_knots)
+        inner = np.linspace(xmin, xmax, n_basis)
         return np.concatenate((np.repeat(inner[0], self.degree), inner, np.repeat(inner[-1], self.degree)))
 
     def _basis_matrix(self, x, knots):
@@ -105,6 +111,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
+        n_basis = self._resolve_param("n_basis", default=5)
 
         self.dim_ = X.shape[1]
         self.knots_ = []
@@ -112,7 +119,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         self.penalties_ = []
 
         for d in range(self.dim_):
-            knots = self._make_knots(X[:, d])
+            knots = self._make_knots(X[:, d], n_basis)
             basis = self._basis_matrix(X[:, d], knots)
             penalty = self._difference_penalty(basis.shape[1])
             self.knots_.append(knots)

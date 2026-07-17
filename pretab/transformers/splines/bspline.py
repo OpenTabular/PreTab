@@ -10,6 +10,7 @@ from typing import Literal
 import numpy as np
 from scipy.interpolate import BSpline
 
+from ...core.params import UNSET
 from .base_spline import BaseSplineTransformer
 
 
@@ -36,30 +37,40 @@ class BSplineTransformer(BaseSplineTransformer):
 
     def __init__(
         self,
-        n_basis_functions: int = 5,
+        n_basis=UNSET,
         degree: int = 3,
-        knot_strategy: str = "quantile",
+        strategy=UNSET,
         include_bias: bool = True,
         knot_locations: np.ndarray | None = None,
-        knot_selector=None,
+        selector=UNSET,
         adaptive: bool = False,
-        min_basis_functions: int | None = None,
-        max_basis_functions: int | None = None,
-        n_knots: int | None = None,
+        min_basis=UNSET,
+        max_basis=UNSET,
         task: Literal["regression", "classification"] | None = None,
+        n_basis_functions=UNSET,
+        knot_strategy=UNSET,
+        knot_selector=UNSET,
+        min_basis_functions=UNSET,
+        max_basis_functions=UNSET,
+        n_knots=UNSET,
     ):
         super().__init__(
-            n_basis_functions=n_basis_functions,
+            n_basis=n_basis,
             degree=degree,
-            knot_strategy=knot_strategy,
+            strategy=strategy,
             include_bias=include_bias,
             knot_locations=knot_locations,
-            knot_selector=knot_selector,
+            selector=selector,
             adaptive=adaptive,
+            min_basis=min_basis,
+            max_basis=max_basis,
+            task=task,
+            n_basis_functions=n_basis_functions,
+            knot_strategy=knot_strategy,
+            knot_selector=knot_selector,
             min_basis_functions=min_basis_functions,
             max_basis_functions=max_basis_functions,
             n_knots=n_knots,
-            task=task,
         )
 
     def _feature_suffix(self) -> str:

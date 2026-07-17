@@ -1,7 +1,10 @@
+from typing import ClassVar
+
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
 
@@ -71,14 +74,17 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
 
     _feature_suffix_value = "ps"
+    _param_aliases: ClassVar[dict[str, str]] = {"n_knots": "n_basis"}
 
-    def __init__(self, n_knots=20, degree=3, diff_order=2):
-        self.n_knots = n_knots
+    def __init__(self, n_basis=UNSET, degree=3, diff_order=2, n_knots=UNSET):
+        self.n_basis = n_basis
         self.degree = degree
         self.diff_order = diff_order
+        self.n_knots = n_knots
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
+        n_basis = self._resolve_param("n_basis", default=20)
 
         self.knots_ = []
         self.penalty_ = []
@@ -87,7 +93,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         for i in range(X.shape[1]):
             x = X[:, i]
             xmin, xmax = x.min(), x.max()
-            inner_knots = np.linspace(xmin, xmax, self.n_knots)
+            inner_knots = np.linspace(xmin, xmax, n_basis)
             knots = np.concatenate(
                 (
                     np.repeat(inner_knots[0], self.degree),

@@ -14,7 +14,7 @@ Each concrete transformer only implements how a single column is turned into a
 basis matrix through the ``_design_matrix`` hook.
 """
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 from sklearn.utils.validation import check_is_fitted
@@ -27,6 +27,7 @@ from ...core.knots import (
     select_knots,
     uniform_knots,
 )
+from ...core.params import UNSET
 from .knot_selectors import BaseKnotSelector
 
 
@@ -106,50 +107,67 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     def __init__(
         self,
-        n_basis_functions: int = 5,
+        n_basis=UNSET,
         degree: int = 3,
-        knot_strategy: str = "quantile",
+        strategy=UNSET,
         include_bias: bool = False,
         knot_locations: np.ndarray | None = None,
-        knot_selector: BaseKnotSelector | None = None,
+        selector=UNSET,
         adaptive: bool = False,
-        min_basis_functions: int | None = None,
-        max_basis_functions: int | None = None,
-        n_knots: int | None = None,
+        min_basis=UNSET,
+        max_basis=UNSET,
         task: Literal["regression", "classification"] | None = None,
+        n_basis_functions=UNSET,
+        knot_strategy=UNSET,
+        knot_selector=UNSET,
+        min_basis_functions=UNSET,
+        max_basis_functions=UNSET,
+        n_knots=UNSET,
     ):
-        self.n_basis_functions = n_basis_functions
+        self.n_basis = n_basis
         self.degree = degree
-        self.knot_strategy = knot_strategy
+        self.strategy = strategy
         self.include_bias = include_bias
         self.knot_locations = knot_locations
-        self.knot_selector = knot_selector
+        self.selector = selector
         self.adaptive = adaptive
+        self.min_basis = min_basis
+        self.max_basis = max_basis
+        self.task: Literal["regression", "classification"] | None = task
+        self.n_basis_functions = n_basis_functions
+        self.knot_strategy = knot_strategy
+        self.knot_selector = knot_selector
         self.min_basis_functions = min_basis_functions
         self.max_basis_functions = max_basis_functions
         self.n_knots = n_knots
-        self.task: Literal["regression", "classification"] | None = task
 
-    def _effective_n_basis(self) -> int:
-        """Resolve the requested number of basis functions, honouring ``n_knots``."""
-        return self.n_knots if self.n_knots is not None else self.n_basis_functions
+    _param_aliases: ClassVar[dict[str, str]] = {
+        "n_basis_functions": "n_basis",
+        "n_knots": "n_basis",
+        "knot_strategy": "strategy",
+        "knot_selector": "selector",
+        "min_basis_functions": "min_basis",
+        "max_basis_functions": "max_basis",
+    }
 
     def _basis_to_knots(self, n_basis: int) -> int:
         """Convert a basis-function count to the number of internal knots."""
         return basis_to_knots(n_basis, self.degree)
 
-    def _resolve_basis_bounds(self, n_basis: int) -> tuple[int, int]:
+    def _resolve_basis_bounds(
+        self, n_basis: int, min_basis_req: int | None, max_basis_req: int | None
+    ) -> tuple[int, int]:
         """Return the (min, max) number of basis functions to allow per feature."""
         if not self.adaptive:
-            if self.min_basis_functions is not None and n_basis < self.min_basis_functions:
+            if min_basis_req is not None and n_basis < min_basis_req:
                 raise ValueError("n_basis_functions must be >= min_basis_functions when adaptive=False")
-            if self.max_basis_functions is not None and n_basis > self.max_basis_functions:
+            if max_basis_req is not None and n_basis > max_basis_req:
                 raise ValueError("n_basis_functions must be <= max_basis_functions when adaptive=False")
             min_basis = n_basis
             max_basis = n_basis
         else:
-            min_basis = self.min_basis_functions if self.min_basis_functions is not None else n_basis
-            max_basis = self.max_basis_functions if self.max_basis_functions is not None else n_basis
+            min_basis = min_basis_req if min_basis_req is not None else n_basis
+            max_basis = max_basis_req if max_basis_req is not None else n_basis
 
         if min_basis < self.degree + 1:
             raise ValueError(f"min_basis_functions must be >= degree + 1 = {self.degree + 1}, got {min_basis}")
@@ -159,9 +177,9 @@ class BaseSplineTransformer(BasePreTabTransformer):
             raise ValueError("min_basis_functions must be <= max_basis_functions")
         return min_basis, max_basis
 
-    def _generate_knots(self, x: np.ndarray, n_knots: int) -> np.ndarray:
+    def _generate_knots(self, x: np.ndarray, n_knots: int, strategy: str) -> np.ndarray:
         """Generate internal knots for a single feature using the chosen strategy."""
-        return generate_internal_knots(x, n_knots, self.knot_strategy)
+        return generate_internal_knots(x, n_knots, strategy)
 
     def _adjust_internal_knots(
         self, x: np.ndarray, internal_knots: np.ndarray, min_knots: int, max_knots: int
@@ -191,9 +209,18 @@ class BaseSplineTransformer(BasePreTabTransformer):
             combined = uniform_knots(x, target_count)
         return select_knots(np.asarray(combined), target_count)
 
-    def _column_knots(self, x_valid: np.ndarray, y_valid: np.ndarray | None, n_basis: int) -> np.ndarray:
+    def _column_knots(
+        self,
+        x_valid: np.ndarray,
+        y_valid: np.ndarray | None,
+        n_basis: int,
+        strategy: str,
+        selector: BaseKnotSelector | None,
+        min_basis_req: int | None,
+        max_basis_req: int | None,
+    ) -> np.ndarray:
         """Build the full knot vector for a single feature."""
-        min_basis, max_basis = self._resolve_basis_bounds(n_basis)
+        min_basis, max_basis = self._resolve_basis_bounds(n_basis, min_basis_req, max_basis_req)
         min_knots = self._basis_to_knots(min_basis)
         max_knots = self._basis_to_knots(max_basis)
         if self.adaptive:
@@ -202,8 +229,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
         x_min = x_valid.min()
         x_max = x_valid.max()
 
-        if self.knot_selector is not None:
-            selected = self.knot_selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)
+        if selector is not None:
+            selected = selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(selected), min_knots, max_knots)
         elif self.knot_locations is not None:
             expected_knots = self._basis_to_knots(n_basis)
@@ -212,7 +239,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
         else:
             n_internal = self._basis_to_knots(n_basis)
-            internal_knots = self._generate_knots(x_valid, n_internal)
+            internal_knots = self._generate_knots(x_valid, n_internal, strategy)
             internal_knots = self._adjust_internal_knots(x_valid, internal_knots, min_knots, max_knots)
 
         internal_knots = np.clip(internal_knots, x_min, x_max)
@@ -224,7 +251,11 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Determine per-feature knot vectors."""
-        n_basis = self._effective_n_basis()
+        n_basis = self._resolve_param("n_basis", default=5)
+        strategy = self._resolve_param("strategy", default="quantile")
+        selector = self._resolve_param("selector", default=None)
+        min_basis_req = self._resolve_param("min_basis", default=None)
+        max_basis_req = self._resolve_param("max_basis", default=None)
         if n_basis < self.degree + 1:
             raise ValueError(f"n_basis_functions must be >= degree + 1 = {self.degree + 1}, got {n_basis}")
         if n_basis < 5:
@@ -244,7 +275,9 @@ class BaseSplineTransformer(BasePreTabTransformer):
             if xi_valid.size == 0:
                 raise ValueError(f"Feature at index {i} has only NaN values")
             yi_valid = y_arr[valid_mask] if y_arr is not None else None
-            self.knots_.append(self._column_knots(xi_valid, yi_valid, n_basis))
+            self.knots_.append(
+                self._column_knots(xi_valid, yi_valid, n_basis, strategy, selector, min_basis_req, max_basis_req)
+            )
 
         self.n_basis_ = [len(knots) - self.degree - 1 for knots in self.knots_]
         return self

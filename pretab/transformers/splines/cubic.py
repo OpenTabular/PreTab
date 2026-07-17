@@ -1,7 +1,10 @@
+from typing import ClassVar
+
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
 
@@ -58,11 +61,13 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
 
     _feature_suffix_value = "cs"
+    _param_aliases: ClassVar[dict[str, str]] = {"n_knots": "n_basis"}
 
-    def __init__(self, n_knots=10, degree=3, include_bias=False):
-        self.n_knots = n_knots
+    def __init__(self, n_basis=UNSET, degree=3, include_bias=False, n_knots=UNSET):
+        self.n_basis = n_basis
         self.degree = degree
         self.include_bias = include_bias
+        self.n_knots = n_knots
 
     def _bspline_basis(self, x, knots):
         x = np.asarray(x).reshape(-1, 1)
@@ -80,13 +85,14 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
+        n_basis = self._resolve_param("n_basis", default=10)
 
         self.knots_ = []
         self.designs_ = []
         for i in range(X.shape[1]):
             xi = X[:, i]
             xi_min, xi_max = np.min(xi), np.max(xi)
-            knots = np.linspace(xi_min, xi_max, self.n_knots)
+            knots = np.linspace(xi_min, xi_max, n_basis)
             self.knots_.append(knots)
             self.designs_.append(self._bspline_basis(xi, knots))
 
