@@ -6,7 +6,7 @@ from ..utils.utils import center_identification_using_decision_tree
 
 
 class SigmoidExpansionTransformer(BaseEstimator, TransformerMixin):
-    """
+    r"""
     Applies sigmoid basis expansion to input features using specified or data-driven center placement.
 
     Each feature is expanded using a set of sigmoid functions centered at various locations, creating
@@ -36,10 +36,25 @@ class SigmoidExpansionTransformer(BaseEstimator, TransformerMixin):
 
     Notes
     -----
-    For a feature `x`, and center `c`, the transformation is defined as:
-        sigmoid((x - c) / scale) = 1 / (1 + exp(-(x - c) / scale))
+    For a feature :math:`x` and center :math:`c`, the transformation is
 
-    This results in `n_centers` new features per original feature.
+    .. math::
+
+        \sigma\!\left(\frac{x - c}{s}\right) = \frac{1}{1 + \exp\!\left(-\frac{x - c}{s}\right)},
+
+    where :math:`s` is ``scale``. This produces ``n_centers`` new features per
+    original feature.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import SigmoidExpansionTransformer
+    >>> X = np.array([[1.0], [2.0], [3.0]])
+    >>> transformer = SigmoidExpansionTransformer(n_centers=3, use_decision_tree=False)
+    >>> transformer.fit(X)
+    SigmoidExpansionTransformer(...)
+    >>> transformer.transform(X).shape
+    (3, 3)
     """
 
     def __init__(

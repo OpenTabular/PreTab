@@ -3,14 +3,35 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array
 
 class RollingStatsTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, window_size=5, stats=("mean", "std")):
-        """
-        Computes rolling statistics over a fixed window.
+    """Compute rolling-window statistics over time-series inputs.
 
-        Parameters:
-        - window_size: Number of past observations to use.
-        - stats: Tuple of stats to compute: any of "mean", "std", "min", "max".
-        """
+    A sliding window of fixed size is moved across each feature and the requested
+    summary statistics are computed within each window.
+
+    Parameters
+    ----------
+    window_size : int, default=5
+        Number of consecutive observations in each rolling window.
+    stats : tuple of str, default=("mean", "std")
+        Statistics to compute. Any of ``"mean"``, ``"std"``, ``"min"``, ``"max"``.
+
+    Notes
+    -----
+    Using a sliding window of size ``window_size`` yields
+    ``n_samples - window_size + 1`` output rows. Each requested statistic adds one
+    column per input feature.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import RollingStatsTransformer
+    >>> X = np.arange(10).reshape(-1, 1).astype(float)
+    >>> transformer = RollingStatsTransformer(window_size=3, stats=("mean", "std"))
+    >>> transformer.fit_transform(X).shape
+    (8, 2)
+    """
+
+    def __init__(self, window_size=5, stats=("mean", "std")):
         self.window_size = window_size
         self.stats = stats
 

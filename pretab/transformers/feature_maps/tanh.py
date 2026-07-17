@@ -6,7 +6,7 @@ from ..utils.utils import center_identification_using_decision_tree
 
 
 class TanhExpansionTransformer(BaseEstimator, TransformerMixin):
-    """
+    r"""
     Applies hyperbolic tangent (tanh) basis expansion to input features using specified or learned center locations.
 
     This transformer expands each input feature into multiple tanh-activated features, useful for capturing
@@ -36,10 +36,26 @@ class TanhExpansionTransformer(BaseEstimator, TransformerMixin):
 
     Notes
     -----
-    Each original feature `x` is transformed into `n_centers` features of the form:
-        tanh((x - c) / scale)
+    Each original feature :math:`x` is transformed into ``n_centers`` features of
+    the form
 
-    where `c` is a center value and `scale` controls the spread of the activation.
+    .. math::
+
+        \tanh\!\left(\frac{x - c}{s}\right),
+
+    where :math:`c` is a center value and :math:`s` (``scale``) controls the
+    spread of the activation.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import TanhExpansionTransformer
+    >>> X = np.array([[1.0], [2.0], [3.0]])
+    >>> transformer = TanhExpansionTransformer(n_centers=3, use_decision_tree=False)
+    >>> transformer.fit(X)
+    TanhExpansionTransformer(...)
+    >>> transformer.transform(X).shape
+    (3, 3)
     """
 
     def __init__(

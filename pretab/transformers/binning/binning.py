@@ -19,6 +19,22 @@ class CustomBinTransformer(TransformerMixin, BaseEstimator):
     ----------
     n_features_in_ : int
         The number of input features. Always set to 1 for this transformer.
+
+    Notes
+    -----
+    This transformer operates on a single feature of shape ``(n_samples, 1)``. When
+    ``bins`` is an integer, equal-width bin edges are computed from the data range;
+    when it is an array-like, the provided edges are used directly. The output
+    contains integer bin indices.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import CustomBinTransformer
+    >>> X = np.linspace(0, 1, 10).reshape(-1, 1)
+    >>> transformer = CustomBinTransformer(bins=4)
+    >>> transformer.fit_transform(X).shape
+    (10, 1)
     """
 
     def __init__(self, bins):
@@ -85,13 +101,17 @@ class CustomBinTransformer(TransformerMixin, BaseEstimator):
         return np.expand_dims(np.array(binned_data), 1)
 
     def get_feature_names_out(self, input_features=None):
-        """Returns the names of the transformed features.
+        """Return the names of the transformed features.
 
-        Parameters:
-            input_features (list of str): The names of the input features.
+        Parameters
+        ----------
+        input_features : list of str
+            The names of the input features.
 
-        Returns:
-            input_features (array of shape (n_features,)): The names of the output features after transformation.
+        Returns
+        -------
+        input_features : ndarray of shape (n_features,)
+            The names of the output features after transformation.
         """
         if input_features is None:
             raise ValueError("input_features must be specified")

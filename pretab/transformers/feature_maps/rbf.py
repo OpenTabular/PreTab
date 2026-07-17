@@ -6,7 +6,7 @@ import warnings
 
 
 class RBFExpansionTransformer(BaseEstimator, TransformerMixin):
-    """
+    r"""
     Radial Basis Function (RBF) feature expansion for numerical tabular data.
 
     This transformer expands each feature into a set of RBF (Gaussian) basis functions
@@ -35,11 +35,22 @@ class RBFExpansionTransformer(BaseEstimator, TransformerMixin):
     centers_ : list of ndarray
         List of arrays containing center locations for each feature.
 
+    Notes
+    -----
+    For a feature :math:`x` and centers :math:`c_i`, each output column is a
+    Gaussian radial basis function
+
+    .. math::
+
+        \phi_i(x) = \exp\left(-\gamma (x - c_i)^2\right),
+
+    producing ``n_centers`` new features per original feature.
+
     Examples
     --------
-    >>> from prefab.transformers import RBFExpansionTransformer
     >>> import numpy as np
-    >>> X = np.array([[1.], [2.], [3.]])
+    >>> from pretab.transformers import RBFExpansionTransformer
+    >>> X = np.array([[1.0], [2.0], [3.0]])
     >>> transformer = RBFExpansionTransformer(n_centers=3, gamma=0.5, use_decision_tree=False)
     >>> transformer.fit(X)
     RBFExpansionTransformer(...)

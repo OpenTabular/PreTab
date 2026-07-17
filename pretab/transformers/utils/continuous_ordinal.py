@@ -2,29 +2,46 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 
 class ContinuousOrdinalTransformer(BaseEstimator, TransformerMixin):
-    """This encoder converts categorical features into continuous integer values. Each unique category within a feature
-    is assigned a unique integer based on its order of appearance in the dataset. This transformation is useful for
-    models that can only handle continuous data.
+    """Encode categorical features as continuous integer values.
 
-    Attributes:
-        mapping_ (list of dicts): A list where each element is a dictionary mapping original categories to integers
-                                  for a single feature.
+    Each unique category within a feature is assigned an integer based on its
+    sorted order. Unknown or missing categories are mapped to ``0``. This is
+    useful for models that can only handle numerical input.
 
-    Methods:
-        fit(X, y=None): Learns the mapping from original categories to integers.
-        transform(X): Applies the learned mapping to the data.
-        get_feature_names_out(input_features=None): Returns the input features after transformation.
+    Attributes
+    ----------
+    mapping_ : list of dict
+        One dictionary per feature mapping original categories to integers.
+
+    Notes
+    -----
+    Categories are numbered starting at ``1`` in sorted order; the value ``0`` is
+    reserved for categories not seen during ``fit`` (and for ``None``).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers.utils.continuous_ordinal import ContinuousOrdinalTransformer
+    >>> X = np.array([["a", "x"], ["b", "y"], ["a", "x"]], dtype=object)
+    >>> transformer = ContinuousOrdinalTransformer()
+    >>> transformer.fit_transform(X).shape
+    (3, 2)
     """
 
     def fit(self, X, y=None):
-        """Learns the mapping from original categories to integers for each feature.
+        """Learn the mapping from categories to integers for each feature.
 
-        Parameters:
-            X (array-like of shape (n_samples, n_features)): The input data to fit.
-            y (ignored): Not used, present for API consistency by convention.
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            The input data to fit.
+        y : Ignored
+            Not used, present for API consistency by convention.
 
-        Returns:
-            self: Returns the instance itself.
+        Returns
+        -------
+        self : object
+            Fitted transformer.
         """
         # Fit should determine the mapping from original categories to sequential integers starting from 0
         self.mapping_ = [
@@ -36,13 +53,17 @@ class ContinuousOrdinalTransformer(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        """Transforms the categories in X to their corresponding integer values based on the learned mapping.
+        """Apply the learned category-to-integer mapping.
 
-        Parameters:
-            X (array-like of shape (n_samples, n_features)): The input data to transform.
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            The input data to transform.
 
-        Returns:
-            X_transformed (ndarray of shape (n_samples, n_features)): The transformed data with integer values.
+        Returns
+        -------
+        X_transformed : ndarray of shape (n_samples, n_features)
+            The transformed data with integer values.
         """
         # Transform the categories to their mapped integer values
         X_transformed = np.array(
@@ -54,13 +75,17 @@ class ContinuousOrdinalTransformer(BaseEstimator, TransformerMixin):
         return X_transformed
 
     def get_feature_names_out(self, input_features=None):
-        """Returns the names of the transformed features.
+        """Return the output feature names (unchanged from the input).
 
-        Parameters:
-            input_features (list of str): The names of the input features.
+        Parameters
+        ----------
+        input_features : list of str
+            The names of the input features.
 
-        Returns:
-            input_features (array of shape (n_features,)): The names of the output features after transformation.
+        Returns
+        -------
+        input_features : ndarray of shape (n_features,)
+            The names of the output features after transformation.
         """
         if input_features is None:
             raise ValueError("input_features must be specified")

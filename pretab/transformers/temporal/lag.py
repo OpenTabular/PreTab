@@ -3,13 +3,33 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array
 
 class LagFeatureTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, n_lags=1):
-        """
-        Creates lag features for time series inputs.
+    """Create lagged features for time-series inputs.
 
-        Parameters:
-        - n_lags: Number of lag steps to include.
-        """
+    For each input column, previous time steps are appended as additional
+    features, which is useful for autoregressive modeling.
+
+    Parameters
+    ----------
+    n_lags : int, default=1
+        Number of lag steps to include.
+
+    Notes
+    -----
+    Because the first ``n_lags`` observations have no complete history, the
+    transformed output has ``n_samples - n_lags`` rows. Each input feature is
+    expanded into ``n_lags`` lagged columns.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import LagFeatureTransformer
+    >>> X = np.arange(6).reshape(-1, 1)
+    >>> transformer = LagFeatureTransformer(n_lags=2)
+    >>> transformer.fit_transform(X).shape
+    (4, 2)
+    """
+
+    def __init__(self, n_lags=1):
         self.n_lags = n_lags
 
     def fit(self, X, y=None):

@@ -6,7 +6,7 @@ from ..utils.utils import center_identification_using_decision_tree
 
 
 class ReLUExpansionTransformer(BaseEstimator, TransformerMixin):
-    """
+    r"""
     Applies ReLU basis expansion to input features using fixed or data-driven center placement.
 
     This transformer expands each feature using a set of ReLU activation functions centered at fixed positions,
@@ -33,7 +33,25 @@ class ReLUExpansionTransformer(BaseEstimator, TransformerMixin):
 
     Notes
     -----
-    For a feature `x`, and centers `c`, this transformer produces `max(0, x - c_i)` for all `c_i` in centers.
+    For a feature :math:`x` and centers :math:`c_i`, each output column applies a
+    rectified linear unit
+
+    .. math::
+
+        \phi_i(x) = \max(0,\; x - c_i),
+
+    producing ``n_centers`` new features per original feature.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import ReLUExpansionTransformer
+    >>> X = np.array([[1.0], [2.0], [3.0]])
+    >>> transformer = ReLUExpansionTransformer(n_centers=3, use_decision_tree=False)
+    >>> transformer.fit(X)
+    ReLUExpansionTransformer(...)
+    >>> transformer.transform(X).shape
+    (3, 3)
     """
 
     def __init__(
