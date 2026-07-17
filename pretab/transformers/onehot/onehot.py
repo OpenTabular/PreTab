@@ -1,5 +1,7 @@
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_is_fitted
+
 
 class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
     """Convert ordinal-encoded features into a one-hot encoded representation.
@@ -47,6 +49,7 @@ class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
         self.max_bins_ = (
             np.max(X, axis=0).astype(int) + 1
         )  # Find the maximum bin index for each feature
+        self.n_features_in_ = np.asarray(X).shape[1]
         return self
 
     def transform(self, X):
@@ -64,6 +67,7 @@ class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
         X_one_hot : ndarray of shape (n_samples, n_output_features)
             The one-hot encoded features.
         """
+        check_is_fitted(self, "max_bins_")
         # Initialize an empty list to hold the one-hot encoded arrays
         one_hot_encoded = []
         for i, max_bins in enumerate(self.max_bins_):
@@ -90,3 +94,9 @@ class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
         for i, max_bins in enumerate(self.max_bins_):
             feature_names.extend([f"{input_features[i]}_bin_{j}" for j in range(int(max_bins))])  # type: ignore
         return np.array(feature_names)
+
+    def __sklearn_tags__(self):
+        """Ordinal integer input is required; missing values are not supported."""
+        tags = super().__sklearn_tags__()
+        tags.input_tags.allow_nan = False
+        return tags
