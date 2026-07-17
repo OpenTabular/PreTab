@@ -32,14 +32,31 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     Parameters
     ----------
-    n_knots : int, default=5
-        Number of interior knots per input feature (per marginal dimension).
+    n_basis : int, default=5
+        Number of interior knots per input feature (per marginal dimension;
+        canonical name, the legacy ``n_knots`` alias still works and emits a
+        ``FutureWarning``).
 
     degree : int, default=3
         Degree of the B-spline basis functions.
 
     diff_order : int, default=2
         Order of the finite difference penalty used to enforce smoothness along each input dimension.
+
+    include_bias : bool, default=False
+        If True, prepend a constant column to each marginal basis before the
+        tensor product. The bias term is left unpenalized.
+
+    strategy : {"uniform", "quantile"}, default="uniform"
+        Knot placement rule for each marginal dimension. ``"uniform"`` reproduces
+        the historical evenly spaced knots; ``"quantile"`` uses data quantiles.
+
+    selector : BaseKnotSelector or None, default=None
+        Optional target-aware knot selector applied per marginal dimension. When
+        provided it requires ``y`` during ``fit``.
+
+    task : {"regression", "classification"} or None, default=None
+        Task forwarded to a target-aware ``selector``.
 
     Attributes
     ----------
@@ -83,17 +100,37 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     (20, 36)
     """
 
-    _param_aliases: ClassVar[dict[str, str]] = {"n_knots": "n_basis"}
+    _param_aliases: ClassVar[dict[str, str]] = {
+        "n_knots": "n_basis",
+        "knot_strategy": "strategy",
+        "knot_selector": "selector",
+    }
 
-    def __init__(self, n_basis=UNSET, degree=3, diff_order=2, n_knots=UNSET):
+    def __init__(
+        self,
+        n_basis=UNSET,
+        degree=3,
+        diff_order=2,
+        include_bias=False,
+        strategy=UNSET,
+        selector=UNSET,
+        task=None,
+        n_knots=UNSET,
+        knot_strategy=UNSET,
+        knot_selector=UNSET,
+    ):
         self.n_basis = n_basis
         self.degree = degree
         self.diff_order = diff_order
+        self.include_bias = include_bias
+        self.strategy = strategy
+        self.selector = selector
+        self.task = task
         self.n_knots = n_knots
+        self.knot_strategy = knot_strategy
+        self.knot_selector = knot_selector
 
-    def _make_knots(self, x, n_basis):
-        xmin, xmax = np.min(x), np.max(x)
-        inner = np.linspace(xmin, xmax, n_basis)
+    def _pad_knots(self, inner):
         return np.concatenate((np.repeat(inner[0], self.degree), inner, np.repeat(inner[-1], self.degree)))
 
     def _basis_matrix(self, x, knots):
@@ -101,6 +138,8 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         B = np.zeros((len(x), n_basis))
         for i in range(n_basis):
             B[:, i] = bspline_basis(x, knots, self.degree, i)
+        if self.include_bias:
+            B = np.hstack([np.ones((len(x), 1)), B])
         return B
 
     def _difference_penalty(self, n_basis):
@@ -112,6 +151,8 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
         n_basis = self._resolve_param("n_basis", default=5)
+        strategy = self._resolve_param("strategy", default="uniform")
+        selector = self._resolve_param("selector", default=None)
 
         self.dim_ = X.shape[1]
         self.knots_ = []
@@ -119,9 +160,12 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         self.penalties_ = []
 
         for d in range(self.dim_):
-            knots = self._make_knots(X[:, d], n_basis)
+            inner_knots = self._place_spanning_knots(X[:, d], y, n_basis, strategy, selector, self.task)
+            knots = self._pad_knots(inner_knots)
             basis = self._basis_matrix(X[:, d], knots)
-            penalty = self._difference_penalty(basis.shape[1])
+            penalty = self._difference_penalty(len(knots) - self.degree - 1)
+            if self.include_bias:
+                penalty = np.pad(penalty, ((1, 0), (1, 0)))
             self.knots_.append(knots)
             self.bases_.append(basis)
             self.penalties_.append(penalty)
@@ -179,3 +223,22 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
                 P = np.kron(P, M)
             kron_penalties.append(P)
         return kron_penalties
+
+    def get_penalty_matrix(self, feature_index=0):
+        """Return the marginal difference penalty for one input dimension.
+
+        Provided for signature parity with the other spline transformers; use
+        :meth:`get_penalty_matrices` for the full Kronecker-structured penalties.
+
+        Parameters
+        ----------
+        feature_index : int, default=0
+            Index of the marginal dimension whose difference penalty is returned.
+
+        Returns
+        -------
+        P : ndarray
+            The marginal difference penalty matrix for ``feature_index``.
+        """
+        check_is_fitted(self, "penalties_")
+        return self.penalties_[feature_index]

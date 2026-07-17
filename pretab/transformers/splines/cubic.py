@@ -18,14 +18,27 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    n_knots : int, default=10
-        Number of internal knots to place uniformly between the minimum and maximum of each feature.
+    n_basis : int, default=10
+        Number of knots to place across the range of each feature (canonical name;
+        the legacy ``n_knots`` alias still works and emits a ``FutureWarning``).
 
     degree : int, default=3
         Degree of the polynomial spline. Currently fixed to 3 (cubic), included for compatibility.
 
     include_bias : bool, default=False
         Whether to include a bias (intercept) term in the output feature set.
+
+    strategy : {"uniform", "quantile"}, default="uniform"
+        Knot placement rule. ``"uniform"`` reproduces the historical evenly spaced
+        knots; ``"quantile"`` places them at evenly spaced data quantiles.
+
+    selector : BaseKnotSelector or None, default=None
+        Optional target-aware knot selector (for example ``CARTKnotSelector``).
+        When provided it determines the internal knots from the target and
+        requires ``y`` during ``fit``.
+
+    task : {"regression", "classification"} or None, default=None
+        Task forwarded to a target-aware ``selector``.
 
     Attributes
     ----------
@@ -61,13 +74,33 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
 
     _feature_suffix_value = "cs"
-    _param_aliases: ClassVar[dict[str, str]] = {"n_knots": "n_basis"}
+    _param_aliases: ClassVar[dict[str, str]] = {
+        "n_knots": "n_basis",
+        "knot_strategy": "strategy",
+        "knot_selector": "selector",
+    }
 
-    def __init__(self, n_basis=UNSET, degree=3, include_bias=False, n_knots=UNSET):
+    def __init__(
+        self,
+        n_basis=UNSET,
+        degree=3,
+        include_bias=False,
+        strategy=UNSET,
+        selector=UNSET,
+        task=None,
+        n_knots=UNSET,
+        knot_strategy=UNSET,
+        knot_selector=UNSET,
+    ):
         self.n_basis = n_basis
         self.degree = degree
         self.include_bias = include_bias
+        self.strategy = strategy
+        self.selector = selector
+        self.task = task
         self.n_knots = n_knots
+        self.knot_strategy = knot_strategy
+        self.knot_selector = knot_selector
 
     def _bspline_basis(self, x, knots):
         x = np.asarray(x).reshape(-1, 1)
@@ -86,13 +119,14 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
         n_basis = self._resolve_param("n_basis", default=10)
+        strategy = self._resolve_param("strategy", default="uniform")
+        selector = self._resolve_param("selector", default=None)
 
         self.knots_ = []
         self.designs_ = []
         for i in range(X.shape[1]):
             xi = X[:, i]
-            xi_min, xi_max = np.min(xi), np.max(xi)
-            knots = np.linspace(xi_min, xi_max, n_basis)
+            knots = self._place_spanning_knots(xi, y, n_basis, strategy, selector, self.task)
             self.knots_.append(knots)
             self.designs_.append(self._bspline_basis(xi, knots))
 

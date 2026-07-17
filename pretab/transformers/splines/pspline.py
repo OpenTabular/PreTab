@@ -33,8 +33,10 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    n_knots : int, default=20
-        Number of interior knots to place uniformly across the range of each feature.
+    n_basis : int, default=20
+        Number of interior knots to place across the range of each feature
+        (canonical name; the legacy ``n_knots`` alias still works and emits a
+        ``FutureWarning``).
 
     degree : int, default=3
         Degree of the B-spline basis functions (e.g., 3 for cubic splines).
@@ -42,6 +44,22 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     diff_order : int, default=2
         The order of the difference penalty used to compute the smoothness penalty matrix.
         For example, 2 corresponds to a second-order difference penalty (encouraging smooth second derivatives).
+
+    include_bias : bool, default=False
+        If True, prepend a constant intercept column per feature. The bias term is
+        left unpenalized (a zero row/column is added to the penalty matrix).
+
+    strategy : {"uniform", "quantile"}, default="uniform"
+        Knot placement rule. ``"uniform"`` reproduces the historical evenly spaced
+        knots; ``"quantile"`` places them at evenly spaced data quantiles.
+
+    selector : BaseKnotSelector or None, default=None
+        Optional target-aware knot selector (for example ``CARTKnotSelector``).
+        When provided it determines the interior knots from the target and
+        requires ``y`` during ``fit``.
+
+    task : {"regression", "classification"} or None, default=None
+        Task forwarded to a target-aware ``selector``.
 
     Attributes
     ----------
@@ -74,17 +92,41 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
 
     _feature_suffix_value = "ps"
-    _param_aliases: ClassVar[dict[str, str]] = {"n_knots": "n_basis"}
+    _param_aliases: ClassVar[dict[str, str]] = {
+        "n_knots": "n_basis",
+        "knot_strategy": "strategy",
+        "knot_selector": "selector",
+    }
 
-    def __init__(self, n_basis=UNSET, degree=3, diff_order=2, n_knots=UNSET):
+    def __init__(
+        self,
+        n_basis=UNSET,
+        degree=3,
+        diff_order=2,
+        include_bias=False,
+        strategy=UNSET,
+        selector=UNSET,
+        task=None,
+        n_knots=UNSET,
+        knot_strategy=UNSET,
+        knot_selector=UNSET,
+    ):
         self.n_basis = n_basis
         self.degree = degree
         self.diff_order = diff_order
+        self.include_bias = include_bias
+        self.strategy = strategy
+        self.selector = selector
+        self.task = task
         self.n_knots = n_knots
+        self.knot_strategy = knot_strategy
+        self.knot_selector = knot_selector
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
         n_basis = self._resolve_param("n_basis", default=20)
+        strategy = self._resolve_param("strategy", default="uniform")
+        selector = self._resolve_param("selector", default=None)
 
         self.knots_ = []
         self.penalty_ = []
@@ -92,8 +134,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
         for i in range(X.shape[1]):
             x = X[:, i]
-            xmin, xmax = x.min(), x.max()
-            inner_knots = np.linspace(xmin, xmax, n_basis)
+            inner_knots = self._place_spanning_knots(x, y, n_basis, strategy, selector, self.task)
             knots = np.concatenate(
                 (
                     np.repeat(inner_knots[0], self.degree),
@@ -105,9 +146,12 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
             D = np.eye(n_basis)
             for _ in range(self.diff_order):
                 D = np.diff(D, n=1, axis=0)
+            penalty = D.T @ D
+            if self.include_bias:
+                penalty = np.pad(penalty, ((1, 0), (1, 0)))
             self.knots_.append(knots)
-            self.n_basis_.append(n_basis)
-            self.penalty_.append(D.T @ D)
+            self.n_basis_.append(n_basis + (1 if self.include_bias else 0))
+            self.penalty_.append(penalty)
 
         return self
 
@@ -118,9 +162,12 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         all_basis = []
         for i in range(X.shape[1]):
             x = X[:, i]
-            basis = np.zeros((len(x), self.n_basis_[i]))
-            for j in range(self.n_basis_[i]):
+            nb = len(self.knots_[i]) - self.degree - 1
+            basis = np.zeros((len(x), nb))
+            for j in range(nb):
                 basis[:, j] = bspline_basis(x, self.knots_[i], self.degree, j)
+            if self.include_bias:
+                basis = np.hstack([np.ones((len(x), 1)), basis])
             all_basis.append(basis)
 
         return np.hstack(all_basis)
