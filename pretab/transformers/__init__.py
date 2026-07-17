@@ -1,5 +1,10 @@
 from .binning import CustomBinTransformer
 from .embeddings import LanguageEmbeddingTransformer
+from .encoders import (
+    ContinuousOrdinalTransformer,
+    NoTransformer,
+    ToFloatTransformer,
+)
 from .feature_maps import (
     RBFExpansionTransformer,
     ReLUExpansionTransformer,
@@ -26,6 +31,7 @@ from .temporal import (
 
 __all__ = [
     "BSplineTransformer",
+    "ContinuousOrdinalTransformer",
     "CubicSplineTransformer",
     "CustomBinTransformer",
     "CyclicalTimeTransformer",
@@ -34,6 +40,7 @@ __all__ = [
     "LanguageEmbeddingTransformer",
     "MSplineTransformer",
     "NaturalCubicSplineTransformer",
+    "NoTransformer",
     "OneHotFromOrdinalTransformer",
     "PLETransformer",
     "PSplineTransformer",
@@ -44,4 +51,5 @@ __all__ = [
     "TanhExpansionTransformer",
     "TensorProductSplineTransformer",
     "ThinPlateSplineTransformer",
+    "ToFloatTransformer",
 ]

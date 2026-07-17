@@ -25,7 +25,7 @@ from ..transformers.feature_maps.tanh import TanhExpansionTransformer
 from ..transformers.binning.binning import CustomBinTransformer
 from ..transformers.ple.ple import PLETransformer
 
-from ..transformers.utils.floats import NoTransformer
+from ..transformers.encoders.floats import NoTransformer
 
 
 # Spline basis expansions that share the target-aware knot API.

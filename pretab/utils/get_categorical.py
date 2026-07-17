@@ -1,8 +1,8 @@
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder
 
-from ..transformers.utils.continuous_ordinal import ContinuousOrdinalTransformer
-from ..transformers.utils.floats import ToFloatTransformer, NoTransformer
+from ..transformers.encoders.continuous_ordinal import ContinuousOrdinalTransformer
+from ..transformers.encoders.floats import ToFloatTransformer, NoTransformer
 from ..transformers.binning import CustomBinTransformer
 from ..transformers.onehot import OneHotFromOrdinalTransformer
 from ..transformers.embeddings import LanguageEmbeddingTransformer
