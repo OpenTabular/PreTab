@@ -1,13 +1,13 @@
 import numpy as np
 import pandas as pd
+from sklearn.base import TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.exceptions import NotFittedError
 from sklearn.pipeline import Pipeline
-from sklearn.base import TransformerMixin
 
-from .utils import (
-    get_numerical_transformer_steps,
+from .pipeline import (
     get_categorical_transformer_steps,
+    get_numerical_transformer_steps,
 )
 
 
