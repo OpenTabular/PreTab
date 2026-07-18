@@ -134,6 +134,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Set when the preprocessor is fitted.
     n_features_in_ : int
         Number of input features seen during ``fit``.
+    total_output_dim_ : int
+        Total number of output columns produced across all input features
+        (equals the width of ``transform(..., return_array=True)``).
+    output_dims_ : dict
+        Per-feature expanded output-column counts, keyed by input feature name.
+        The values sum to ``total_output_dim_``.
     embeddings_ : bool
         Whether embedding vectors were provided at ``fit`` time and are expected in transformation.
     embedding_dimensions_ : dict
@@ -506,6 +512,46 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         check_is_fitted(self)
         return self.column_transformer_.get_feature_names_out(input_features)
+
+    @property
+    def total_output_dim_(self) -> int:
+        """Total number of output columns produced across all input features.
+
+        Fitted attribute (available only after ``fit``). Defined as
+        ``len(self.get_feature_names_out())`` so it always equals the true width
+        of the array returned by ``transform(..., return_array=True)``.
+        """
+        check_is_fitted(self)
+        return len(self.get_feature_names_out())
+
+    @property
+    def output_dims_(self) -> dict:
+        """Per-feature expanded output-column counts.
+
+        Fitted attribute (available only after ``fit``). Maps each input feature
+        (by name) to the number of columns it contributes to the transformed
+        array, complementing the scalar :attr:`total_output_dim_`. The values sum
+        to :attr:`total_output_dim_`. Useful when features get different
+        ``output_dim`` values (via ``feature_preprocessing``) or expand to a
+        non-uniform width (e.g. one-hot encoded categoricals).
+        """
+        check_is_fitted(self)
+        column_transformer = self.column_transformer_
+        output_indices = column_transformer.output_indices_
+        dims: dict = {}
+        for name, _transformer, columns in column_transformer.transformers_:
+            span = output_indices[name]
+            width = span.stop - span.start
+            if width == 0:
+                continue
+            if name == "remainder":
+                # Passthrough columns: one output column per untransformed feature.
+                for full in column_transformer.get_feature_names_out()[span]:
+                    feature = full.split("__", 1)[-1] if "__" in full else full
+                    dims[feature] = dims.get(feature, 0) + 1
+            else:
+                dims[columns[0]] = width
+        return dims
 
     def get_feature_info(self, verbose=True):
         """
