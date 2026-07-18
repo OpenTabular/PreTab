@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./docs/images/logo/pretab.png" width="900" />
+  <img src="./docs/logo/pretab-logo.png" width="900" />
 
 [![PyPI](https://img.shields.io/pypi/v/pretab)](https://pypi.org/project/pretab)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/pretab)
@@ -70,8 +70,8 @@ print({k: v.shape for k, v in X.items()})
 > **Works with pandas and numpy.** Pass a DataFrame or an array, and PreTab infers
 > numerical vs. categorical columns for you.
 
-> **Mix strategies per column.** Swap the global methods for a `feature_preprocessing` map —
-> for example `{"age": "ple", "income": "rbf", "city": "one-hot"}` — and PreTab fits each
+> **Mix strategies per column.** Swap the global methods for a `feature_preprocessing` map,
+> for example `{"age": "ple", "income": "rbf", "city": "one-hot"}`, and PreTab fits each
 > column with its own strategy in a single pass. See [Usage](#usage) for a full example.
 
 ## Available Transformers
@@ -212,7 +212,7 @@ from pretab.transformers import PLETransformer
 x = np.random.randn(100, 1)
 y = np.random.randn(100, 1)
 
-x_ple = PLETransformer(n_bins=15, task="regression").fit_transform(x, y)
+x_ple = PLETransformer(output_dim=15, task="regression").fit_transform(x, y)
 assert x_ple.shape[1] == 15
 ```
 
@@ -232,7 +232,7 @@ from sklearn.pipeline import Pipeline
 from pretab.transformers import NaturalCubicSplineTransformer, RBFExpansionTransformer
 
 features = ColumnTransformer([
-    ("age", NaturalCubicSplineTransformer(n_knots=10), ["age"]),
+    ("age", NaturalCubicSplineTransformer(output_dim=10), ["age"]),
     ("income", RBFExpansionTransformer(), ["income"]),
 ])
 
@@ -251,9 +251,9 @@ from pretab.transformers import ThinPlateSplineTransformer
 
 x = np.random.randn(100, 1)
 
-tp = ThinPlateSplineTransformer(n_basis=15)
+tp = ThinPlateSplineTransformer(output_dim=15)
 x_tp = tp.fit_transform(x)
-penalty = tp.get_penalty_matrix()   # (n_basis, n_basis) smoothing penalty
+penalty = tp.get_penalty_matrix()   # (output_dim, output_dim) smoothing penalty
 ```
 
 ## Advanced Features

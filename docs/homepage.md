@@ -1,11 +1,11 @@
-# pretab
+# PreTab
 
-**pretab** is a modular, extensible, and [scikit-learn](https://scikit-learn.org/)-compatible
+**PreTab** is a modular, extensible, and [scikit-learn](https://scikit-learn.org/)-compatible
 preprocessing library for tabular data. It supports **all `sklearn` transformers** out of the
 box and extends them with a rich set of custom encoders, splines, and neural basis expansions.
 
 ```{note}
-These docs are for pretab {{ version }}. The project is under active development and the
+These docs are for PreTab {{ version }}. The project is under active development and the
 public API may evolve while the major version is `0`.
 ```
 
@@ -60,8 +60,8 @@ X = pre.fit_transform(df, y)          # dict of model-ready feature blocks
 ```
 
 `Preprocessor` detects the column types, fits a strategy per column, and returns model-ready
-arrays — as a dict of blocks or, with `return_array=True`, a single stacked matrix. Inspect
-the resolved layout at any time with `get_feature_info(verbose=True)`:
+arrays, either as a dict of blocks or, with `return_array=True`, a single stacked matrix.
+Inspect the resolved layout at any time with `get_feature_info(verbose=True)`:
 
 ```text
 feature  kind         pipeline                        dim   cats
@@ -74,7 +74,7 @@ city     categorical  imputer -> continuous_ordinal     1      4
 ### Mix strategies per column
 
 Columns rarely want the same treatment. Pass a `feature_preprocessing` map to give each
-column its own strategy — a single `fit` still returns one coherent feature set:
+column its own strategy, and a single `fit` still returns one coherent feature set:
 
 ```python
 pre = Preprocessor(feature_preprocessing={
@@ -96,13 +96,25 @@ X = pre.fit_transform(df, y)
 :::{grid-item-card} Installation
 :link: getting_started/installation
 :link-type: doc
-Install pretab from PyPI or from source.
+Install PreTab from PyPI or from source.
 :::
 
 :::{grid-item-card} Quickstart
 :link: getting_started/quickstart
 :link-type: doc
 Fit and transform a dataset in a few lines.
+:::
+
+:::{grid-item-card} End-to-end example
+:link: getting_started/end_to_end
+:link-type: doc
+See PreTab lift a linear model, baseline vs. PreTab.
+:::
+
+:::{grid-item-card} Tutorials
+:link: tutorials/sklearn_pipeline
+:link-type: doc
+Classification and full `sklearn` pipelines.
 :::
 
 :::{grid-item-card} API Reference

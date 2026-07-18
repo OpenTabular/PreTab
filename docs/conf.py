@@ -80,6 +80,8 @@ html_theme = "sphinxawesome_theme"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 html_title = "pretab"
+html_logo = "logo/pretab-favicon.png"
+html_favicon = "logo/pretab-favicon.png"
 html_last_updated_fmt = "%Y-%m-%d"
 html_show_sourcelink = False
 
