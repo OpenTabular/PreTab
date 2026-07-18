@@ -2,6 +2,7 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
+from ...core.exceptions import InsufficientSamplesError
 
 
 class LagFeatureTransformer(BasePreTabTransformer):
@@ -40,7 +41,7 @@ class LagFeatureTransformer(BasePreTabTransformer):
     def fit(self, X, y=None):
         X = self._validate(X, reset=True)
         if X.shape[0] <= self.n_lags:
-            raise ValueError("n_lags must be smaller than the number of samples.")
+            raise InsufficientSamplesError("n_lags must be smaller than the number of samples.")
         return self
 
     def transform(self, X):
@@ -48,7 +49,7 @@ class LagFeatureTransformer(BasePreTabTransformer):
         X = self._validate(X, reset=False)
         n_samples = X.shape[0]
         if n_samples <= self.n_lags:
-            raise ValueError("n_lags must be smaller than the number of samples.")
+            raise InsufficientSamplesError("n_lags must be smaller than the number of samples.")
 
         lagged = [X[self.n_lags - i: -i or None] for i in range(1, self.n_lags + 1)]
         return np.hstack(lagged)

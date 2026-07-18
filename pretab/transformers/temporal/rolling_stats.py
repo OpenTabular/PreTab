@@ -2,6 +2,7 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
+from ...core.exceptions import InsufficientSamplesError, invalid_param_error
 
 
 class RollingStatsTransformer(BasePreTabTransformer):
@@ -43,7 +44,7 @@ class RollingStatsTransformer(BasePreTabTransformer):
     def fit(self, X, y=None):
         X = self._validate(X, reset=True)
         if X.shape[0] < self.window_size:
-            raise ValueError("window_size must be less than number of samples.")
+            raise InsufficientSamplesError("window_size must be less than number of samples.")
         return self
 
     def transform(self, X):
@@ -51,7 +52,7 @@ class RollingStatsTransformer(BasePreTabTransformer):
         X = self._validate(X, reset=False)
         n_samples = X.shape[0]
         if n_samples < self.window_size:
-            raise ValueError("Insufficient samples for the given window size.")
+            raise InsufficientSamplesError("Insufficient samples for the given window size.")
 
         results = []
         for stat in self.stats:
@@ -65,7 +66,11 @@ class RollingStatsTransformer(BasePreTabTransformer):
             elif stat == "max":
                 stat_val = rolled.max(axis=2)
             else:
-                raise ValueError(f"Unsupported stat: {stat}")
+                raise invalid_param_error(
+                    type(self).__name__, "stats", stat,
+                    "each stat must be one of 'mean', 'std', 'min', 'max'",
+                    valid={"mean", "std", "min", "max"},
+                )
             results.append(stat_val)
 
         return np.hstack(results)

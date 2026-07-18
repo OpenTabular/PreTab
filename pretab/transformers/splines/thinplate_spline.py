@@ -4,7 +4,7 @@ from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.exceptions import InvalidParamError
+from ...core.exceptions import InvalidParamError, PretabDataError
 from .mixins import SplineBasisMixin
 
 
@@ -104,7 +104,7 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
         X = self._validate_allow_nan(X, reset=True)
 
         if X.shape[1] > 1:
-            raise ValueError("ThinPlateSplineTransformer supports only univariate input.")
+            raise PretabDataError("ThinPlateSplineTransformer supports only univariate input.")
 
         if self.output_dim < 1:
             raise InvalidParamError(f"output_dim must be >= 1, got {self.output_dim}")
@@ -142,7 +142,7 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
         check_is_fitted(self, "basis_")
         X = self._validate_allow_nan(X, reset=False)
         if X.shape[1] > 1:
-            raise ValueError("ThinPlateSplineTransformer supports only univariate input.")
+            raise PretabDataError("ThinPlateSplineTransformer supports only univariate input.")
 
         x_new = X.reshape(-1, 1)
         r_new = cdist(x_new, self.x_, metric="euclidean")

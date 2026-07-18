@@ -19,6 +19,11 @@ from typing import Literal
 import numpy as np
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
+from ...core.exceptions import (
+    IncompatibleParamsError,
+    OptionalDependencyError,
+    invalid_param_error,
+)
 from ...core.knots import basis_to_knots, quantile_knots
 
 
@@ -70,7 +75,11 @@ class BaseKnotSelector(ABC):
         """Convert a number of basis functions into a number of internal knots."""
         if self.spline_type in ("bspline", "mspline", "ispline"):
             return basis_to_knots(n_basis, self.degree)
-        raise ValueError(f"Unknown spline_type: {self.spline_type}")
+        raise invalid_param_error(
+            type(self).__name__, "spline_type", self.spline_type,
+            "must be one of 'bspline', 'mspline', 'ispline'",
+            valid={"bspline", "mspline", "ispline"},
+        )
 
     def _enforce_spacing(self, split_points: list[float], X: np.ndarray) -> list[float]:
         """Drop knots that sit closer than ``min_knot_spacing`` of the range."""
@@ -164,7 +173,7 @@ class CARTKnotSelector(BaseKnotSelector):
         task: Literal["regression", "classification"] | None = "regression",
     ) -> np.ndarray:
         if y is None:
-            raise ValueError("CARTKnotSelector requires y to select knots.")
+            raise IncompatibleParamsError("CARTKnotSelector requires y to select knots.")
         task = task or "regression"
 
         X = np.asarray(X)
@@ -324,7 +333,7 @@ class LightGBMKnotSelector(BaseKnotSelector):
         try:
             import lightgbm as lgb
         except ImportError as exc:
-            raise ImportError(
+            raise OptionalDependencyError(
                 "LightGBMKnotSelector requires the optional 'lightgbm' dependency. "
                 "Install it with: pip install pretab[knots]"
             ) from exc
@@ -337,7 +346,7 @@ class LightGBMKnotSelector(BaseKnotSelector):
         task: Literal["regression", "classification"] | None = "regression",
     ) -> np.ndarray:
         if y is None:
-            raise ValueError("LightGBMKnotSelector requires y to select knots.")
+            raise IncompatibleParamsError("LightGBMKnotSelector requires y to select knots.")
         task = task or "regression"
         lgb = self._import_lightgbm()
 

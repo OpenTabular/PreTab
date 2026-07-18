@@ -15,7 +15,12 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.utils.validation import check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
-from ...core.exceptions import DataWarning
+from ...core.exceptions import (
+    DataWarning,
+    EmptyDataError,
+    InvalidParamError,
+    PretabDataError,
+)
 from ...core.params import UNSET, AliasResolverMixin
 
 
@@ -170,7 +175,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator,
         y = np.asarray(y).ravel()
 
         if len(X) != len(y):
-            raise ValueError(f"X and y must have same length. Got {len(X)} and {len(y)}")
+            raise PretabDataError(f"X and y must have same length. Got {len(X)} and {len(y)}")
 
         if self.handle_missing == "median":
             valid_mask = ~(np.isnan(X).any(axis=1) | np.isnan(y))
@@ -185,7 +190,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator,
                 y = y[valid_mask]
 
         if len(X) == 0:
-            raise ValueError("All samples contain NaN values")
+            raise EmptyDataError("All samples contain NaN values")
 
         self.n_features_in_ = X.shape[1]
         self.thresholds_ = []
@@ -219,7 +224,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator,
                     random_state=self.random_state,
                 )
             else:
-                raise ValueError(f"Unsupported task: {self.task}. Use 'regression' or 'classification'.")
+                raise InvalidParamError(f"Unsupported task: {self.task}. Use 'regression' or 'classification'.")
 
             dt.fit(x_feat, y)
 
@@ -262,7 +267,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator,
         )
 
         if X.shape[1] != self.n_features_in_:
-            raise ValueError(
+            raise PretabDataError(
                 f"X has {X.shape[1]} features, but PLETransformer was fitted with {self.n_features_in_} features."
             )
 
@@ -275,7 +280,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator,
             nan_mask = np.isnan(feature)
             if nan_mask.any():
                 if self.handle_missing == "error":
-                    raise ValueError(f"Feature {col} contains NaN values")
+                    raise PretabDataError(f"Feature {col} contains NaN values")
                 feature[nan_mask] = self.fill_values_[col]
 
             ple_encoded = self._apply_piecewise_linear_vectorized(feature, thresholds)

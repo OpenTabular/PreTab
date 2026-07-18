@@ -1,6 +1,7 @@
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder
 
+from ..core.exceptions import invalid_param_error
 from ..transformers.binning import CustomBinTransformer
 from ..transformers.embeddings import LanguageEmbeddingTransformer
 from ..transformers.encoders.continuous_ordinal import ContinuousOrdinalTransformer
@@ -41,6 +42,10 @@ def get_categorical_transformer_steps(
     elif method == "onehot_from_ordinal":
         steps.append(("onehot_from_ordinal", OneHotFromOrdinalTransformer()))
     else:
-        raise ValueError(f"Unknown categorical transformer method: {method}")
+        raise invalid_param_error(
+            "get_categorical_transformer_steps", "method", method,
+            "unrecognized categorical preprocessing method",
+            valid={"int", "one-hot", "pretrained", "none", "custombin", "onehot_from_ordinal"},
+        )
 
     return steps

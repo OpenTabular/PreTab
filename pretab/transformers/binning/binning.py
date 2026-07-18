@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from ...core.exceptions import InvalidParamError
+from ...core.exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 from ...core.params import UNSET, AliasResolverMixin
 
 
@@ -97,10 +97,10 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
 
         X = np.asarray(X)  # Ensures squeeze works and consistent input
         if X.ndim != 2 or X.shape[1] != 1:
-            raise ValueError("Input must be a 2D array with shape (n_samples, 1).")
+            raise PretabDataError("Input must be a 2D array with shape (n_samples, 1).")
 
         if X.shape[0] <= 2:
-            raise ValueError("Input must have more than 2 observations.")
+            raise InsufficientSamplesError("Input must have more than 2 observations.")
 
         bins_spec = self._resolve_param("output_dim", default=UNSET)
         if bins_spec is UNSET:
@@ -136,5 +136,5 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
             The names of the output features after transformation.
         """
         if input_features is None:
-            raise ValueError("input_features must be specified")
+            raise InvalidParamError("input_features must be specified")
         return input_features

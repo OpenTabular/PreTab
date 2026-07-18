@@ -2,6 +2,7 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
+from ...core.exceptions import PretabDataError
 
 
 class CyclicalTimeTransformer(BasePreTabTransformer):
@@ -45,7 +46,7 @@ class CyclicalTimeTransformer(BasePreTabTransformer):
     def fit(self, X, y=None):
         X = self._validate(X, reset=True)
         if not np.all((X >= 0) & (X <= self.period)):
-            raise ValueError("Input should be within the range [0, period].")
+            raise PretabDataError("Input should be within the range [0, period].")
         return self
 
     def transform(self, X):

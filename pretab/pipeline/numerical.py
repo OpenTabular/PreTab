@@ -3,7 +3,7 @@ import warnings
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
-from ..core.exceptions import ConfigWarning
+from ..core.exceptions import ConfigWarning, invalid_param_error
 from ..transformers.splines.knot_selectors import CARTKnotSelector
 from .registry import NUMERICAL_METHODS
 
@@ -82,7 +82,11 @@ def get_numerical_transformer_steps(
         steps.append(scalers[scaling])
 
     if method not in NUMERICAL_METHODS:
-        raise ValueError(f"Unknown numerical transformer method: {method}")
+        raise invalid_param_error(
+            "get_numerical_transformer_steps", "method", method,
+            "unrecognized numerical preprocessing method",
+            valid=set(NUMERICAL_METHODS),
+        )
 
     cls, allowed_args = NUMERICAL_METHODS[method]
     filtered = _canonicalize(filter_kwargs(cls, kwargs, allowed=allowed_args))

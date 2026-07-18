@@ -1,6 +1,8 @@
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 
+from ...core.exceptions import OptionalDependencyError, PretabConfigError
+
 
 class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
     """Encode categorical text features into embeddings using a pre-trained language model.
@@ -49,7 +51,7 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
 
                 self.model = SentenceTransformer(model_name)
             except ImportError as e:
-                raise ImportError(
+                raise OptionalDependencyError(
                     "sentence-transformers is not installed. Install it via `pip install sentence-transformers` or provide a preloaded model."
                 ) from e
 
@@ -92,7 +94,7 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
             X = [str(x) for x in X]  # Ensure everything is a string
 
         if self.model is None:
-            raise ValueError(
+            raise PretabConfigError(
                 "Model is not initialized. Ensure that the model is properly loaded."
             )
         embeddings = self.model.encode(

@@ -2,6 +2,8 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.exceptions import InvalidParamError
+
 
 class ContinuousOrdinalTransformer(BaseEstimator, TransformerMixin):
     """Encode categorical features as continuous integer values.
@@ -93,7 +95,7 @@ class ContinuousOrdinalTransformer(BaseEstimator, TransformerMixin):
         """
         check_is_fitted(self, "mapping_")
         if input_features is None:
-            raise ValueError("input_features must be specified")
+            raise InvalidParamError("input_features must be specified")
         return input_features
 
     def __sklearn_tags__(self):

@@ -2,6 +2,8 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.exceptions import InvalidParamError
+
 
 class NoTransformer(TransformerMixin, BaseEstimator):
     """Pass-through transformer that returns the input unchanged.
@@ -72,7 +74,7 @@ class NoTransformer(TransformerMixin, BaseEstimator):
         """
         check_is_fitted(self, "n_features_in_")
         if input_features is None:
-            raise ValueError(
+            raise InvalidParamError(
                 "input_features must be provided to generate feature names."
             )
         return np.array(input_features)
@@ -150,7 +152,7 @@ class ToFloatTransformer(TransformerMixin, BaseEstimator):
         """
         check_is_fitted(self, "n_features_in_")
         if input_features is None:
-            raise ValueError(
+            raise InvalidParamError(
                 "input_features must be provided to generate feature names."
             )
         return np.array(input_features)

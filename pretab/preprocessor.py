@@ -7,6 +7,10 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
+from .core.exceptions import (
+    IncompatibleParamsError,
+    invalid_param_error,
+)
 from .core.logging import configure_logging, get_logger
 from .pipeline import (
     get_categorical_transformer_steps,
@@ -256,8 +260,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 elif isinstance(self.cat_cutoff, int):
                     cutoff_condition = num_unique_values < self.cat_cutoff
                 else:
-                    raise ValueError(
-                        "cat_cutoff should be either a float or an integer."
+                    raise invalid_param_error(
+                        type(self).__name__, "cat_cutoff", self.cat_cutoff,
+                        "must be a float (unique-ratio cutoff) or an int (absolute unique-count cutoff)",
                     )
 
                 if X[col].dtype.kind not in "iufc" or (
@@ -419,7 +424,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         if embeddings is not None:
             if not self.embeddings_:
-                raise ValueError("Embeddings were not expected, but were provided.")
+                raise IncompatibleParamsError(
+                    "Embeddings were not expected, but were provided.\n"
+                    "Fix: configure an embedding feature in feature_preprocessing before "
+                    "passing embeddings to transform, or omit the embeddings argument."
+                )
             if isinstance(embeddings, np.ndarray):
                 transformed_dict["embedding_1"] = embeddings.astype(np.float32)
             elif isinstance(embeddings, list):

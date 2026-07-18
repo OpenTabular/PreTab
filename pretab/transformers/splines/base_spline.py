@@ -20,6 +20,11 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
+from ...core.exceptions import (
+    IncompatibleParamsError,
+    InvalidParamError,
+    PretabDataError,
+)
 from ...core.knots import (
     basis_to_knots,
     generate_internal_knots,
@@ -226,7 +231,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         elif self.knot_locations is not None:
             expected_knots = self._basis_to_knots(n_basis)
             if not self.adaptive and len(self.knot_locations) != expected_knots:
-                raise ValueError("knot_locations length must match output_dim - degree - 1 when adaptive=False")
+                raise IncompatibleParamsError("knot_locations length must match output_dim - degree - 1 when adaptive=False")
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
         else:
             n_internal = self._basis_to_knots(n_basis)
@@ -248,9 +253,9 @@ class BaseSplineTransformer(BasePreTabTransformer):
         min_basis_req = self._resolve_param("min_output_dim", default=None)
         max_basis_req = self._resolve_param("max_output_dim", default=None)
         if n_basis < self.degree + 1:
-            raise ValueError(f"output_dim must be >= degree + 1 = {self.degree + 1}, got {n_basis}")
+            raise InvalidParamError(f"output_dim must be >= degree + 1 = {self.degree + 1}, got {n_basis}")
         if n_basis > 50:
-            raise ValueError(f"output_dim should be <= 50, got {n_basis}")
+            raise InvalidParamError(f"output_dim should be <= 50, got {n_basis}")
 
         X = self._validate(X, reset=True)
 
@@ -262,7 +267,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
             valid_mask = ~np.isnan(xi)
             xi_valid = xi[valid_mask]
             if xi_valid.size == 0:
-                raise ValueError(f"Feature at index {i} has only NaN values")
+                raise PretabDataError(f"Feature at index {i} has only NaN values")
             yi_valid = y_arr[valid_mask] if y_arr is not None else None
             self.knots_.append(
                 self._column_knots(xi_valid, yi_valid, n_basis, strategy, selector, min_basis_req, max_basis_req)

@@ -14,6 +14,8 @@ resolution and its validation so no family reimplements it. Families call
 family-specific floor (and optional ceiling) on the count.
 """
 
+from .exceptions import IncompatibleParamsError, InvalidParamError
+
 __all__ = ["AdaptiveResolutionMixin"]
 
 
@@ -68,9 +70,17 @@ class AdaptiveResolutionMixin:
         """
         if not self.adaptive:
             if min_req is not None and output_dim < min_req:
-                raise ValueError("output_dim must be >= min_output_dim when adaptive=False")
+                raise IncompatibleParamsError(
+                    "output_dim must be >= min_output_dim when adaptive=False "
+                    f"(got output_dim={output_dim}, min_output_dim={min_req}).\n"
+                    "Fix: raise output_dim, lower min_output_dim, or set adaptive=True."
+                )
             if max_req is not None and output_dim > max_req:
-                raise ValueError("output_dim must be <= max_output_dim when adaptive=False")
+                raise IncompatibleParamsError(
+                    "output_dim must be <= max_output_dim when adaptive=False "
+                    f"(got output_dim={output_dim}, max_output_dim={max_req}).\n"
+                    "Fix: lower output_dim, raise max_output_dim, or set adaptive=True."
+                )
             lo = hi = output_dim
         else:
             lo = min_req if min_req is not None else output_dim
@@ -78,9 +88,18 @@ class AdaptiveResolutionMixin:
 
         label = floor_label if floor_label is not None else str(floor)
         if lo < floor:
-            raise ValueError(f"min_output_dim must be >= {label}, got {lo}")
+            raise InvalidParamError(
+                f"min_output_dim must be >= {label}, got {lo}.\n"
+                "Fix: raise min_output_dim to at least the family minimum."
+            )
         if ceil is not None and hi > ceil:
-            raise ValueError(f"max_output_dim should be <= {ceil}, got {hi}")
+            raise InvalidParamError(
+                f"max_output_dim should be <= {ceil}, got {hi}.\n"
+                f"Fix: lower max_output_dim to at most {ceil}."
+            )
         if lo > hi:
-            raise ValueError("min_output_dim must be <= max_output_dim")
+            raise IncompatibleParamsError(
+                "min_output_dim must be <= max_output_dim "
+                f"(got min_output_dim={lo}, max_output_dim={hi})."
+            )
         return lo, hi
