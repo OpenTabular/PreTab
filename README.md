@@ -59,6 +59,9 @@ y = np.random.randn(100)
 preprocessor = Preprocessor(numerical_method="ple", categorical_method="int")
 
 X = preprocessor.fit_transform(df, y)   # dict of transformed feature blocks
+
+print({k: v.shape for k, v in X.items()})
+# {'num_age': (100, 7), 'num_income': (100, 7), 'cat_city': (100, 1)}
 ```
 
 > **That's it.** PreTab detects feature types, fits a strategy per column, and returns
@@ -66,6 +69,10 @@ X = preprocessor.fit_transform(df, y)   # dict of transformed feature blocks
 
 > **Works with pandas and numpy.** Pass a DataFrame or an array, and PreTab infers
 > numerical vs. categorical columns for you.
+
+> **Mix strategies per column.** Swap the global methods for a `feature_preprocessing` map —
+> for example `{"age": "ple", "income": "rbf", "city": "one-hot"}` — and PreTab fits each
+> column with its own strategy in a single pass. See [Usage](#usage) for a full example.
 
 ## Available Transformers
 
@@ -176,6 +183,18 @@ X_dict = preprocessor.fit_transform(df, y)               # {"num_age": ..., "cat
 X_array = preprocessor.transform(df, return_array=True)  # single stacked ndarray
 
 preprocessor.get_feature_info(verbose=True)              # inspect resolved strategies
+```
+
+`get_feature_info(verbose=True)` prints the resolved layout so you can confirm every column
+at a glance:
+
+```text
+feature     kind         pipeline                        dim   cats
+-------------------------------------------------------------------
+age         numerical    imputer -> minmax -> ple          7      -
+income      numerical    imputer -> minmax -> rbf          7      -
+experience  numerical    imputer -> minmax -> quantile     1      -
+city        categorical  imputer -> onehot -> to_float     4      4
 ```
 
 > **Two output formats.** `transform` returns a dict of feature blocks by default (keys
