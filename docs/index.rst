@@ -8,6 +8,15 @@
 
    getting_started/installation
    getting_started/quickstart
+   getting_started/end_to_end
+
+.. toctree::
+   :caption: Tutorials
+   :maxdepth: 1
+   :hidden:
+
+   tutorials/classification
+   tutorials/sklearn_pipeline
 
 .. toctree::
    :caption: User Guide

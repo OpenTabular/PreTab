@@ -68,7 +68,7 @@ from pretab.transformers import PLETransformer
 x = np.random.randn(100, 1)
 y = np.random.randn(100, 1)
 
-x_ple = PLETransformer(n_bins=15, task="regression").fit_transform(x, y)
+x_ple = PLETransformer(output_dim=15, task="regression").fit_transform(x, y)
 assert x_ple.shape[1] == 15
 ```
 
@@ -87,7 +87,7 @@ from pretab.transformers import ThinPlateSplineTransformer
 
 x = np.random.randn(100, 1)
 
-tp = ThinPlateSplineTransformer(n_basis=15)
+tp = ThinPlateSplineTransformer(output_dim=15)
 x_tp = tp.fit_transform(x)
 assert x_tp.shape[1] == 15
 
@@ -96,5 +96,9 @@ penalty = tp.get_penalty_matrix()
 
 ## Next steps
 
+- See pretab feed a real model, baseline vs. pretab, in the
+  [end-to-end example](end_to_end.md).
+- Work through a [classification tutorial](../tutorials/classification.md) or an
+  [sklearn Pipeline tutorial](../tutorials/sklearn_pipeline.md).
 - Learn about the available strategies in the [User Guide](../user_guide/preprocessing.md).
 - Browse every class in the [API Reference](../api/index.rst).
