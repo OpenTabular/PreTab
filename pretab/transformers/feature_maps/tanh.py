@@ -13,8 +13,8 @@ class TanhExpansionTransformer(BaseCenterExpansion):
 
     Parameters
     ----------
-    n_centers : int, default=10
-        Number of tanh centers per feature.
+    output_dim : int, default=10
+        Number of tanh centers (output columns) per feature.
 
     scale : float, default=1.0
         Controls the sharpness of the tanh transitions. Smaller values make the activation sharper.
@@ -33,9 +33,12 @@ class TanhExpansionTransformer(BaseCenterExpansion):
     centers_ : list of ndarray
         A list of center values for each input feature used in the tanh expansion.
 
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted).
+
     Notes
     -----
-    Each original feature :math:`x` is transformed into ``n_centers`` features of
+    Each original feature :math:`x` is transformed into ``output_dim`` features of
     the form
 
     .. math::
@@ -43,14 +46,15 @@ class TanhExpansionTransformer(BaseCenterExpansion):
         \tanh\!\left(\frac{x - c}{s}\right),
 
     where :math:`c` is a center value and :math:`s` (``scale``) controls the
-    spread of the activation.
+    spread of the activation (on the default, non-decision-tree path; a decision
+    tree may place a data-driven number).
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import TanhExpansionTransformer
     >>> X = np.array([[1.0], [2.0], [3.0]])
-    >>> transformer = TanhExpansionTransformer(n_centers=3, use_decision_tree=False)
+    >>> transformer = TanhExpansionTransformer(output_dim=3, use_decision_tree=False)
     >>> transformer.fit(X)
     TanhExpansionTransformer(...)
     >>> transformer.transform(X).shape
@@ -61,20 +65,18 @@ class TanhExpansionTransformer(BaseCenterExpansion):
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         scale: float = 1.0,
         use_target=UNSET,
         task: str = "regression",
         strategy="uniform",
-        n_centers=UNSET,
         use_decision_tree=UNSET,
     ):
         super().__init__(
-            n_basis=n_basis,
+            output_dim=output_dim,
             use_target=use_target,
             task=task,
             strategy=strategy,
-            n_centers=n_centers,
             use_decision_tree=use_decision_tree,
         )
         self.scale = scale

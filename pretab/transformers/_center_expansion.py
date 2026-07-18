@@ -37,24 +37,21 @@ class BaseCenterExpansion(BasePreTabTransformer):
     centers_: list
 
     _param_aliases: ClassVar[dict[str, str]] = {
-        "n_centers": "n_basis",
         "use_decision_tree": "use_target",
     }
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         use_target=UNSET,
         task: str = "regression",
         strategy="uniform",
-        n_centers=UNSET,
         use_decision_tree=UNSET,
     ):
-        self.n_basis = n_basis
+        self.output_dim = output_dim
         self.use_target = use_target
         self.task = task
         self.strategy = strategy
-        self.n_centers = n_centers
         self.use_decision_tree = use_decision_tree
 
         if self.strategy not in ("uniform", "quantile"):
@@ -75,9 +72,12 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Place per-feature centers from a decision tree or quantile/uniform spacing."""
-        n_centers = self._resolve_param("n_basis", default=10)
+        n_centers = self._resolve_param("output_dim", default=10)
         use_target = self._resolve_param("use_target", default=True)
         X = self._validate(X, reset=True)
+
+        if n_centers < 1:
+            raise InvalidParamError(f"output_dim must be >= 1, got {n_centers}")
 
         if use_target and y is None:
             raise IncompatibleParamsError(

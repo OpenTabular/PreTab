@@ -13,8 +13,8 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
 
     Parameters
     ----------
-    n_centers : int, default=10
-        Number of sigmoid centers per feature.
+    output_dim : int, default=10
+        Number of sigmoid centers (output columns) per feature.
 
     scale : float, default=1.0
         Controls the sharpness of the sigmoid transition. Smaller values yield sharper transitions.
@@ -33,6 +33,9 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
     centers_ : list of ndarray
         A list containing the sigmoid center locations for each input feature.
 
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted).
+
     Notes
     -----
     For a feature :math:`x` and center :math:`c`, the transformation is
@@ -41,15 +44,16 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
 
         \sigma\!\left(\frac{x - c}{s}\right) = \frac{1}{1 + \exp\!\left(-\frac{x - c}{s}\right)},
 
-    where :math:`s` is ``scale``. This produces ``n_centers`` new features per
-    original feature.
+    where :math:`s` is ``scale``. This produces ``output_dim`` new features per
+    original feature (on the default, non-decision-tree path; a decision tree may
+    place a data-driven number).
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import SigmoidExpansionTransformer
     >>> X = np.array([[1.0], [2.0], [3.0]])
-    >>> transformer = SigmoidExpansionTransformer(n_centers=3, use_decision_tree=False)
+    >>> transformer = SigmoidExpansionTransformer(output_dim=3, use_decision_tree=False)
     >>> transformer.fit(X)
     SigmoidExpansionTransformer(...)
     >>> transformer.transform(X).shape
@@ -60,20 +64,18 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         scale: float = 1.0,
         use_target=UNSET,
         task: str = "regression",
         strategy="uniform",
-        n_centers=UNSET,
         use_decision_tree=UNSET,
     ):
         super().__init__(
-            n_basis=n_basis,
+            output_dim=output_dim,
             use_target=use_target,
             task=task,
             strategy=strategy,
-            n_centers=n_centers,
             use_decision_tree=use_decision_tree,
         )
         self.scale = scale

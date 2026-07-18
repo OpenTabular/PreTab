@@ -14,8 +14,8 @@ class RBFExpansionTransformer(BaseCenterExpansion):
 
     Parameters
     ----------
-    n_centers : int, default=10
-        Number of RBF centers per feature.
+    output_dim : int, default=10
+        Number of RBF centers (output columns) per feature.
 
     gamma : float, default=1.0
         Width parameter of the RBF kernel. Larger values make the kernel narrower.
@@ -34,6 +34,9 @@ class RBFExpansionTransformer(BaseCenterExpansion):
     centers_ : list of ndarray
         List of arrays containing center locations for each feature.
 
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted).
+
     Notes
     -----
     For a feature :math:`x` and centers :math:`c_i`, each output column is a
@@ -43,14 +46,15 @@ class RBFExpansionTransformer(BaseCenterExpansion):
 
         \phi_i(x) = \exp\left(-\gamma (x - c_i)^2\right),
 
-    producing ``n_centers`` new features per original feature.
+    producing ``output_dim`` new features per original feature (on the default,
+    non-decision-tree path; a decision tree may place a data-driven number).
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import RBFExpansionTransformer
     >>> X = np.array([[1.0], [2.0], [3.0]])
-    >>> transformer = RBFExpansionTransformer(n_centers=3, gamma=0.5, use_decision_tree=False)
+    >>> transformer = RBFExpansionTransformer(output_dim=3, gamma=0.5, use_decision_tree=False)
     >>> transformer.fit(X)
     RBFExpansionTransformer(...)
     >>> transformer.transform(X).shape
@@ -61,20 +65,18 @@ class RBFExpansionTransformer(BaseCenterExpansion):
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         gamma: float = 1.0,
         use_target=UNSET,
         task: str = "regression",
         strategy="uniform",
-        n_centers=UNSET,
         use_decision_tree=UNSET,
     ):
         super().__init__(
-            n_basis=n_basis,
+            output_dim=output_dim,
             use_target=use_target,
             task=task,
             strategy=strategy,
-            n_centers=n_centers,
             use_decision_tree=use_decision_tree,
         )
         self.gamma = gamma

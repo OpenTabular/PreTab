@@ -13,8 +13,8 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
 
     Parameters
     ----------
-    n_centers : int, default=10
-        Number of ReLU centers per feature.
+    output_dim : int, default=10
+        Number of ReLU centers (output columns) per feature.
 
     use_decision_tree : bool, default=True
         If True, uses a decision tree to determine center locations based on the input `X` and target `y`.
@@ -30,6 +30,9 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
     centers_ : list of ndarray
         A list of arrays containing the center locations for each input feature.
 
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted).
+
     Notes
     -----
     For a feature :math:`x` and centers :math:`c_i`, each output column applies a
@@ -39,14 +42,15 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
 
         \phi_i(x) = \max(0,\; x - c_i),
 
-    producing ``n_centers`` new features per original feature.
+    producing ``output_dim`` new features per original feature (on the default,
+    non-decision-tree path; a decision tree may place a data-driven number).
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import ReLUExpansionTransformer
     >>> X = np.array([[1.0], [2.0], [3.0]])
-    >>> transformer = ReLUExpansionTransformer(n_centers=3, use_decision_tree=False)
+    >>> transformer = ReLUExpansionTransformer(output_dim=3, use_decision_tree=False)
     >>> transformer.fit(X)
     ReLUExpansionTransformer(...)
     >>> transformer.transform(X).shape
@@ -57,19 +61,17 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         use_target=UNSET,
         task: str = "regression",
         strategy="uniform",
-        n_centers=UNSET,
         use_decision_tree=UNSET,
     ):
         super().__init__(
-            n_basis=n_basis,
+            output_dim=output_dim,
             use_target=use_target,
             task=task,
             strategy=strategy,
-            n_centers=n_centers,
             use_decision_tree=use_decision_tree,
         )
 
