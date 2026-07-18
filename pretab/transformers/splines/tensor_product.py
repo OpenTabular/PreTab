@@ -92,7 +92,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     penalties_ : list of ndarray
         Univariate difference penalties for each marginal basis.
 
-    X_design_ : ndarray of shape (n_samples, output_dim ** dim_)
+    X_design_ : ndarray of shape (n_samples, output_dim ** dim\_)
         Full tensor-product design matrix computed during ``fit``.
 
     n_features_in_ : int
@@ -106,7 +106,8 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     -----
     - Uses einsum-based reshaping to build the tensor product basis efficiently.
     - Supports arbitrary number of input dimensions.
-    - Commonly used in structured additive models and GAMs where smooth surfaces are desired.
+    - Commonly used in structured additive models and GAMs where smooth surfaces are
+      desired [1]_, [2]_.
 
     References
     ----------

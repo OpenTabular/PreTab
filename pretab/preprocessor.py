@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 
 
 class Preprocessor(TransformerMixin, BaseEstimator):
-    """
+    r"""
     Preprocessor class for automated tabular feature preprocessing using scikit-learn-compatible pipelines.
 
     This class provides a flexible interface for preprocessing tabular datasets containing numerical and
@@ -129,20 +129,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     Attributes
     ----------
-    column_transformer_ : ColumnTransformer
+    column_transformer\_ : ColumnTransformer
         The internal scikit-learn column transformer that handles feature-wise preprocessing.
         Set when the preprocessor is fitted.
-    n_features_in_ : int
+    n_features_in\_ : int
         Number of input features seen during ``fit``.
-    total_output_dim_ : int
+    total_output_dim\_ : int
         Total number of output columns produced across all input features
         (equals the width of ``transform(..., return_array=True)``).
-    output_dims_ : dict
+    output_dims\_ : dict
         Per-feature expanded output-column counts, keyed by input feature name.
         The values sum to ``total_output_dim_``.
-    embeddings_ : bool
+    embeddings\_ : bool
         Whether embedding vectors were provided at ``fit`` time and are expected in transformation.
-    embedding_dimensions_ : dict
+    embedding_dimensions\_ : dict
         Dictionary of embedding feature names to their expected dimensionality.
 
     Notes

@@ -63,8 +63,8 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
     -----
     - Input must be univariate. Multivariate input will raise a ValueError.
     - Basis functions are derived from a kernel matrix projected onto the orthogonal complement of the null space
-      of the linear terms (intercept and slope).
-    - The transformer uses an eigendecomposition of the projected TPS kernel to define the basis.
+      of the linear terms (intercept and slope) [1]_.
+    - The transformer uses an eigendecomposition of the projected TPS kernel to define the basis [2]_.
     - The transformer is kernel-based rather than knot-based, so the knot-oriented options shared by the other
       splines (``degree``, ``strategy``, ``selector``, ``task``) do not apply here.
 
