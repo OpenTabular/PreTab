@@ -56,6 +56,19 @@ class BasePreTabTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator)
                 names.append(f"{feature}_{suffix}{j}")
         return np.asarray(names, dtype=object)
 
+    @property
+    def total_output_dim_(self) -> int:
+        """Total number of output columns produced across all input features.
+
+        Fitted attribute (available only after ``fit``). Defined as
+        ``len(self.get_feature_names_out())`` so it always equals the true width
+        of the transformed array, including any bias columns and, for interaction
+        bases such as the tensor-product spline, the full product of the marginal
+        sizes.
+        """
+        check_is_fitted(self, "n_features_in_")
+        return len(self.get_feature_names_out())
+
     def __sklearn_tags__(self):
         """Declare NaN-passthrough and target-requirement estimator tags."""
         tags = super().__sklearn_tags__()

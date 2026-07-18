@@ -1,12 +1,15 @@
 """Canonical parameter vocabulary and legacy-alias resolution.
 
 Different transformer families historically spelled the same concept in
-different ways -- the number of basis units per feature alone was named
+different ways -- the per-feature output size alone was named
 ``n_basis_functions`` / ``n_knots`` / ``n_bins`` / ``n_centers`` / ``bins`` /
-``n_basis``. :data:`CANONICAL_PARAMS` records the single cross-family vocabulary
-new code and docs should use, and :class:`AliasResolverMixin` lets a transformer
-keep accepting its old names as *aliases* that resolve to the canonical name at
-``fit`` time (with a :class:`FutureWarning`).
+``n_basis``. As of Phase 15 those count names are removed and every family takes
+a single ``output_dim`` (the number of non-bias output columns per feature).
+:data:`CANONICAL_PARAMS` records the single cross-family vocabulary new code and
+docs should use, and :class:`AliasResolverMixin` still lets a transformer keep
+accepting its remaining non-count legacy names (``knot_strategy`` /
+``knot_selector`` / ``use_decision_tree``) as *aliases* that resolve to the
+canonical name at ``fit`` time (with a :class:`FutureWarning`).
 
 The mechanism follows scikit-learn's deprecation constraint: ``get_params`` and
 ``clone`` introspect ``__init__`` and re-instantiate with the exact same
@@ -57,10 +60,10 @@ def is_set(value) -> bool:
 
 # §8.3 canonical vocabulary: the family-neutral name for each shared concept.
 CANONICAL_PARAMS: dict[str, str] = {
-    "n_basis": "Number of basis units (knots / bins / centers) produced per feature.",
-    "min_basis": "Lower bound on the number of basis units in adaptive mode.",
-    "max_basis": "Upper bound on the number of basis units in adaptive mode.",
-    "adaptive": "Whether the number of basis units may vary per feature.",
+    "output_dim": "Number of non-bias output columns produced per input feature.",
+    "min_output_dim": "Lower bound on the per-feature output dimension in adaptive mode.",
+    "max_output_dim": "Upper bound on the per-feature output dimension in adaptive mode.",
+    "adaptive": "Whether the per-feature output dimension may vary per feature.",
     "strategy": "Placement strategy for basis units ('uniform' or 'quantile').",
     "degree": "Polynomial degree of the basis (where meaningful).",
     "selector": "Target-aware selector used to place basis units.",
@@ -75,7 +78,7 @@ class AliasResolverMixin:
     Subclasses declare a class-level ``_param_aliases`` mapping each legacy
     constructor argument to its canonical name, e.g.::
 
-        _param_aliases = {"n_knots": "n_basis", "knot_strategy": "strategy"}
+        _param_aliases = {"knot_strategy": "strategy", "knot_selector": "selector"}
 
     Both the canonical parameter and every legacy alias are ordinary
     constructor parameters that default to :data:`UNSET` and are stored
