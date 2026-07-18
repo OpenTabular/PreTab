@@ -14,6 +14,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.utils.validation import check_array, check_is_fitted
 
+from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.params import UNSET, AliasResolverMixin
 
 
@@ -42,7 +43,7 @@ def extract_thresholds_from_tree(tree) -> np.ndarray:
     return np.unique(thresholds)
 
 
-class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
+class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator, TransformerMixin):
     """Piecewise Linear Encoding (PLE) transformer for numerical features.
 
     Each feature is discretized with a decision tree, and the split thresholds
@@ -366,25 +367,7 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
         return np.array(feature_names_out)
 
     def _resolve_bin_bounds(self, n_bins: int, min_bins_req, max_bins_req) -> tuple[int, int]:
-        if not self.adaptive:
-            if min_bins_req is not None and n_bins < min_bins_req:
-                raise ValueError("output_dim must be >= min_output_dim when adaptive=False")
-            if max_bins_req is not None and n_bins > max_bins_req:
-                raise ValueError("output_dim must be <= max_output_dim when adaptive=False")
-            min_bins = n_bins
-            max_bins = n_bins
-        else:
-            min_bins = min_bins_req if min_bins_req is not None else n_bins
-            max_bins = max_bins_req if max_bins_req is not None else n_bins
-
-        if min_bins < 1:
-            raise ValueError(f"min_output_dim must be >= 1, got {min_bins}")
-        if max_bins < 1:
-            raise ValueError(f"max_output_dim must be >= 1, got {max_bins}")
-        if min_bins > max_bins:
-            raise ValueError("min_output_dim must be <= max_output_dim")
-
-        return min_bins, max_bins
+        return self._resolve_output_bounds(n_bins, min_bins_req, max_bins_req, floor=1)
 
     def _adjust_thresholds(
         self, feature: np.ndarray, thresholds: np.ndarray, min_bins: int, max_bins: int

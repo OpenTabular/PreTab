@@ -70,6 +70,9 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
         task: str = "regression",
         strategy="uniform",
         use_decision_tree=UNSET,
+        adaptive: bool = False,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
     ):
         super().__init__(
             output_dim=output_dim,
@@ -77,6 +80,9 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
             task=task,
             strategy=strategy,
             use_decision_tree=use_decision_tree,
+            adaptive=adaptive,
+            min_output_dim=min_output_dim,
+            max_output_dim=max_output_dim,
         )
         self.scale = scale
 

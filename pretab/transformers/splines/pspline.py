@@ -134,6 +134,9 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         strategy=UNSET,
         selector=UNSET,
         task=None,
+        adaptive: bool = False,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
         knot_strategy=UNSET,
         knot_selector=UNSET,
     ):
@@ -144,6 +147,9 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         self.strategy = strategy
         self.selector = selector
         self.task = task
+        self.adaptive = adaptive
+        self.min_output_dim = min_output_dim
+        self.max_output_dim = max_output_dim
         self.knot_strategy = knot_strategy
         self.knot_selector = knot_selector
 
@@ -163,9 +169,15 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         self.n_basis_ = []
         self.n_knots_ = []
 
+        min_interior, max_interior = self._adaptive_interior_bounds(
+            output_dim, selector, floor=self.degree + 1, offset=self.degree + 1
+        )
+
         for i in range(X.shape[1]):
             x = X[:, i]
-            knots = self._place_bspline_knots(x, y, output_dim, self.degree, strategy, selector, self.task)
+            knots = self._place_bspline_knots(
+                x, y, output_dim, self.degree, strategy, selector, self.task, min_interior, max_interior
+            )
             n_basis = len(knots) - self.degree - 1
             D = np.eye(n_basis)
             for _ in range(self.diff_order):

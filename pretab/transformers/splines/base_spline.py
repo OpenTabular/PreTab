@@ -159,24 +159,14 @@ class BaseSplineTransformer(BasePreTabTransformer):
         self, n_basis: int, min_basis_req: int | None, max_basis_req: int | None
     ) -> tuple[int, int]:
         """Return the (min, max) number of basis functions to allow per feature."""
-        if not self.adaptive:
-            if min_basis_req is not None and n_basis < min_basis_req:
-                raise ValueError("output_dim must be >= min_output_dim when adaptive=False")
-            if max_basis_req is not None and n_basis > max_basis_req:
-                raise ValueError("output_dim must be <= max_output_dim when adaptive=False")
-            min_basis = n_basis
-            max_basis = n_basis
-        else:
-            min_basis = min_basis_req if min_basis_req is not None else n_basis
-            max_basis = max_basis_req if max_basis_req is not None else n_basis
-
-        if min_basis < self.degree + 1:
-            raise ValueError(f"min_output_dim must be >= degree + 1 = {self.degree + 1}, got {min_basis}")
-        if max_basis > 50:
-            raise ValueError(f"max_output_dim should be <= 50, got {max_basis}")
-        if min_basis > max_basis:
-            raise ValueError("min_output_dim must be <= max_output_dim")
-        return min_basis, max_basis
+        return self._resolve_output_bounds(
+            n_basis,
+            min_basis_req,
+            max_basis_req,
+            floor=self.degree + 1,
+            floor_label=f"degree + 1 = {self.degree + 1}",
+            ceil=50,
+        )
 
     def _generate_knots(self, x: np.ndarray, n_knots: int, strategy: str) -> np.ndarray:
         """Generate internal knots for a single feature using the chosen strategy."""

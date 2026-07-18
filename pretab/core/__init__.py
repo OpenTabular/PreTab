@@ -5,6 +5,7 @@ The ``core`` package holds reusable *math + scikit-learn-contract* primitives
 user-facing transformers. It never defines user-facing transformers itself.
 """
 
+from .adaptive import AdaptiveResolutionMixin
 from .base import BasePreTabTransformer
 from .centers import center_identification_using_decision_tree
 from .exceptions import (
@@ -38,6 +39,7 @@ from .validation import validate_2d_allow_nan
 __all__ = [
     "CANONICAL_PARAMS",
     "UNSET",
+    "AdaptiveResolutionMixin",
     "AliasResolverMixin",
     "BasePreTabTransformer",
     "ConfigWarning",

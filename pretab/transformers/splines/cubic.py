@@ -113,6 +113,9 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         strategy=UNSET,
         selector=UNSET,
         task=None,
+        adaptive: bool = False,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
         knot_strategy=UNSET,
         knot_selector=UNSET,
     ):
@@ -122,6 +125,9 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         self.strategy = strategy
         self.selector = selector
         self.task = task
+        self.adaptive = adaptive
+        self.min_output_dim = min_output_dim
+        self.max_output_dim = max_output_dim
         self.knot_strategy = knot_strategy
         self.knot_selector = knot_selector
 
@@ -150,11 +156,17 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
         n_interior = output_dim - 3
 
+        min_interior, max_interior = self._adaptive_interior_bounds(
+            output_dim, selector, floor=3, offset=3
+        )
+
         self.knots_ = []
         self.designs_ = []
         for i in range(X.shape[1]):
             xi = X[:, i]
-            knots = self._place_interior_knots(xi, y, n_interior, strategy, selector, self.task)
+            knots = self._place_interior_knots(
+                xi, y, n_interior, strategy, selector, self.task, min_interior, max_interior
+            )
             self.knots_.append(knots)
             self.designs_.append(self._bspline_basis(xi, knots))
 

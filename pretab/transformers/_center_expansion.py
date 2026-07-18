@@ -19,6 +19,7 @@ from ..core.exceptions import (
     InvalidParamError,
     PretabDataError,
 )
+from ..core.knots import select_knots, spanning_knots
 from ..core.params import UNSET, is_set
 
 
@@ -32,6 +33,13 @@ class BaseCenterExpansion(BasePreTabTransformer):
     Centers are placed either from decision-tree split thresholds (when
     ``use_decision_tree`` is True, which then requires ``y``) or from ``quantile``
     / ``uniform`` spacing.
+
+    Adaptive sizing (``adaptive=True``) only takes effect on the target-aware
+    decision-tree path: the tree is grown up to ``max_output_dim`` leaves and the
+    resulting per-feature centers are clamped into
+    ``[min_output_dim, max_output_dim]``. On the ``quantile`` / ``uniform`` paths
+    (and whenever ``adaptive`` is False) each feature keeps exactly ``output_dim``
+    centers, reproducing the non-adaptive behavior.
     """
 
     centers_: list
@@ -47,12 +55,18 @@ class BaseCenterExpansion(BasePreTabTransformer):
         task: str = "regression",
         strategy="uniform",
         use_decision_tree=UNSET,
+        adaptive: bool = False,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
     ):
         self.output_dim = output_dim
         self.use_target = use_target
         self.task = task
         self.strategy = strategy
         self.use_decision_tree = use_decision_tree
+        self.adaptive = adaptive
+        self.min_output_dim = min_output_dim
+        self.max_output_dim = max_output_dim
 
         if self.strategy not in ("uniform", "quantile"):
             raise InvalidParamError(
@@ -74,6 +88,8 @@ class BaseCenterExpansion(BasePreTabTransformer):
         """Place per-feature centers from a decision tree or quantile/uniform spacing."""
         n_centers = self._resolve_param("output_dim", default=10)
         use_target = self._resolve_param("use_target", default=True)
+        min_req = self._resolve_param("min_output_dim", default=None)
+        max_req = self._resolve_param("max_output_dim", default=None)
         X = self._validate(X, reset=True)
 
         if n_centers < 1:
@@ -84,7 +100,20 @@ class BaseCenterExpansion(BasePreTabTransformer):
                 "Target variable 'y' must be provided when use_decision_tree=True."
             )
 
-        if use_target:
+        if use_target and self.adaptive:
+            # Adaptive sizing only applies on the target-aware tree path: grow the
+            # tree up to ``max`` leaves, then clamp each feature into [min, max].
+            min_centers, max_centers = self._resolve_output_bounds(
+                n_centers, min_req, max_req, floor=1
+            )
+            raw_centers = center_identification_using_decision_tree(
+                X, y, self.task, max_centers
+            )
+            centers_list = [
+                self._adjust_centers(X[:, i], centers, min_centers, max_centers)
+                for i, centers in enumerate(raw_centers)
+            ]
+        elif use_target:
             centers_list = center_identification_using_decision_tree(
                 X, y, self.task, n_centers
             )
@@ -120,6 +149,31 @@ class BaseCenterExpansion(BasePreTabTransformer):
     def _output_sizes(self) -> list[int]:
         """Number of output columns contributed by each input feature."""
         return [int(np.asarray(centers).shape[0]) for centers in self.centers_]
+
+    def _adjust_centers(
+        self, x: np.ndarray, centers: np.ndarray, min_centers: int, max_centers: int
+    ) -> np.ndarray:
+        """Clamp a data-driven set of centers into the ``[min, max]`` window."""
+        centers = np.unique(np.sort(np.asarray(centers, dtype=float)))
+        if len(centers) > max_centers:
+            centers = select_knots(centers, max_centers)
+        if len(centers) < min_centers:
+            centers = self._supplement_centers(x, centers, min_centers)
+        return centers
+
+    def _supplement_centers(
+        self, x: np.ndarray, centers: np.ndarray, target: int
+    ) -> np.ndarray:
+        """Add quantile / uniform candidates until ``target`` centers exist."""
+        if target <= len(centers):
+            return centers
+        candidates = [np.asarray(centers, dtype=float)]
+        candidates.append(spanning_knots(x, target, "quantile"))
+        candidates.append(spanning_knots(x, target, "uniform"))
+        combined = np.unique(np.concatenate(candidates))
+        if len(combined) > target:
+            combined = select_knots(combined, target)
+        return combined
 
     def __sklearn_tags__(self):
         """Require ``y`` only when centers are placed with a decision tree."""
