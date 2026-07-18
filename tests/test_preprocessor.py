@@ -112,6 +112,8 @@ EXPECTED_PARAMS = {
     "scaling",
     "cat_cutoff",
     "treat_all_integers_as_numerical",
+    "random_state",
+    "handle_missing",
     "verbose",
 }
 
