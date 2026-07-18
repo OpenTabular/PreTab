@@ -73,5 +73,5 @@ def test_sigmoid_missing_y_tree(X_single_feature):
 def test_sigmoid_feature_mismatch(X_multi_feature, y_regression):
     transformer = SigmoidExpansionTransformer(output_dim=2, use_decision_tree=True)
     transformer.fit(X_multi_feature[:, :2], y_regression)
-    with pytest.raises(ValueError, match="same number of features"):
+    with pytest.raises(ValueError, match="is expecting"):
         transformer.transform(X_multi_feature)

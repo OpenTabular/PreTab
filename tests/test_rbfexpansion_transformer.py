@@ -78,5 +78,5 @@ def test_rbf_transform_before_fit_raises():
 def test_rbf_transform_feature_mismatch(X_multi_feature, y_regression):
     transformer = RBFExpansionTransformer(output_dim=3, use_decision_tree=True)
     transformer.fit(X_multi_feature[:, :2], y_regression)
-    with pytest.raises(ValueError, match="same number of features"):
+    with pytest.raises(ValueError, match="is expecting"):
         transformer.transform(X_multi_feature)

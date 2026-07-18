@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.utils.estimator_checks import check_estimator
 from sklearn.base import TransformerMixin, BaseEstimator
 from pretab.transformers import CustomBinTransformer
 

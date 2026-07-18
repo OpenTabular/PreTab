@@ -43,7 +43,7 @@ def test_tprs_multivariate_error():
 
     transformer = ThinPlateSplineTransformer(output_dim=4)
     transformer.fit(np.random.rand(10, 1))
-    with pytest.raises(ValueError, match="univariate"):
+    with pytest.raises(ValueError, match="is expecting 1 features"):
         transformer.transform(X)
 
 
