@@ -31,38 +31,63 @@ class Preprocessor(TransformerMixin):
 
     Parameters
     ----------
+    numerical_method : str, default="ple"
+        Preprocessing strategy applied to every numerical column unless overridden per feature.
+        Common choices: ``"ple"`` (piecewise-linear encoding), ``"minmax"`` / ``"standardization"``
+        / ``"robust"`` (scaling), ``"quantile"`` (rank transform), ``"rbf"`` / ``"relu"`` /
+        ``"sigmoid"`` / ``"tanh"`` (feature maps), and ``"cubicspline"`` / ``"naturalspline"`` /
+        ``"pspline"`` / ``"bspline"`` (spline bases). Pass ``None`` (resolved to ``"none"``) to leave
+        numerical columns unchanged. See *Notes* for the complete list.
+    categorical_method : str, default="int"
+        Preprocessing strategy applied to every categorical column unless overridden per feature.
+        Choices: ``"int"`` (contiguous integer codes), ``"one-hot"`` (dummy columns),
+        ``"onehot_from_ordinal"`` (integer codes then one-hot), ``"pretrained"`` (sentence-transformer
+        language embeddings), and ``"custombin"`` (discretized bin codes). Pass ``None`` (resolved to
+        ``"none"``) to leave categorical columns unchanged.
     feature_preprocessing : dict, optional
-        Dictionary mapping feature names to specific preprocessing methods. Overrides global defaults.
-    output_dim : int, default=64
-        The single width knob shared by every numerical method: the number of non-bias output columns
-        produced per input feature (e.g. bins for PLE/binning, centers for the feature maps, basis
-        functions for the splines). The B/M/I splines clamp it into their supported ``[5, 50]`` range.
-    numerical_preprocessing : str, default="ple"
-        Preprocessing method for numerical features (e.g., "standardization", "minmax", "ple", "rbf", etc.).
-    categorical_preprocessing : str, default="int"
-        Preprocessing method for categorical features (e.g., "int", "ordinal", "onehot").
-    use_decision_tree_bins : bool, default=False
-        Whether to use decision tree binning for numerical discretization.
-    binning_strategy : str, default="uniform"
-        Strategy for bin placement when not using tree-based methods. Options: "uniform", "quantile".
+        Mapping of individual column names to a method, overriding the global ``numerical_method`` /
+        ``categorical_method`` for those columns only, e.g.
+        ``{"age": "cubicspline", "city": "pretrained"}``. Columns absent from the dict fall back to
+        the global defaults.
+    output_dim : int, default=7
+        The single width knob shared by every numerical method: the number of non-bias output
+        columns produced per input feature (bins for PLE/binning, centers for the feature maps,
+        basis functions for the splines). The B/M/I splines clamp it into their supported
+        ``[5, 50]`` range. Used as the fixed per-feature width when ``adaptive`` is False.
+    adaptive : bool, default=False
+        Whether adaptive-capable methods size each feature's output dimension from the data
+        (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
+        Fixed-width methods (e.g. plain scalers) ignore this flag.
+    min_output_dim : int, default=5
+        Lower bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
+        fixed-width methods and when ``adaptive`` is False.
+    max_output_dim : int, default=10
+        Upper bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
+        fixed-width methods and when ``adaptive`` is False.
     task : str, default="regression"
-        Problem type used to guide preprocessing (e.g., "regression" or "classification").
-    cat_cutoff : float or int, default=0.03
-        Threshold to determine whether integer-valued features are treated as categorical.
-    treat_all_integers_as_numerical : bool, default=False
-        If True, treat all integer-typed columns as numerical regardless of cardinality.
+        Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
+        place basis units / knots against ``y``. Only consulted when ``use_target`` is True.
+    use_target : bool, default=True
+        Whether target-aware methods (feature maps and splines) use ``y`` to place their basis
+        units, e.g. decision-tree knot/center selection. Requires ``y`` to be passed to ``fit``;
+        set to False for a purely unsupervised, ``y``-free fit driven by ``strategy``.
+    strategy : str, default="uniform"
+        Placement strategy for basis units when ``use_target`` is False: ``"uniform"`` (evenly
+        spaced across the feature range) or ``"quantile"`` (spaced by the data quantiles).
     degree : int, default=3
-        Degree of polynomial or spline basis functions where applicable.
-    scaling_strategy : str, default="minmax"
-        Strategy for feature scaling (e.g., "standardization", "minmax", etc.).
-    use_decision_tree_knots : bool, default=True
-        Whether to use decision tree-based knot placement for spline transformations.
-    knots_strategy : str, default="uniform"
-        Strategy for placing knots for splines ("uniform" or "quantile").
-    spline_implementation : str, default="sklearn"
-        Which spline backend implementation to use (e.g., "sklearn", "custom").
-    min_unique_vals : int, default=5
-        Minimum number of unique values required for a feature to be treated as numerical.
+        Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
+        (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.
+    scaling : str, default="minmax"
+        Optional scaler inserted *before* the numerical method: ``"minmax"`` (rescale to ``[-1, 1]``)
+        or ``"standardization"`` (zero mean, unit variance). Skipped automatically when the chosen
+        method already scales (e.g. ``numerical_method="minmax"``).
+    cat_cutoff : float or int, default=0.03
+        Threshold deciding whether an integer column is treated as categorical. A float is a
+        unique-ratio cutoff (``n_unique / n_rows < cat_cutoff`` -> categorical); an int is an
+        absolute unique-count cutoff (``n_unique < cat_cutoff`` -> categorical).
+    treat_all_integers_as_numerical : bool, default=False
+        If True, every integer-typed column is treated as numerical regardless of cardinality,
+        bypassing the ``cat_cutoff`` heuristic.
 
     Attributes
     ----------
@@ -75,103 +100,104 @@ class Preprocessor(TransformerMixin):
     embedding_dimensions : dict
         Dictionary of embedding feature names to their expected dimensionality.
 
+    Notes
+    -----
+    Available ``numerical_method`` values: ``"none"``, ``"minmax"``, ``"standardization"``,
+    ``"robust"``, ``"quantile"``, ``"polynomial"``, ``"box-cox"``, ``"yeo-johnson"``, ``"ple"``,
+    ``"custombin"``, ``"rbf"``, ``"relu"``, ``"sigmoid"``, ``"tanh"``, ``"cubicspline"``,
+    ``"naturalspline"``, ``"pspline"``, ``"tensorspline"``, ``"tprs"``, ``"bspline"``,
+    ``"mspline"``, ``"ispline"``.
+
+    Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
+    ``"pretrained"``, ``"custombin"``, ``"none"``. The ``"pretrained"`` method requires the optional
+    ``sentence-transformers`` dependency (``pip install "pretab[embeddings]"``).
+
+    ``transform`` returns a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` by
+    default, or a single stacked array when ``return_array=True``.
+
     Examples
     --------
-    >>> from pretab import Preprocessor
+    Basic usage -- PLE for numerics and integer codes for categoricals (the defaults):
+
     >>> import pandas as pd
-    >>> df = pd.DataFrame({
-    ...     "age": [25, 32, 47],
-    ...     "gender": ["M", "F", "F"]
-    ... })
+    >>> from pretab import Preprocessor
+    >>> df = pd.DataFrame({"age": [25, 32, 47, 51], "gender": ["M", "F", "F", "M"]})
+    >>> y = [0.1, 0.4, 0.9, 1.2]
     >>> pre = Preprocessor()
-    >>> pre.fit(df)
-    >>> out = pre.transform(df)
-    >>> out.keys()
-    dict_keys(['num_age', 'cat_gender'])
+    >>> out = pre.fit_transform(df, y)
+    >>> sorted(out.keys())
+    ['cat_gender', 'num_age']
+
+    Cubic-spline basis for numerics with one-hot encoded categoricals:
+
+    >>> pre = Preprocessor(numerical_method="cubicspline", categorical_method="one-hot",
+    ...                    output_dim=10, degree=3)
+    >>> out = pre.fit_transform(df, y)
+
+    Radial-basis feature maps with target-aware center placement:
+
+    >>> pre = Preprocessor(numerical_method="rbf", use_target=True, task="regression",
+    ...                    output_dim=8)
+    >>> out = pre.fit_transform(df, y)
+
+    A different method per column via ``feature_preprocessing``:
+
+    >>> pre = Preprocessor(feature_preprocessing={"age": "pspline", "gender": "one-hot"})
+    >>> out = pre.fit_transform(df, y)
+
+    Data-driven (adaptive) width, returned as a single stacked array:
+
+    >>> pre = Preprocessor(numerical_method="ple", adaptive=True,
+    ...                    min_output_dim=4, max_output_dim=12)
+    >>> arr = pre.fit_transform(df, y, return_array=True)
+    >>> arr.ndim
+    2
     """
 
     def __init__(
         self,
+        numerical_method="ple",
+        categorical_method="int",
         feature_preprocessing=None,
-        output_dim=64,
-        numerical_preprocessing="ple",
-        categorical_preprocessing="int",
-        use_decision_tree_bins=False,
-        binning_strategy="uniform",
+        output_dim=7,
+        adaptive=False,
+        min_output_dim=5,
+        max_output_dim=10,
         task="regression",
+        use_target=True,
+        strategy="uniform",
+        degree=3,
+        scaling="minmax",
         cat_cutoff=0.03,
         treat_all_integers_as_numerical=False,
-        degree=3,
-        scaling_strategy="minmax",
-        use_decision_tree_knots=True,
-        knots_strategy="uniform",
-        spline_implementation="sklearn",
-        min_unique_vals=5,
     ):
         """
         Initialize the Preprocessor with various transformation options for tabular data.
 
-        Parameters
-        ----------
-        feature_preprocessing : dict, optional
-            Dictionary specifying preprocessing methods per feature. If None, global settings are used.
-        output_dim : int, default=64
-            The single width knob shared by every numerical method: the number of non-bias output
-            columns produced per input feature. The B/M/I splines clamp it into their ``[5, 50]`` range.
-        numerical_preprocessing : str, default="ple"
-            Preprocessing strategy for numerical features.
-        categorical_preprocessing : str, default="int"
-            Preprocessing strategy for categorical features.
-        use_decision_tree_bins : bool, default=False
-            Whether to use decision tree-based binning for numerical features.
-        binning_strategy : str, default="uniform"
-            Strategy for determining bin edges ("uniform", "quantile").
-        task : str, default="regression"
-            Task type for decision tree splitting ("regression", "classification").
-        cat_cutoff : float or int, default=0.03
-            Threshold to determine whether integer-valued columns are treated as categorical.
-        treat_all_integers_as_numerical : bool, default=False
-            If True, treat all integer columns as numerical.
-        degree : int, default=3
-            Degree of polynomial or spline basis expansion.
-        scaling_strategy : str, default="minmax"
-            Scaling method for numerical data ("standardization", "minmax", etc.).
-        use_decision_tree_knots : bool, default=True
-            Use decision tree-based knot placement for splines.
-        knots_strategy : str, default="uniform"
-            Strategy for placing spline knots.
-        spline_implementation : str, default="sklearn"
-            Backend implementation to use for splines.
-        min_unique_vals : int, default=5
-            Minimum number of unique values required for numerical processing.
+        See the :class:`Preprocessor` class docstring for the full parameter reference,
+        available ``numerical_method`` / ``categorical_method`` values, and usage examples.
         """
 
-        self.output_dim = output_dim
-        self.numerical_preprocessing = (
-            numerical_preprocessing.lower()
-            if numerical_preprocessing is not None
-            else "none"
+        self.numerical_method = (
+            numerical_method.lower() if numerical_method is not None else "none"
         )
-        self.categorical_preprocessing = (
-            categorical_preprocessing.lower()
-            if categorical_preprocessing is not None
-            else "none"
+        self.categorical_method = (
+            categorical_method.lower() if categorical_method is not None else "none"
         )
-
-        self.use_decision_tree_bins = use_decision_tree_bins
         self.feature_preprocessing = feature_preprocessing or {}
-        self.column_transformer = None
-        self.fitted = False
-        self.binning_strategy = binning_strategy
+        self.output_dim = output_dim
+        self.adaptive = adaptive
+        self.min_output_dim = min_output_dim
+        self.max_output_dim = max_output_dim
         self.task = task
+        self.use_target = use_target
+        self.strategy = strategy
+        self.degree = degree
+        self.scaling = scaling
         self.cat_cutoff = cat_cutoff
         self.treat_all_integers_as_numerical = treat_all_integers_as_numerical
-        self.degree = degree
-        self.scaling_strategy = scaling_strategy
-        self.use_decision_tree_knots = use_decision_tree_knots
-        self.knots_strategy = knots_strategy
-        self.spline_implementation = spline_implementation
-        self.min_unique_vals = min_unique_vals
+        self.column_transformer = None
+        self.fitted = False
         self.embeddings = False
         self.embedding_dimensions = {}
 
@@ -189,18 +215,20 @@ class Preprocessor(TransformerMixin):
             Parameter names mapped to their values.
         """
         params = {
+            "numerical_method": self.numerical_method,
+            "categorical_method": self.categorical_method,
+            "feature_preprocessing": self.feature_preprocessing,
             "output_dim": self.output_dim,
-            "numerical_preprocessing": self.numerical_preprocessing,
-            "categorical_preprocessing": self.categorical_preprocessing,
-            "use_decision_tree_bins": self.use_decision_tree_bins,
-            "binning_strategy": self.binning_strategy,
+            "adaptive": self.adaptive,
+            "min_output_dim": self.min_output_dim,
+            "max_output_dim": self.max_output_dim,
             "task": self.task,
+            "use_target": self.use_target,
+            "strategy": self.strategy,
+            "degree": self.degree,
+            "scaling": self.scaling,
             "cat_cutoff": self.cat_cutoff,
             "treat_all_integers_as_numerical": self.treat_all_integers_as_numerical,
-            "degree": self.degree,
-            "scaling_strategy": self.scaling_strategy,
-            "use_decision_tree_knots": self.use_decision_tree_knots,
-            "knots_strategy": self.knots_strategy,
         }
         return params
 
@@ -309,27 +337,25 @@ class Preprocessor(TransformerMixin):
         transformers = []
 
         for feature in numerical_features:
-            method = self.feature_preprocessing.get(
-                feature, self.numerical_preprocessing
-            )
+            method = self.feature_preprocessing.get(feature, self.numerical_method)
             steps = get_numerical_transformer_steps(
                 method=method,
                 task=self.task,
-                use_decision_tree=self.use_decision_tree_knots,
+                use_decision_tree=self.use_target,
                 add_imputer=True,
                 imputer_strategy="mean",
                 output_dim=self.output_dim,
+                adaptive=self.adaptive,
+                min_output_dim=self.min_output_dim,
+                max_output_dim=self.max_output_dim,
                 degree=self.degree,
-                scaling=self.scaling_strategy,
-                strategy=self.knots_strategy,
-                implementation=self.spline_implementation,
+                scaling=self.scaling,
+                strategy=self.strategy,
             )
             transformers.append((f"num_{feature}", Pipeline(steps), [feature]))
 
         for feature in categorical_features:
-            method = self.feature_preprocessing.get(
-                feature, self.categorical_preprocessing
-            )
+            method = self.feature_preprocessing.get(feature, self.categorical_method)
             steps = get_categorical_transformer_steps(method)
             transformers.append((f"cat_{feature}", Pipeline(steps), [feature]))
 
