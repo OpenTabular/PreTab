@@ -15,6 +15,7 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.utils.validation import check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
+from ...core.exceptions import DataWarning
 from ...core.params import UNSET, AliasResolverMixin
 
 
@@ -177,7 +178,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator,
                 n_removed = int((~valid_mask).sum())
                 warnings.warn(
                     f"Removed {n_removed} samples with NaN values during fit",
-                    UserWarning,
+                    DataWarning,
                     stacklevel=2,
                 )
                 X = X[valid_mask]

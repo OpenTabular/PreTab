@@ -3,6 +3,7 @@ import warnings
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
+from ..core.exceptions import ConfigWarning
 from ..transformers.splines.knot_selectors import CARTKnotSelector
 from .registry import NUMERICAL_METHODS
 
@@ -49,7 +50,7 @@ def _clamp_spline_basis(output_dim):
         warnings.warn(
             f"output_dim={output_dim} is outside the spline range "
             f"[{_MIN_SPLINE_BASIS}, {_MAX_SPLINE_BASIS}]; using {clamped} basis functions.",
-            UserWarning,
+            ConfigWarning,
             stacklevel=2,
         )
     return clamped

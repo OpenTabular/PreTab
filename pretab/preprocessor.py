@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -5,10 +7,14 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
+from .core.logging import configure_logging, get_logger
 from .pipeline import (
     get_categorical_transformer_steps,
     get_numerical_transformer_steps,
 )
+
+logger = get_logger(__name__)
+
 
 
 class Preprocessor(TransformerMixin, BaseEstimator):
@@ -89,9 +95,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         If True, every integer-typed column is treated as numerical regardless of cardinality,
         bypassing the ``cat_cutoff`` heuristic.
     verbose : int, default=0
-        Verbosity level for ``fit``-time logging (``0`` = silent). Reserved for the logging UX;
-        higher values will emit progressively more detail. Stored verbatim and forwarded by
-        ``get_params`` / ``clone``.
+        Verbosity level controlling ``fit``-time logging, applied through the shared
+        ``"pretab"`` logger so a single setting on this entry point governs the whole
+        package (including the individual numerical/categorical transformers). Accepts an
+        int ``0``-``3`` and also ``bool`` (``True`` -> ``1``, ``False`` -> ``0``):
+
+        - ``0`` -- silent on the happy path (only :class:`~pretab.PretabWarning` data warnings).
+        - ``1`` -- one fit-summary line (feature counts, resolved methods, total output width, duration).
+        - ``2`` -- the per-feature table that :meth:`get_feature_info` builds.
+        - ``3`` -- internal decisions (fitted bins / knots / centers).
+
+        Stored verbatim and forwarded by ``get_params`` / ``clone``, so an embedding host
+        (e.g. DeepTab) can pass it straight through ``Preprocessor(**kwargs)``. PreTab never
+        configures the root logger or attaches a handler when the host already owns one, so
+        ``verbose=0`` keeps PreTab silent under a host's own logging.
 
     Attributes
     ----------
@@ -271,6 +288,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             Fitted instance of the preprocessor.
         """
 
+        verbose = int(self.verbose or 0)
+        if verbose > 0:
+            configure_logging(verbose)
+        start_time = time.perf_counter()
+
         if isinstance(X, dict):
             X = pd.DataFrame(X)
         elif isinstance(X, np.ndarray):
@@ -329,6 +351,25 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         )
         self.column_transformer_.fit(X, y)
         self.n_features_in_ = X.shape[1]
+
+        if verbose >= 1:
+            logger.info(
+                "fit complete: %d numerical (%s) + %d categorical (%s) feature(s) "
+                "-> %d output columns in %.3fs",
+                len(numerical_features),
+                numerical_method,
+                len(categorical_features),
+                categorical_method,
+                len(self.get_feature_names_out()),
+                time.perf_counter() - start_time,
+            )
+        if verbose >= 2:
+            info = self.get_feature_info(verbose=False)
+            for line in self._feature_table_lines(*info):
+                logger.debug(line)
+        if verbose >= 3:
+            self._log_internal_decisions()
+
         return self
 
     def transform(self, X, embeddings=None, return_array=False):
@@ -447,7 +488,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         verbose : bool, default=True
-            If True, prints detailed information for each feature.
+            If True, renders an aligned per-feature table through the ``pretab``
+            logger (attaching a stream handler when none is configured). If False,
+            the info dicts are returned silently.
 
         Returns
         -------
@@ -503,17 +546,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                         try:
                             transformed_feature = last_step.transform(dummy_input)
                             dimension = transformed_feature.shape[1]
-                        except Exception:
+                        except (ValueError, TypeError, AttributeError, IndexError) as exc:
+                            logger.debug(
+                                "Could not introspect output width of %r: %s",
+                                feature_name,
+                                exc,
+                            )
                             dimension = None
                     numerical_feature_info[feature_name] = {
                         "preprocessing": preprocessing_type,
                         "dimension": dimension,
                         "categories": None,
                     }
-                    if verbose:
-                        print(
-                            f"Numerical Feature: {feature_name}, Info: {numerical_feature_info[feature_name]}"
-                        )
 
                 elif "continuous_ordinal" in steps:
                     step = transformer_pipeline.named_steps["continuous_ordinal"]
@@ -524,10 +568,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                         "dimension": dimension,
                         "categories": categories,
                     }
-                    if verbose:
-                        print(
-                            f"Categorical Feature (Ordinal): {feature_name}, Info: {categorical_feature_info[feature_name]}"
-                        )
 
                 elif "onehot" in steps:
                     step = transformer_pipeline.named_steps["onehot"]
@@ -539,10 +579,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                         "dimension": dimension,
                         "categories": categories,
                     }
-                    if verbose:
-                        print(
-                            f"Categorical Feature (One-Hot): {feature_name}, Info: {categorical_feature_info[feature_name]}"
-                        )
 
                 else:
                     last_step = transformer_pipeline.steps[-1][1]
@@ -551,7 +587,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                         try:
                             transformed_feature = last_step.transform(dummy_input)
                             dimension = transformed_feature.shape[1]
-                        except Exception:
+                        except (ValueError, TypeError, AttributeError, IndexError) as exc:
+                            logger.debug(
+                                "Could not introspect output width of %r: %s",
+                                feature_name,
+                                exc,
+                            )
                             dimension = None
                     if "cat" in name:
                         categorical_feature_info[feature_name] = {
@@ -565,17 +606,66 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                             "dimension": dimension,
                             "categories": None,
                         }
-                    if verbose:
-                        print(
-                            f"Feature: {feature_name}, Info: {preprocessing_type}, Dimension: {dimension}"
-                        )
 
-                if verbose:
-                    print("-" * 50)
-
-        if verbose and self.embeddings_:
-            print("Embeddings:")
-            for key, value in embedding_feature_info.items():
-                print(f"  Feature: {key}, Dimension: {value['dimension']}")
+        if verbose:
+            configure_logging(1)
+            for line in self._feature_table_lines(
+                numerical_feature_info,
+                categorical_feature_info,
+                embedding_feature_info,
+            ):
+                logger.info(line)
 
         return numerical_feature_info, categorical_feature_info, embedding_feature_info
+
+    def _feature_table_lines(self, numerical_info, categorical_info, embedding_info):
+        """Build aligned, human-readable rows describing the fitted feature layout."""
+        rows = []
+        for feat, info in numerical_info.items():
+            rows.append(
+                (str(feat), "numerical", str(info["preprocessing"]), info["dimension"], info["categories"])
+            )
+        for feat, info in categorical_info.items():
+            rows.append(
+                (str(feat), "categorical", str(info["preprocessing"]), info["dimension"], info["categories"])
+            )
+        for feat, info in embedding_info.items():
+            rows.append((str(feat), "embedding", "-", info["dimension"], info["categories"]))
+        if not rows:
+            return []
+
+        feat_w = max(len("feature"), *(len(r[0]) for r in rows))
+        kind_w = max(len("kind"), *(len(r[1]) for r in rows))
+        pipe_w = max(len("pipeline"), *(len(r[2]) for r in rows))
+        header = (
+            f"{'feature':<{feat_w}}  {'kind':<{kind_w}}  "
+            f"{'pipeline':<{pipe_w}}  {'dim':>4}  {'cats':>5}"
+        )
+        lines = [header, "-" * len(header)]
+        for feat, kind, pipe, dim, cats in rows:
+            dim_s = "-" if dim is None else str(dim)
+            cats_s = "-" if cats is None else str(cats)
+            lines.append(
+                f"{feat:<{feat_w}}  {kind:<{kind_w}}  "
+                f"{pipe:<{pipe_w}}  {dim_s:>4}  {cats_s:>5}"
+            )
+        return lines
+
+    def _log_internal_decisions(self):
+        """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
+        for name, transformer, _columns in self.column_transformer_.transformers_:
+            last_step = (
+                transformer.steps[-1][1]
+                if hasattr(transformer, "steps")
+                else transformer
+            )
+            for attr in (
+                "thresholds_",
+                "knots_",
+                "centers_",
+                "n_knots_",
+                "total_output_dim_",
+            ):
+                if hasattr(last_step, attr):
+                    logger.debug("%s.%s = %r", name, attr, getattr(last_step, attr))
+
