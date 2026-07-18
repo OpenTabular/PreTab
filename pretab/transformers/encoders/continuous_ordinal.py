@@ -5,7 +5,7 @@ from sklearn.utils.validation import check_is_fitted
 from ...core.exceptions import InvalidParamError
 
 
-class ContinuousOrdinalTransformer(BaseEstimator, TransformerMixin):
+class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
     """Encode categorical features as continuous integer values.
 
     Each unique category within a feature is assigned an integer based on its

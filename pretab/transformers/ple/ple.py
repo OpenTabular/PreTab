@@ -49,7 +49,7 @@ def extract_thresholds_from_tree(tree) -> np.ndarray:
     return np.unique(thresholds)
 
 
-class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator, TransformerMixin):
+class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator):
     """Piecewise Linear Encoding (PLE) transformer for numerical features.
 
     Each feature is discretized with a decision tree, and the split thresholds
@@ -149,6 +149,13 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator,
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
+
+    def __sklearn_tags__(self):
+        """Declare NaN-passthrough (median policy) and the required-target tag."""
+        tags = super().__sklearn_tags__()
+        tags.input_tags.allow_nan = self.handle_missing == "median"
+        tags.target_tags.required = True
+        return tags
 
     def fit(self, X, y):
         """Fit the transformer by learning per-feature bin thresholds.
@@ -268,7 +275,8 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, BaseEstimator,
 
         if X.shape[1] != self.n_features_in_:
             raise PretabDataError(
-                f"X has {X.shape[1]} features, but PLETransformer was fitted with {self.n_features_in_} features."
+                f"X has {X.shape[1]} features, but {type(self).__name__} "
+                f"is expecting {self.n_features_in_} features as input."
             )
 
         all_transformed = []
