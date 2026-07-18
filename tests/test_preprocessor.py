@@ -188,3 +188,69 @@ def test_lowercase_and_none_method_resolution(sample_data):
     assert isinstance(out, dict)
     assert pre.numerical_method == "PLE"  # unchanged on the instance
     assert pre.categorical_method is None
+
+
+def test_total_output_dim_matches_array_width(sample_data):
+    X, y = sample_data
+    pre = Preprocessor().fit(X, y)
+    arr = pre.transform(X, return_array=True)
+    assert isinstance(arr, np.ndarray)
+    assert pre.total_output_dim_ == arr.shape[1]
+
+
+def test_output_dims_keys_are_input_features(sample_data):
+    X, y = sample_data
+    pre = Preprocessor().fit(X, y)
+    assert set(pre.output_dims_) == set(X.columns)
+
+
+def test_output_dims_sum_to_total_output_dim(sample_data):
+    X, y = sample_data
+    pre = Preprocessor().fit(X, y)
+    assert sum(pre.output_dims_.values()) == pre.total_output_dim_
+
+
+def test_output_dims_reflects_per_feature_widths():
+    X = pd.DataFrame(
+        {
+            "a": np.linspace(0, 1, 60),
+            "b": np.linspace(-1, 1, 60),
+        }
+    )
+    y = pd.Series(np.random.randn(60))
+    # 'a' uses the rbf feature map (output_dim columns); 'b' is overridden to
+    # plain min-max scaling (a single column) via feature_preprocessing.
+    pre = Preprocessor(
+        numerical_method="rbf",
+        output_dim=5,
+        feature_preprocessing={"b": "minmax"},
+    ).fit(X, y)
+    dims = pre.output_dims_
+    assert dims["a"] == 5
+    assert dims["b"] == 1
+    assert sum(dims.values()) == pre.total_output_dim_
+
+
+def test_output_dims_nonuniform_for_one_hot_categorical():
+    X = pd.DataFrame(
+        {
+            "num": np.linspace(0, 1, 30),
+            "cat": ["A", "B", "C"] * 10,
+        }
+    )
+    y = pd.Series(np.random.randn(30))
+    pre = Preprocessor(
+        numerical_method="minmax", categorical_method="one-hot"
+    ).fit(X, y)
+    dims = pre.output_dims_
+    assert dims["num"] == 1
+    assert dims["cat"] == 3  # one-hot of three categories
+    assert sum(dims.values()) == pre.total_output_dim_
+
+
+def test_output_dims_and_total_before_fit_raise():
+    with pytest.raises(NotFittedError):
+        _ = Preprocessor().output_dims_
+    with pytest.raises(NotFittedError):
+        _ = Preprocessor().total_output_dim_
+
