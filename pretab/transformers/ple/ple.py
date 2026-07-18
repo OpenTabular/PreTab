@@ -54,9 +54,12 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
 
     Parameters
     ----------
-    n_bins : int, default=20
-        Maximum number of leaf nodes (bins) per feature. This caps the number of
-        thresholds the decision tree may produce.
+    output_dim : int, default=20
+        Maximum number of bins per feature, i.e. an upper bound on the number of
+        output columns produced for each feature. This caps the number of leaf
+        nodes (and therefore thresholds) the decision tree may produce. The
+        actual number of output columns is data-dependent and may be smaller
+        (see Notes).
     task : {"regression", "classification"}, default="regression"
         Whether to fit a ``DecisionTreeRegressor`` or ``DecisionTreeClassifier``
         to locate the split thresholds.
@@ -77,11 +80,11 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
           the feature produced no thresholds).
     adaptive : bool, default=False
         If True, allow the number of bins per feature to be data-driven, bounded
-        by ``min_bins`` and ``max_bins``. If False, every feature is capped by
-        ``n_bins``.
-    min_bins : int or None, default=None
+        by ``min_output_dim`` and ``max_output_dim``. If False, every feature is
+        capped by ``output_dim``.
+    min_output_dim : int or None, default=None
         Minimum number of bins per feature when ``adaptive=True``.
-    max_bins : int or None, default=None
+    max_output_dim : int or None, default=None
         Maximum number of bins per feature when ``adaptive=True``.
 
     Attributes
@@ -92,6 +95,9 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
         Number of features seen during ``fit``.
     n_bins_per_feature_ : list of int
         Number of output bins produced for each feature (``len(thresholds) + 1``).
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted); equals
+        ``sum(n_bins_per_feature_)``.
     fill_values_ : list of float
         Per-feature fill value used to replace NaN during ``transform``.
 
@@ -99,25 +105,23 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
     -----
     The number of output columns per feature equals ``len(thresholds) + 1`` and
     is therefore data-dependent: a feature whose tree finds fewer splits will
-    expand into fewer columns than a feature with many splits.
+    expand into fewer columns than a feature with many splits. ``output_dim`` is
+    an upper bound (bin cap), not an exact width; this is a documented exception
+    to the exact-width contract that the fixed-basis families follow.
 
     Examples
     --------
     >>> from sklearn.datasets import make_regression
     >>> X, y = make_regression(n_samples=100, n_features=5, noise=10, random_state=51)
-    >>> ple = PLETransformer(n_bins=10, task="regression")
+    >>> ple = PLETransformer(output_dim=10, task="regression")
     >>> X_transformed = ple.fit_transform(X, y)
     """
 
-    _param_aliases: ClassVar[dict[str, str]] = {
-        "n_bins": "n_basis",
-        "min_bins": "min_basis",
-        "max_bins": "max_basis",
-    }
+    _param_aliases: ClassVar[dict[str, str]] = {}
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         task: Literal["regression", "classification"] = "regression",
         max_depth: int | None = None,
         min_samples_split: int = 2,
@@ -125,13 +129,10 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
         random_state: int | None = 51,
         handle_missing: Literal["error", "median"] = "median",
         adaptive: bool = False,
-        min_basis=UNSET,
-        max_basis=UNSET,
-        n_bins=UNSET,
-        min_bins=UNSET,
-        max_bins=UNSET,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
     ):
-        self.n_basis = n_basis
+        self.output_dim = output_dim
         self.task = task
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
@@ -139,11 +140,8 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
         self.random_state = random_state
         self.handle_missing = handle_missing
         self.adaptive = adaptive
-        self.min_basis = min_basis
-        self.max_basis = max_basis
-        self.n_bins = n_bins
-        self.min_bins = min_bins
-        self.max_bins = max_bins
+        self.min_output_dim = min_output_dim
+        self.max_output_dim = max_output_dim
 
     def fit(self, X, y):
         """Fit the transformer by learning per-feature bin thresholds.
@@ -192,9 +190,9 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
         self.n_bins_per_feature_ = []
         self.fill_values_ = []
 
-        n_bins = self._resolve_param("n_basis", default=20)
-        min_bins_req = self._resolve_param("min_basis", default=None)
-        max_bins_req = self._resolve_param("max_basis", default=None)
+        n_bins = self._resolve_param("output_dim", default=20)
+        min_bins_req = self._resolve_param("min_output_dim", default=None)
+        max_bins_req = self._resolve_param("max_output_dim", default=None)
         min_bins, max_bins = self._resolve_bin_bounds(n_bins, min_bins_req, max_bins_req)
 
         for i in range(X.shape[1]):
@@ -233,6 +231,8 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
                 self.fill_values_.append(float(np.median(thresholds)))
             else:
                 self.fill_values_.append(0.0)
+
+        self.total_output_dim_ = int(sum(self.n_bins_per_feature_))
 
         return self
 
@@ -368,9 +368,9 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
     def _resolve_bin_bounds(self, n_bins: int, min_bins_req, max_bins_req) -> tuple[int, int]:
         if not self.adaptive:
             if min_bins_req is not None and n_bins < min_bins_req:
-                raise ValueError("n_bins must be >= min_bins when adaptive=False")
+                raise ValueError("output_dim must be >= min_output_dim when adaptive=False")
             if max_bins_req is not None and n_bins > max_bins_req:
-                raise ValueError("n_bins must be <= max_bins when adaptive=False")
+                raise ValueError("output_dim must be <= max_output_dim when adaptive=False")
             min_bins = n_bins
             max_bins = n_bins
         else:
@@ -378,11 +378,11 @@ class PLETransformer(AliasResolverMixin, BaseEstimator, TransformerMixin):
             max_bins = max_bins_req if max_bins_req is not None else n_bins
 
         if min_bins < 1:
-            raise ValueError(f"min_bins must be >= 1, got {min_bins}")
+            raise ValueError(f"min_output_dim must be >= 1, got {min_bins}")
         if max_bins < 1:
-            raise ValueError(f"max_bins must be >= 1, got {max_bins}")
+            raise ValueError(f"max_output_dim must be >= 1, got {max_bins}")
         if min_bins > max_bins:
-            raise ValueError("min_bins must be <= max_bins")
+            raise ValueError("min_output_dim must be <= max_output_dim")
 
         return min_bins, max_bins
 

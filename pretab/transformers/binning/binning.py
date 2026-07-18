@@ -17,37 +17,46 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    bins : int or array-like
-        If int, defines the number of equal-width bins. If array-like, defines the bin edges to use directly.
+    output_dim : int or array-like
+        If int, defines the number of equal-width bins. If array-like, defines
+        the bin edges to use directly. Note that ``output_dim`` here is the
+        number of *bins*, not the number of output columns: this transformer
+        always emits a single ordinal column of integer bin indices. The bin
+        count only becomes an output width after a subsequent one-hot encoding.
 
     Attributes
     ----------
     n_features_in_ : int
         The number of input features. Always set to 1 for this transformer.
 
+    total_output_dim_ : int
+        Total number of output columns (fitted). Always ``1`` because the output
+        is a single ordinal column.
+
     Notes
     -----
     This transformer operates on a single feature of shape ``(n_samples, 1)``. When
-    ``bins`` is an integer, equal-width bin edges are computed from the data range;
-    when it is an array-like, the provided edges are used directly. The output
-    contains integer bin indices.
+    ``output_dim`` is an integer, equal-width bin edges are computed from the data
+    range; when it is an array-like, the provided edges are used directly. The
+    output contains integer bin indices in a single column, so its width is ``1``
+    regardless of ``output_dim`` -- this is a documented exception to the
+    exact-width contract that the fixed-basis families follow.
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import CustomBinTransformer
     >>> X = np.linspace(0, 1, 10).reshape(-1, 1)
-    >>> transformer = CustomBinTransformer(bins=4)
+    >>> transformer = CustomBinTransformer(output_dim=4)
     >>> transformer.fit_transform(X).shape
     (10, 1)
     """
 
-    _param_aliases: ClassVar[dict[str, str]] = {"bins": "n_basis"}
+    _param_aliases: ClassVar[dict[str, str]] = {}
 
-    def __init__(self, n_basis=UNSET, bins=UNSET):
-        # A basis count (int) yields equal-width bins; an array-like is used as bin edges.
-        self.n_basis = n_basis
-        self.bins = bins
+    def __init__(self, output_dim=UNSET):
+        # An int yields equal-width bins; an array-like is used as bin edges.
+        self.output_dim = output_dim
 
     def fit(self, X, y=None):
         """
@@ -68,6 +77,7 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
         """
         # Fit doesn't need to do anything as we are directly using provided bins
         self.n_features_in_ = 1
+        self.total_output_dim_ = 1
         return self
 
     def transform(self, X):
@@ -92,9 +102,9 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
         if X.shape[0] <= 2:
             raise ValueError("Input must have more than 2 observations.")
 
-        bins_spec = self._resolve_param("n_basis", default=UNSET)
+        bins_spec = self._resolve_param("output_dim", default=UNSET)
         if bins_spec is UNSET:
-            raise InvalidParamError("CustomBinTransformer requires 'n_basis' (or the legacy 'bins').")
+            raise InvalidParamError("CustomBinTransformer requires 'output_dim'.")
 
         if isinstance(bins_spec, int):
             # Calculate equal width bins based on the range of the data and number of bins
