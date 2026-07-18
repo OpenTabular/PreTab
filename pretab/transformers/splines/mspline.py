@@ -22,8 +22,8 @@ class MSplineTransformer(BaseSplineTransformer):
     M-splines are non-negative basis functions obtained by scaling each B-spline
     by ``(degree + 1) / knot_span`` so that it integrates to one. Knot placement
     follows the same priority as the other spline transformers: target-aware
-    (``knot_selector``) > explicit (``knot_locations``) > automatic
-    (``n_basis_functions`` with ``knot_strategy``).
+    (``selector``) > explicit (``knot_locations``) > automatic
+    (``output_dim`` with ``strategy``).
 
     See :class:`~pretab.transformers.splines.base_spline.BaseSplineTransformer`
     for the full parameter description. ``include_bias`` defaults to False here.
@@ -33,46 +33,38 @@ class MSplineTransformer(BaseSplineTransformer):
     >>> import numpy as np
     >>> from pretab.transformers import MSplineTransformer
     >>> X = np.linspace(0, 1, 50).reshape(-1, 1)
-    >>> MSplineTransformer(n_basis_functions=8).fit_transform(X).shape
+    >>> MSplineTransformer(output_dim=8).fit_transform(X).shape
     (50, 8)
     """
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         degree: int = 3,
         strategy=UNSET,
         include_bias: bool = False,
         knot_locations: np.ndarray | None = None,
         selector=UNSET,
         adaptive: bool = False,
-        min_basis=UNSET,
-        max_basis=UNSET,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
         task: Literal["regression", "classification"] | None = None,
-        n_basis_functions=UNSET,
         knot_strategy=UNSET,
         knot_selector=UNSET,
-        min_basis_functions=UNSET,
-        max_basis_functions=UNSET,
-        n_knots=UNSET,
     ):
         super().__init__(
-            n_basis=n_basis,
+            output_dim=output_dim,
             degree=degree,
             strategy=strategy,
             include_bias=include_bias,
             knot_locations=knot_locations,
             selector=selector,
             adaptive=adaptive,
-            min_basis=min_basis,
-            max_basis=max_basis,
+            min_output_dim=min_output_dim,
+            max_output_dim=max_output_dim,
             task=task,
-            n_basis_functions=n_basis_functions,
             knot_strategy=knot_strategy,
             knot_selector=knot_selector,
-            min_basis_functions=min_basis_functions,
-            max_basis_functions=max_basis_functions,
-            n_knots=n_knots,
         )
 
     def _feature_suffix(self) -> str:

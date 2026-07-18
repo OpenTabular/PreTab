@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.exceptions import InvalidParamError
 from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
@@ -22,20 +23,33 @@ def bspline_basis(x, knots, degree, i):
 
 
 class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
-    """
+    r"""
     Tensor Product Spline Transformer for multivariate smooth basis expansion.
 
-    This transformer generates tensor-product B-spline basis functions for multivariate input,
-    allowing for smooth modeling of complex feature interactions. It supports regularization
-    via difference penalties in each marginal dimension, suitable for additive models and
-    structured regression.
+    This transformer generates tensor-product B-spline basis functions for
+    multivariate input, allowing for smooth modeling of complex feature
+    interactions. It supports regularization via difference penalties in each
+    marginal dimension, suitable for additive models and structured regression.
+
+    ``output_dim`` here is **per marginal dimension**: each of the :math:`d` input
+    features gets a marginal B-spline basis of :math:`m := \mathtt{output\_dim}`
+    columns (using :math:`K = \mathtt{output\_dim} - p - 1` interior knots with a
+    :math:`p + 1` boundary pad, exactly like :class:`PSplineTransformer`), and the
+    full tensor-product design has
+
+    .. math::
+
+        \text{total columns} = \mathtt{output\_dim}^{\,d}
+
+    columns (``(output_dim + 1) ** d`` when ``include_bias=True``). This is the one
+    family where the total output width is *not* ``n_features * output_dim``.
 
     Parameters
     ----------
-    n_basis : int, default=5
-        Number of interior knots per input feature (per marginal dimension;
-        canonical name, the legacy ``n_knots`` alias still works and emits a
-        ``FutureWarning``).
+    output_dim : int, default=5
+        Number of non-bias output columns **per marginal dimension** (:math:`m`).
+        Must be at least ``degree + 1``. The interior knots per dimension is
+        ``output_dim - degree - 1``.
 
     degree : int, default=3
         Degree of the B-spline basis functions.
@@ -48,12 +62,13 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         tensor product. The bias term is left unpenalized.
 
     strategy : {"uniform", "quantile"}, default="uniform"
-        Knot placement rule for each marginal dimension. ``"uniform"`` reproduces
-        the historical evenly spaced knots; ``"quantile"`` uses data quantiles.
+        Interior-knot placement rule for each marginal dimension. ``"uniform"``
+        spaces knots evenly; ``"quantile"`` uses data quantiles.
 
     selector : BaseKnotSelector or None, default=None
         Optional target-aware knot selector applied per marginal dimension. When
-        provided it requires ``y`` during ``fit``.
+        provided it requires ``y`` during ``fit``; the resulting width is then
+        data-driven and may differ from ``output_dim ** d``.
 
     task : {"regression", "classification"} or None, default=None
         Task forwarded to a target-aware ``selector``.
@@ -64,19 +79,28 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         Number of input features (marginal dimensions).
 
     knots_ : list of ndarray
-        List of knot sequences for each marginal dimension.
+        Full padded knot sequence for each marginal dimension.
+
+    n_knots_ : list of int
+        Number of interior knots for each marginal dimension
+        (``output_dim - degree - 1`` on the default, non-selector path).
 
     bases_ : list of ndarray
-        List of B-spline basis matrices (n_samples x n_basis) for each input feature.
+        Marginal B-spline basis matrices, each of shape
+        ``(n_samples, output_dim (+1 if include_bias))``.
 
     penalties_ : list of ndarray
-        List of univariate penalty matrices for each marginal basis.
+        Univariate difference penalties for each marginal basis.
 
-    X_design_ : ndarray of shape (n_samples, n_total_basis)
-        Full tensor-product design matrix, computed during `fit`.
+    X_design_ : ndarray of shape (n_samples, output_dim ** dim_)
+        Full tensor-product design matrix computed during ``fit``.
 
     n_features_in_ : int
-        Number of input features seen during `fit`.
+        Number of input features seen during ``fit``.
+
+    total_output_dim_ : int
+        Total number of output columns (fitted); equals
+        ``output_dim ** dim_`` (``(output_dim + 1) ** dim_`` with a bias).
 
     Notes
     -----
@@ -93,40 +117,41 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     Examples
     --------
     >>> import numpy as np
+    >>> rng = np.random.default_rng(0)
     >>> from pretab.transformers import TensorProductSplineTransformer
-    >>> X = np.random.rand(20, 2)
-    >>> transformer = TensorProductSplineTransformer(n_knots=4)
-    >>> transformer.fit_transform(X).shape
+    >>> X = rng.random((20, 2))
+    >>> transformer = TensorProductSplineTransformer(output_dim=6)
+    >>> Xt = transformer.fit_transform(X)
+    >>> Xt.shape
     (20, 36)
+    >>> transformer.total_output_dim_
+    36
     """
 
     _param_aliases: ClassVar[dict[str, str]] = {
-        "n_knots": "n_basis",
         "knot_strategy": "strategy",
         "knot_selector": "selector",
     }
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         degree=3,
         diff_order=2,
         include_bias=False,
         strategy=UNSET,
         selector=UNSET,
         task=None,
-        n_knots=UNSET,
         knot_strategy=UNSET,
         knot_selector=UNSET,
     ):
-        self.n_basis = n_basis
+        self.output_dim = output_dim
         self.degree = degree
         self.diff_order = diff_order
         self.include_bias = include_bias
         self.strategy = strategy
         self.selector = selector
         self.task = task
-        self.n_knots = n_knots
         self.knot_strategy = knot_strategy
         self.knot_selector = knot_selector
 
@@ -150,18 +175,24 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
-        n_basis = self._resolve_param("n_basis", default=5)
+        output_dim = self._resolve_param("output_dim", default=5)
         strategy = self._resolve_param("strategy", default="uniform")
         selector = self._resolve_param("selector", default=None)
+
+        if output_dim < self.degree + 1:
+            raise InvalidParamError(
+                f"output_dim must be >= degree + 1 = {self.degree + 1} for the tensor-product "
+                f"spline basis, got {output_dim}"
+            )
 
         self.dim_ = X.shape[1]
         self.knots_ = []
         self.bases_ = []
         self.penalties_ = []
+        self.n_knots_ = []
 
         for d in range(self.dim_):
-            inner_knots = self._place_spanning_knots(X[:, d], y, n_basis, strategy, selector, self.task)
-            knots = self._pad_knots(inner_knots)
+            knots = self._place_bspline_knots(X[:, d], y, output_dim, self.degree, strategy, selector, self.task)
             basis = self._basis_matrix(X[:, d], knots)
             penalty = self._difference_penalty(len(knots) - self.degree - 1)
             if self.include_bias:
@@ -169,6 +200,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
             self.knots_.append(knots)
             self.bases_.append(basis)
             self.penalties_.append(penalty)
+            self.n_knots_.append(max(0, len(knots) - 2 * (self.degree + 1)))
 
         n_samples = X.shape[0]
         design = self.bases_[0]

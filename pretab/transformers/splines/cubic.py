@@ -4,23 +4,37 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.exceptions import InvalidParamError
 from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
 
 class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
-    """
+    r"""
     Cubic Spline Transformer for one-dimensional or multi-dimensional input features.
 
-    This transformer applies cubic spline basis expansions to continuous features using uniformly spaced knots.
-    The output includes standard polynomial features up to cubic degree and cubic spline basis functions derived
-    from shifted knot positions. Optionally, a bias term can be included.
+    This transformer applies a truncated-power cubic spline basis to each
+    continuous feature. The basis stacks the polynomial terms :math:`x, x^2, x^3`
+    with one truncated cubic term :math:`(x - \kappa)^3_+` per interior knot
+    :math:`\kappa`. Optionally a bias (intercept) column is prepended.
+
+    Let :math:`m := \mathtt{output\_dim}` be the number of non-bias output columns
+    produced per feature. A cubic truncated-power basis with :math:`K` interior
+    knots has
+
+    .. math::
+
+        m = 3 + K,
+
+    so the requested ``output_dim`` is inverted to :math:`K = \mathtt{output\_dim} - 3`
+    interior knots. ``include_bias=True`` adds one further column on top of ``output_dim``.
 
     Parameters
     ----------
-    n_basis : int, default=10
-        Number of knots to place across the range of each feature (canonical name;
-        the legacy ``n_knots`` alias still works and emits a ``FutureWarning``).
+    output_dim : int, default=10
+        Number of non-bias output columns per feature (:math:`m`). Must be at
+        least 3 (the three polynomial terms; ``output_dim == 3`` places no interior
+        knots). The number of interior knots is ``output_dim - 3``.
 
     degree : int, default=3
         Degree of the polynomial spline. Currently fixed to 3 (cubic), included for compatibility.
@@ -29,13 +43,14 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         Whether to include a bias (intercept) term in the output feature set.
 
     strategy : {"uniform", "quantile"}, default="uniform"
-        Knot placement rule. ``"uniform"`` reproduces the historical evenly spaced
-        knots; ``"quantile"`` places them at evenly spaced data quantiles.
+        Interior-knot placement rule. ``"uniform"`` spaces knots evenly across the
+        range; ``"quantile"`` places them at evenly spaced data quantiles.
 
     selector : BaseKnotSelector or None, default=None
         Optional target-aware knot selector (for example ``CARTKnotSelector``).
-        When provided it determines the internal knots from the target and
-        requires ``y`` during ``fit``.
+        When provided it determines the interior knots from the target and
+        requires ``y`` during ``fit``; the resulting output width is then
+        data-driven and may differ from ``output_dim``.
 
     task : {"regression", "classification"} or None, default=None
         Task forwarded to a target-aware ``selector``.
@@ -43,62 +58,70 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     Attributes
     ----------
     knots_ : list of ndarray
-        List of arrays containing the knots used for each feature.
+        Interior knots used for each feature (length ``output_dim - 3`` on the
+        default, non-selector path).
+
+    n_knots_ : list of int
+        Number of interior knots placed for each feature (``len(knots_[i])``).
 
     designs_ : list of ndarray
-        List of design matrices (spline basis evaluations) for each input feature during fitting.
+        Cached design matrices (spline basis evaluations) for each input feature,
+        each of shape ``(n_samples, output_dim (+1 if include_bias))``.
+
+    n_basis_ : list of int
+        Number of output columns per feature, including the optional bias.
 
     n_features_in_ : int
-        Number of input features seen during `fit`.
+        Number of input features seen during ``fit``.
+
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted); equals
+        ``n_features * (output_dim (+1 if include_bias))``.
 
     Notes
     -----
-    The basis includes:
-    - Polynomial terms: x, x^2, x^3
-    - Truncated power basis functions: (x - knot)^3_+
-
-    The implementation is based on B-spline basis functions but follows a truncated power basis formulation.
-    Each transformed feature is expanded to a higher-dimensional representation depending on `n_knots` and
-    whether bias is included.
-
-    This transformer supports multidimensional input and stacks all expanded features horizontally.
+    The basis includes the polynomial terms ``x, x^2, x^3`` followed by the
+    truncated power terms ``(x - knot)^3_+`` for each interior knot. Each feature
+    is expanded independently and the results are stacked horizontally.
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import CubicSplineTransformer
     >>> X = np.linspace(0, 1, 20).reshape(-1, 1)
-    >>> transformer = CubicSplineTransformer(n_knots=5)
-    >>> transformer.fit_transform(X).shape
+    >>> transformer = CubicSplineTransformer(output_dim=8)
+    >>> Xt = transformer.fit_transform(X)
+    >>> Xt.shape
     (20, 8)
+    >>> transformer.n_knots_
+    [5]
+    >>> transformer.total_output_dim_
+    8
     """
 
     _feature_suffix_value = "cs"
     _param_aliases: ClassVar[dict[str, str]] = {
-        "n_knots": "n_basis",
         "knot_strategy": "strategy",
         "knot_selector": "selector",
     }
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         degree=3,
         include_bias=False,
         strategy=UNSET,
         selector=UNSET,
         task=None,
-        n_knots=UNSET,
         knot_strategy=UNSET,
         knot_selector=UNSET,
     ):
-        self.n_basis = n_basis
+        self.output_dim = output_dim
         self.degree = degree
         self.include_bias = include_bias
         self.strategy = strategy
         self.selector = selector
         self.task = task
-        self.n_knots = n_knots
         self.knot_strategy = knot_strategy
         self.knot_selector = knot_selector
 
@@ -118,19 +141,25 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
-        n_basis = self._resolve_param("n_basis", default=10)
+        output_dim = self._resolve_param("output_dim", default=10)
         strategy = self._resolve_param("strategy", default="uniform")
         selector = self._resolve_param("selector", default=None)
+
+        if output_dim < 3:
+            raise InvalidParamError(f"output_dim must be >= 3 for the cubic spline basis, got {output_dim}")
+
+        n_interior = output_dim - 3
 
         self.knots_ = []
         self.designs_ = []
         for i in range(X.shape[1]):
             xi = X[:, i]
-            knots = self._place_spanning_knots(xi, y, n_basis, strategy, selector, self.task)
+            knots = self._place_interior_knots(xi, y, n_interior, strategy, selector, self.task)
             self.knots_.append(knots)
             self.designs_.append(self._bspline_basis(xi, knots))
 
         self.n_basis_ = [design.shape[1] for design in self.designs_]
+        self.n_knots_ = [len(knots) for knots in self.knots_]
         return self
 
     def transform(self, X):

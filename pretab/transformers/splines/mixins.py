@@ -14,7 +14,7 @@ import numpy as np
 
 from ...core.base import BasePreTabTransformer
 from ...core.exceptions import IncompatibleParamsError
-from ...core.knots import spanning_knots
+from ...core.knots import generate_internal_knots, spanning_knots
 
 
 class SplineBasisMixin(BasePreTabTransformer):
@@ -71,3 +71,45 @@ class SplineBasisMixin(BasePreTabTransformer):
             selected = np.unique(selected[(selected > x_min) & (selected < x_max)])
             return np.concatenate([[x_min], selected, [x_max]])
         return spanning_knots(x, n_basis, strategy)
+
+    def _place_interior_knots(self, x, y, n_interior, strategy, selector, task):
+        """Return the interior knots (endpoints excluded) for one feature.
+
+        Unlike :meth:`_place_spanning_knots`, no boundary points are appended: the
+        returned array holds only the strictly-interior knots that the B/M/I,
+        cubic, p-spline and tensor-product families use to reach an exact
+        ``output_dim``. When ``selector`` is provided the interior knots come from
+        the target-aware selector (their count is data-driven and may differ from
+        ``n_interior``); otherwise ``n_interior`` knots are placed with
+        :func:`pretab.core.knots.generate_internal_knots`.
+        """
+        x = np.asarray(x)
+        if selector is not None:
+            if y is None:
+                raise IncompatibleParamsError(
+                    "A knot selector requires y during fit for target-aware knot placement."
+                )
+            selected = np.asarray(
+                selector.get_knot_locations(x.reshape(-1, 1), y, task=task), dtype=float
+            )
+            x_min, x_max = x.min(), x.max()
+            return np.unique(selected[(selected > x_min) & (selected < x_max)])
+        return generate_internal_knots(x, n_interior, strategy)
+
+    def _place_bspline_knots(self, x, y, output_dim, degree, strategy, selector, task):
+        """Return the full padded B-spline knot vector for one feature.
+
+        Places ``output_dim - degree - 1`` interior knots (via
+        :meth:`_place_interior_knots`) and brackets them with ``degree + 1``
+        repeated boundary knots on each side -- the B/M/I convention used by
+        :class:`~pretab.transformers.splines.base_spline.BaseSplineTransformer`.
+        The resulting marginal B-spline basis then has exactly ``output_dim``
+        (non-bias) columns: ``len(knots) - degree - 1 == output_dim``.
+        """
+        x = np.asarray(x)
+        n_interior = output_dim - degree - 1
+        interior = self._place_interior_knots(x, y, n_interior, strategy, selector, task)
+        x_min, x_max = x.min(), x.max()
+        boundary_left = np.repeat(x_min, degree + 1)
+        boundary_right = np.repeat(x_max, degree + 1)
+        return np.concatenate([boundary_left, interior, boundary_right])

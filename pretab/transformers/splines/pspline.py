@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.exceptions import InvalidParamError
 from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
@@ -24,19 +25,30 @@ def bspline_basis(x, knots, degree, i):
 
 
 class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
-    """
+    r"""
     P-spline Transformer for smooth spline basis expansion with penalization.
 
-    This transformer expands each input feature into a set of B-spline basis functions
-    and stores a corresponding penalty matrix for regularization. It is useful in
-    Generalized Additive Models (GAMs) where smoothness is enforced through penalties.
+    This transformer expands each input feature into a set of B-spline basis
+    functions and stores a corresponding difference-penalty matrix for
+    regularization. It is useful in Generalized Additive Models (GAMs) where
+    smoothness is enforced through penalties.
+
+    Let :math:`p` be the ``degree`` and :math:`m := \mathtt{output\_dim}` the number
+    of non-bias output columns per feature. A B-spline basis with :math:`K` interior
+    knots (padded by :math:`p + 1` repeated boundary knots on each side) has
+
+    .. math::
+
+        m = \operatorname{len}(\mathtt{knots}) - p - 1 = K + p + 1,
+
+    so the requested ``output_dim`` is inverted to :math:`K = \mathtt{output\_dim} - p - 1`
+    interior knots. ``include_bias=True`` adds one further column on top of ``output_dim``.
 
     Parameters
     ----------
-    n_basis : int, default=20
-        Number of interior knots to place across the range of each feature
-        (canonical name; the legacy ``n_knots`` alias still works and emits a
-        ``FutureWarning``).
+    output_dim : int, default=20
+        Number of non-bias output columns per feature (:math:`m`). Must be at least
+        ``degree + 1``. The number of interior knots is ``output_dim - degree - 1``.
 
     degree : int, default=3
         Degree of the B-spline basis functions (e.g., 3 for cubic splines).
@@ -50,13 +62,14 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         left unpenalized (a zero row/column is added to the penalty matrix).
 
     strategy : {"uniform", "quantile"}, default="uniform"
-        Knot placement rule. ``"uniform"`` reproduces the historical evenly spaced
-        knots; ``"quantile"`` places them at evenly spaced data quantiles.
+        Interior-knot placement rule. ``"uniform"`` spaces knots evenly across the
+        range; ``"quantile"`` places them at evenly spaced data quantiles.
 
     selector : BaseKnotSelector or None, default=None
         Optional target-aware knot selector (for example ``CARTKnotSelector``).
-        When provided it determines the interior knots from the target and
-        requires ``y`` during ``fit``.
+        When provided it determines the interior knots from the target and requires
+        ``y`` during ``fit``; the resulting output width is then data-driven and may
+        differ from ``output_dim``.
 
     task : {"regression", "classification"} or None, default=None
         Task forwarded to a target-aware ``selector``.
@@ -64,16 +77,26 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     Attributes
     ----------
     knots_ : list of ndarray
-        List of extended knot sequences (with added boundary knots) for each feature.
+        Full padded knot sequence (interior knots bracketed by ``degree + 1``
+        repeated boundary knots on each side) for each feature.
+
+    n_knots_ : list of int
+        Number of interior knots for each feature (``output_dim - degree - 1`` on
+        the default, non-selector path).
 
     penalty_ : list of ndarray
-        List of penalty matrices (D^T D) for each feature, where D is the differencing matrix.
+        Difference-penalty matrices (``D^T D``) for each feature.
 
     n_basis_ : list of int
-        Number of B-spline basis functions generated for each feature.
+        Number of output columns per feature, including the optional bias (equals
+        ``output_dim (+1 if include_bias)`` on the default path).
 
     n_features_in_ : int
-        Number of input features seen during `fit`.
+        Number of input features seen during ``fit``.
+
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted); equals
+        ``n_features * (output_dim (+1 if include_bias))``.
 
     Notes
     -----
@@ -86,62 +109,63 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     >>> import numpy as np
     >>> from pretab.transformers import PSplineTransformer
     >>> X = np.linspace(0, 1, 30).reshape(-1, 1)
-    >>> transformer = PSplineTransformer(n_knots=6)
-    >>> transformer.fit_transform(X).shape
+    >>> transformer = PSplineTransformer(output_dim=8)
+    >>> Xt = transformer.fit_transform(X)
+    >>> Xt.shape
     (30, 8)
+    >>> transformer.n_knots_
+    [4]
+    >>> transformer.total_output_dim_
+    8
     """
 
     _feature_suffix_value = "ps"
     _param_aliases: ClassVar[dict[str, str]] = {
-        "n_knots": "n_basis",
         "knot_strategy": "strategy",
         "knot_selector": "selector",
     }
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         degree=3,
         diff_order=2,
         include_bias=False,
         strategy=UNSET,
         selector=UNSET,
         task=None,
-        n_knots=UNSET,
         knot_strategy=UNSET,
         knot_selector=UNSET,
     ):
-        self.n_basis = n_basis
+        self.output_dim = output_dim
         self.degree = degree
         self.diff_order = diff_order
         self.include_bias = include_bias
         self.strategy = strategy
         self.selector = selector
         self.task = task
-        self.n_knots = n_knots
         self.knot_strategy = knot_strategy
         self.knot_selector = knot_selector
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
-        n_basis = self._resolve_param("n_basis", default=20)
+        output_dim = self._resolve_param("output_dim", default=20)
         strategy = self._resolve_param("strategy", default="uniform")
         selector = self._resolve_param("selector", default=None)
+
+        if output_dim < self.degree + 1:
+            raise InvalidParamError(
+                f"output_dim must be >= degree + 1 = {self.degree + 1} for the p-spline basis, got {output_dim}"
+            )
 
         self.knots_ = []
         self.penalty_ = []
         self.n_basis_ = []
+        self.n_knots_ = []
 
         for i in range(X.shape[1]):
             x = X[:, i]
-            inner_knots = self._place_spanning_knots(x, y, n_basis, strategy, selector, self.task)
-            knots = np.concatenate(
-                (
-                    np.repeat(inner_knots[0], self.degree),
-                    inner_knots,
-                    np.repeat(inner_knots[-1], self.degree),
-                )
-            )
+            knots = self._place_bspline_knots(x, y, output_dim, self.degree, strategy, selector, self.task)
             n_basis = len(knots) - self.degree - 1
             D = np.eye(n_basis)
             for _ in range(self.diff_order):
@@ -151,6 +175,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
                 penalty = np.pad(penalty, ((1, 0), (1, 0)))
             self.knots_.append(knots)
             self.n_basis_.append(n_basis + (1 if self.include_bias else 0))
+            self.n_knots_.append(max(0, len(knots) - 2 * (self.degree + 1)))
             self.penalty_.append(penalty)
 
         return self

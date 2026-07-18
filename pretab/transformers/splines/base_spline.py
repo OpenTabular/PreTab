@@ -35,119 +35,120 @@ class BaseSplineTransformer(BasePreTabTransformer):
     """
     Base class for spline basis expansions with target-aware knot placement.
 
+    Let ``p`` be the spline ``degree`` and ``m := output_dim`` the number of
+    non-bias output columns produced per input feature. A B/M/I spline basis with
+    ``K`` interior knots has ``m = K + p + 1`` columns, so the requested
+    ``output_dim`` is inverted to ``K = output_dim - p - 1`` interior knots
+    (bracketed by ``p + 1`` repeated boundary knots on each side). ``include_bias``
+    adds one further intercept column on top of ``output_dim``.
+
     Parameters
     ----------
-    n_basis_functions : int, default=5
-        Number of basis functions per feature. The number of internal knots is
-        derived as ``n_basis_functions - degree - 1``. Must be between 5 and 50.
-        Ignored when ``knot_locations`` or ``knot_selector`` is provided.
+    output_dim : int, default=5
+        Number of non-bias output columns per feature (``m``). The number of
+        interior knots is derived as ``output_dim - degree - 1``. Must be at least
+        ``degree + 1`` and at most 50. Ignored when ``knot_locations`` or a
+        ``selector`` is provided.
 
     degree : int, default=3
         Degree of the spline (3 is cubic, 2 quadratic, 1 linear).
 
-    knot_strategy : {"uniform", "quantile"}, default="quantile"
+    strategy : {"uniform", "quantile"}, default="quantile"
         Placement rule used for the automatic strategy. ``"uniform"`` spaces knots
         evenly across the range, ``"quantile"`` places them at data quantiles.
+        The legacy alias ``knot_strategy`` still works (emits a ``FutureWarning``).
 
     include_bias : bool, default=False
         Whether to prepend a constant intercept column per feature.
 
     knot_locations : ndarray or None, default=None
         Explicit internal knot locations applied to every feature. Overrides
-        ``n_basis_functions``.
+        ``output_dim``.
 
-    knot_selector : BaseKnotSelector or None, default=None
+    selector : BaseKnotSelector or None, default=None
         Target-aware knot selector (for example ``CARTKnotSelector``). Takes
         priority over all other placement options and requires ``y`` during fit.
+        The legacy alias ``knot_selector`` still works (emits a ``FutureWarning``).
 
     adaptive : bool, default=False
-        If True, the number of basis functions may vary per feature within
-        ``[min_basis_functions, max_basis_functions]``.
+        If True, the per-feature output dimension may vary within
+        ``[min_output_dim, max_output_dim]``.
 
-    min_basis_functions : int or None, default=None
-        Lower bound used in adaptive mode.
+    min_output_dim : int or None, default=None
+        Lower bound on the per-feature output dimension used in adaptive mode.
 
-    max_basis_functions : int or None, default=None
-        Upper bound used in adaptive mode.
-
-    n_knots : int or None, default=None
-        Compatibility alias for ``n_basis_functions``. When set, it takes
-        precedence and is interpreted as the number of basis functions. This lets
-        the Preprocessor keep passing ``n_knots`` to spline strategies.
+    max_output_dim : int or None, default=None
+        Upper bound on the per-feature output dimension used in adaptive mode.
 
     task : {"regression", "classification"} or None, default=None
-        Task passed to a target-aware ``knot_selector``.
+        Task passed to a target-aware ``selector``.
 
     Attributes
     ----------
     knots_ : list of ndarray
         Full knot vector (with repeated boundary knots) for each feature.
 
+    n_knots_ : list of int
+        Number of interior knots placed for each feature
+        (``output_dim - degree - 1`` on the default, non-selector path).
+
     n_basis_ : list of int
-        Number of spline basis functions for each feature, excluding the bias term.
+        Number of spline basis functions for each feature, excluding the bias term
+        (equals ``output_dim`` on the default path).
 
     n_features_in_ : int
         Number of input features seen during ``fit``.
 
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted).
+
     Notes
     -----
-    Knot placement follows a fixed priority: a target-aware ``knot_selector``
-    takes precedence over explicit ``knot_locations``, which in turn take
-    precedence over the automatic ``n_basis_functions`` strategy. Multi-column
-    input is expanded column by column and stacked horizontally.
+    Knot placement follows a fixed priority: a target-aware ``selector`` takes
+    precedence over explicit ``knot_locations``, which in turn take precedence over
+    the automatic ``output_dim`` strategy. Multi-column input is expanded column by
+    column and stacked horizontally.
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import BSplineTransformer
     >>> X = np.linspace(0, 1, 50).reshape(-1, 1)
-    >>> BSplineTransformer(n_basis_functions=8).fit_transform(X).shape
+    >>> BSplineTransformer(output_dim=8).fit_transform(X).shape
     (50, 9)
     """
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         degree: int = 3,
         strategy=UNSET,
         include_bias: bool = False,
         knot_locations: np.ndarray | None = None,
         selector=UNSET,
         adaptive: bool = False,
-        min_basis=UNSET,
-        max_basis=UNSET,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
         task: Literal["regression", "classification"] | None = None,
-        n_basis_functions=UNSET,
         knot_strategy=UNSET,
         knot_selector=UNSET,
-        min_basis_functions=UNSET,
-        max_basis_functions=UNSET,
-        n_knots=UNSET,
     ):
-        self.n_basis = n_basis
+        self.output_dim = output_dim
         self.degree = degree
         self.strategy = strategy
         self.include_bias = include_bias
         self.knot_locations = knot_locations
         self.selector = selector
         self.adaptive = adaptive
-        self.min_basis = min_basis
-        self.max_basis = max_basis
+        self.min_output_dim = min_output_dim
+        self.max_output_dim = max_output_dim
         self.task: Literal["regression", "classification"] | None = task
-        self.n_basis_functions = n_basis_functions
         self.knot_strategy = knot_strategy
         self.knot_selector = knot_selector
-        self.min_basis_functions = min_basis_functions
-        self.max_basis_functions = max_basis_functions
-        self.n_knots = n_knots
 
     _param_aliases: ClassVar[dict[str, str]] = {
-        "n_basis_functions": "n_basis",
-        "n_knots": "n_basis",
         "knot_strategy": "strategy",
         "knot_selector": "selector",
-        "min_basis_functions": "min_basis",
-        "max_basis_functions": "max_basis",
     }
 
     def _basis_to_knots(self, n_basis: int) -> int:
@@ -160,9 +161,9 @@ class BaseSplineTransformer(BasePreTabTransformer):
         """Return the (min, max) number of basis functions to allow per feature."""
         if not self.adaptive:
             if min_basis_req is not None and n_basis < min_basis_req:
-                raise ValueError("n_basis_functions must be >= min_basis_functions when adaptive=False")
+                raise ValueError("output_dim must be >= min_output_dim when adaptive=False")
             if max_basis_req is not None and n_basis > max_basis_req:
-                raise ValueError("n_basis_functions must be <= max_basis_functions when adaptive=False")
+                raise ValueError("output_dim must be <= max_output_dim when adaptive=False")
             min_basis = n_basis
             max_basis = n_basis
         else:
@@ -170,11 +171,11 @@ class BaseSplineTransformer(BasePreTabTransformer):
             max_basis = max_basis_req if max_basis_req is not None else n_basis
 
         if min_basis < self.degree + 1:
-            raise ValueError(f"min_basis_functions must be >= degree + 1 = {self.degree + 1}, got {min_basis}")
+            raise ValueError(f"min_output_dim must be >= degree + 1 = {self.degree + 1}, got {min_basis}")
         if max_basis > 50:
-            raise ValueError(f"max_basis_functions should be <= 50, got {max_basis}")
+            raise ValueError(f"max_output_dim should be <= 50, got {max_basis}")
         if min_basis > max_basis:
-            raise ValueError("min_basis_functions must be <= max_basis_functions")
+            raise ValueError("min_output_dim must be <= max_output_dim")
         return min_basis, max_basis
 
     def _generate_knots(self, x: np.ndarray, n_knots: int, strategy: str) -> np.ndarray:
@@ -235,7 +236,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         elif self.knot_locations is not None:
             expected_knots = self._basis_to_knots(n_basis)
             if not self.adaptive and len(self.knot_locations) != expected_knots:
-                raise ValueError("knot_locations length must match n_basis_functions when adaptive=False")
+                raise ValueError("knot_locations length must match output_dim - degree - 1 when adaptive=False")
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
         else:
             n_internal = self._basis_to_knots(n_basis)
@@ -251,17 +252,15 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Determine per-feature knot vectors."""
-        n_basis = self._resolve_param("n_basis", default=5)
+        n_basis = self._resolve_param("output_dim", default=5)
         strategy = self._resolve_param("strategy", default="quantile")
         selector = self._resolve_param("selector", default=None)
-        min_basis_req = self._resolve_param("min_basis", default=None)
-        max_basis_req = self._resolve_param("max_basis", default=None)
+        min_basis_req = self._resolve_param("min_output_dim", default=None)
+        max_basis_req = self._resolve_param("max_output_dim", default=None)
         if n_basis < self.degree + 1:
-            raise ValueError(f"n_basis_functions must be >= degree + 1 = {self.degree + 1}, got {n_basis}")
-        if n_basis < 5:
-            raise ValueError(f"n_basis_functions must be >= 5 to ensure at least 1 internal knot, got {n_basis}")
+            raise ValueError(f"output_dim must be >= degree + 1 = {self.degree + 1}, got {n_basis}")
         if n_basis > 50:
-            raise ValueError(f"n_basis_functions should be <= 50, got {n_basis}")
+            raise ValueError(f"output_dim should be <= 50, got {n_basis}")
 
         X = self._validate(X, reset=True)
 
@@ -280,6 +279,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
             )
 
         self.n_basis_ = [len(knots) - self.degree - 1 for knots in self.knots_]
+        self.n_knots_ = [len(knots) - 2 * (self.degree + 1) for knots in self.knots_]
         return self
 
     def transform(self, X):

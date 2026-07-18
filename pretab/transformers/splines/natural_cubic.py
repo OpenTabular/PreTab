@@ -4,26 +4,38 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.exceptions import InvalidParamError
 from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
 
 class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
-    """
+    r"""
     Natural Cubic Spline Transformer for continuous features.
 
-    This transformer expands each input feature using a natural cubic spline basis. Natural cubic splines are
-    piecewise cubic polynomials that are linear beyond the boundary knots, ensuring smooth extrapolation.
+    This transformer expands each input feature using a natural cubic spline basis.
+    Natural cubic splines are piecewise cubic polynomials that are linear beyond the
+    boundary knots, ensuring smooth extrapolation. The basis stacks a linear term
+    with one constrained non-linear term per interior knot (and, optionally, a bias
+    column).
 
-    The resulting transformation includes:
-    - A linear component (and optionally a bias term),
-    - Several non-linear basis functions constrained to produce a natural spline.
+    Let :math:`m := \mathtt{output\_dim}` be the number of non-bias output columns
+    per feature and :math:`T` the total number of (spanning) knots including the two
+    boundary knots. The natural-spline basis drops the intercept, so
+
+    .. math::
+
+        m = T - 1,
+
+    and the requested ``output_dim`` is inverted to :math:`T = \mathtt{output\_dim} + 1`
+    spanning knots (both endpoints retained for the linear-tail constraint).
+    ``include_bias=True`` adds one further column on top of ``output_dim``.
 
     Parameters
     ----------
-    n_basis : int, default=5
-        Number of knots to place across the range of each feature (canonical name;
-        the legacy ``n_knots`` alias still works and emits a ``FutureWarning``).
+    output_dim : int, default=5
+        Number of non-bias output columns per feature (:math:`m`). Must be at least
+        2. The number of spanning knots placed is ``output_dim + 1``.
 
     degree : int, default=3
         Degree of the spline. Natural cubic splines are cubic by definition, so
@@ -38,8 +50,9 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
 
     selector : BaseKnotSelector or None, default=None
         Optional target-aware knot selector (for example ``CARTKnotSelector``).
-        When provided it determines the internal knots from the target and
-        requires ``y`` during ``fit``.
+        When provided it determines the knots from the target and requires ``y``
+        during ``fit``; the resulting output width is then data-driven and may
+        differ from ``output_dim``.
 
     task : {"regression", "classification"} or None, default=None
         Task forwarded to a target-aware ``selector``.
@@ -47,57 +60,71 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
     Attributes
     ----------
     knots_ : list of ndarray
-        List of knot vectors used for each feature.
+        Spanning knot vectors used for each feature (length ``output_dim + 1`` on
+        the default, non-selector path).
+
+    n_knots_ : list of int
+        Number of interior knots for each feature (``len(knots_[i]) - 2``).
 
     designs_ : list of ndarray
-        Cached spline basis design matrices (used for penalty computation or inspection).
+        Cached spline basis design matrices, each of shape
+        ``(n_samples, output_dim (+1 if include_bias))``.
+
+    n_basis_ : list of int
+        Number of output columns per feature, including the optional bias.
 
     n_features_in_ : int
-        Number of input features seen during `fit`.
+        Number of input features seen during ``fit``.
+
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted); equals
+        ``n_features * (output_dim (+1 if include_bias))``.
 
     Notes
     -----
-    The basis is constructed to satisfy the natural spline constraint: the second derivative of the spline is zero
-    at the boundary knots. This reduces the tendency to overfit at the boundaries and improves extrapolation.
-
-    Each feature is transformed independently and their expanded outputs are concatenated.
+    The basis is constructed to satisfy the natural spline constraint: the second
+    derivative of the spline is zero at the boundary knots. This reduces overfitting
+    at the boundaries and improves extrapolation. Each feature is transformed
+    independently and the outputs are concatenated.
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import NaturalCubicSplineTransformer
     >>> X = np.linspace(0, 1, 20).reshape(-1, 1)
-    >>> transformer = NaturalCubicSplineTransformer(n_knots=5)
-    >>> transformer.fit_transform(X).shape
+    >>> transformer = NaturalCubicSplineTransformer(output_dim=4)
+    >>> Xt = transformer.fit_transform(X)
+    >>> Xt.shape
     (20, 4)
+    >>> transformer.n_knots_
+    [3]
+    >>> transformer.total_output_dim_
+    4
     """
 
     _feature_suffix_value = "ncs"
     _param_aliases: ClassVar[dict[str, str]] = {
-        "n_knots": "n_basis",
         "knot_strategy": "strategy",
         "knot_selector": "selector",
     }
 
     def __init__(
         self,
-        n_basis=UNSET,
+        output_dim=UNSET,
         degree=3,
         include_bias=False,
         strategy=UNSET,
         selector=UNSET,
         task=None,
-        n_knots=UNSET,
         knot_strategy=UNSET,
         knot_selector=UNSET,
     ):
-        self.n_basis = n_basis
+        self.output_dim = output_dim
         self.degree = degree
         self.include_bias = include_bias
         self.strategy = strategy
         self.selector = selector
         self.task = task
-        self.n_knots = n_knots
         self.knot_strategy = knot_strategy
         self.knot_selector = knot_selector
 
@@ -123,20 +150,28 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
-        n_basis = self._resolve_param("n_basis", default=5)
+        output_dim = self._resolve_param("output_dim", default=5)
         strategy = self._resolve_param("strategy", default="uniform")
         selector = self._resolve_param("selector", default=None)
+
+        if output_dim < 2:
+            raise InvalidParamError(
+                f"output_dim must be >= 2 for the natural cubic spline basis, got {output_dim}"
+            )
+
+        n_spanning = output_dim + 1
 
         self.knots_ = []
         self.designs_ = []
 
         for i in range(X.shape[1]):
             xi = X[:, i]
-            knots = self._place_spanning_knots(xi, y, n_basis, strategy, selector, self.task)
+            knots = self._place_spanning_knots(xi, y, n_spanning, strategy, selector, self.task)
             self.knots_.append(knots)
             self.designs_.append(self._basis(xi, knots))
 
         self.n_basis_ = [design.shape[1] for design in self.designs_]
+        self.n_knots_ = [max(0, len(knots) - 2) for knots in self.knots_]
         return self
 
     def transform(self, X):

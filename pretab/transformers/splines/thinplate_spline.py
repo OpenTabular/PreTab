@@ -4,21 +4,29 @@ from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.exceptions import InvalidParamError
 from .mixins import SplineBasisMixin
 
 
 class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
-    """
+    r"""
     Thin Plate Spline Transformer for smooth univariate basis expansion.
 
-    This transformer constructs a smooth, nonparametric basis using eigen-decomposed thin plate spline (TPS) kernels.
-    It supports only univariate input and is useful for modeling smooth nonlinear functions in regression tasks.
-    The basis functions are derived from the principal components of the projected TPS kernel matrix.
+    This transformer constructs a smooth, nonparametric basis using eigen-decomposed
+    thin plate spline (TPS) kernels. It supports only univariate input and is useful
+    for modeling smooth nonlinear functions in regression tasks. The basis functions
+    are the leading eigenvectors of the projected TPS kernel matrix.
+
+    Let :math:`m := \mathtt{output\_dim}` be the number of non-bias output columns.
+    The transformer keeps the top :math:`m` eigenvectors, so the output width equals
+    ``output_dim`` directly (this family is knot-free; there is no knot inversion).
+    ``include_bias=True`` adds one further intercept column.
 
     Parameters
     ----------
-    n_basis : int, default=10
-        Number of basis functions to extract from the eigen-decomposition of the TPS kernel.
+    output_dim : int, default=10
+        Number of non-bias output columns (:math:`m`) extracted from the
+        eigen-decomposition of the TPS kernel. Must be at least 1.
 
     include_bias : bool, default=False
         If True, prepend a constant intercept column to the output. The bias term
@@ -32,17 +40,24 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
     Z_ : ndarray of shape (n_samples, 2)
         Matrix containing intercept and linear term (used for null space projection).
 
-    eigvals_ : ndarray of shape (n_basis,)
+    eigvals_ : ndarray of shape (output_dim,)
         Top eigenvalues from the projected kernel matrix.
 
-    basis_ : ndarray of shape (n_samples, n_basis)
+    basis_ : ndarray of shape (n_samples, output_dim)
         Orthogonal basis functions corresponding to the top eigenvectors.
 
-    penalty_ : ndarray of shape (n_basis, n_basis)
+    penalty_ : ndarray of shape (output_dim, output_dim)
         Diagonal penalty matrix containing eigenvalues (used for smoothing regularization).
 
+    n_basis_ : list of int
+        Number of output columns for the single feature, including the optional bias.
+
     n_features_in_ : int
-        Number of input features seen during `fit`.
+        Number of input features seen during ``fit`` (always 1).
+
+    total_output_dim_ : int
+        Total number of output columns (fitted); equals
+        ``output_dim (+1 if include_bias)``.
 
     Notes
     -----
@@ -64,15 +79,18 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
     >>> import numpy as np
     >>> from pretab.transformers import ThinPlateSplineTransformer
     >>> X = np.linspace(0, 1, 30).reshape(-1, 1)
-    >>> transformer = ThinPlateSplineTransformer(n_basis=6)
-    >>> transformer.fit_transform(X).shape
+    >>> transformer = ThinPlateSplineTransformer(output_dim=6)
+    >>> Xt = transformer.fit_transform(X)
+    >>> Xt.shape
     (30, 6)
+    >>> transformer.total_output_dim_
+    6
     """
 
     _feature_suffix_value = "tps"
 
-    def __init__(self, n_basis=10, include_bias=False):
-        self.n_basis = n_basis
+    def __init__(self, output_dim=10, include_bias=False):
+        self.output_dim = output_dim
         self.include_bias = include_bias
 
     def _tps_kernel(self, r):
@@ -87,6 +105,9 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
 
         if X.shape[1] > 1:
             raise ValueError("ThinPlateSplineTransformer supports only univariate input.")
+
+        if self.output_dim < 1:
+            raise InvalidParamError(f"output_dim must be >= 1, got {self.output_dim}")
 
         x = X.reshape(-1, 1)
         self.x_ = x
@@ -107,8 +128,8 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
         eigvals = eigvals[idx]
         eigvecs = eigvecs[:, idx]
 
-        self.eigvals_ = eigvals[: self.n_basis]
-        self.basis_ = eigvecs[:, : self.n_basis] * np.sqrt(n)
+        self.eigvals_ = eigvals[: self.output_dim]
+        self.basis_ = eigvecs[:, : self.output_dim] * np.sqrt(n)
         penalty = np.diag(self.eigvals_)
         if self.include_bias:
             penalty = np.pad(penalty, ((1, 0), (1, 0)))
@@ -148,7 +169,7 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
 
         Returns
         -------
-        penalty_ : ndarray of shape (n_basis, n_basis)
+        penalty_ : ndarray of shape (output_dim, output_dim)
             Diagonal penalty matrix of eigenvalues used for regularization (with
             an unpenalized leading row/column when ``include_bias=True``).
         """
