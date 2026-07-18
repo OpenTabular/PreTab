@@ -2,8 +2,7 @@
 
 The RBF / ReLU / sigmoid / tanh transformers all place their basis centers at the
 split thresholds of a shallow decision tree fitted per feature. That logic lives
-here in ``core`` so every feature map consumes one implementation; the old
-``pretab.transformers.utils.utils`` path re-exports this function as a shim.
+here in ``core`` so every feature map consumes one implementation.
 """
 
 import numpy as np

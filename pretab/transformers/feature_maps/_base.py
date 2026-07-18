@@ -12,15 +12,15 @@ from typing import ClassVar
 import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
-from ..core.base import BasePreTabTransformer
-from ..core.centers import center_identification_using_decision_tree
-from ..core.exceptions import (
+from ...core.base import BasePreTabTransformer
+from ...core.centers import center_identification_using_decision_tree
+from ...core.exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
     PretabDataError,
 )
-from ..core.knots import select_knots, spanning_knots
-from ..core.params import UNSET, is_set
+from ...core.knots import select_knots, spanning_knots
+from ...core.params import UNSET, is_set
 
 
 class BaseCenterExpansion(BasePreTabTransformer):
