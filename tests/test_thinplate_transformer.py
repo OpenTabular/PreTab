@@ -7,16 +7,17 @@ from pretab.transformers import ThinPlateSplineTransformer
 
 def test_tprs_output_shape_and_values():
     X = np.linspace(0, 1, 30).reshape(-1, 1)
-    transformer = ThinPlateSplineTransformer(n_basis=6)
+    transformer = ThinPlateSplineTransformer(output_dim=6)
     Xt = transformer.fit_transform(X)
 
     assert Xt.shape == (30, 6)
+    assert transformer.total_output_dim_ == 6
     assert np.isfinite(Xt).all()
 
 
 def test_tprs_output_consistency():
     X = np.random.rand(20, 1)
-    transformer = ThinPlateSplineTransformer(n_basis=5)
+    transformer = ThinPlateSplineTransformer(output_dim=5)
     transformer.fit(X)
     Xt1 = transformer.transform(X)
     Xt2 = transformer.fit_transform(X)
@@ -26,7 +27,7 @@ def test_tprs_output_consistency():
 
 def test_tprs_penalty_shape_and_symmetry():
     X = np.random.rand(25, 1)
-    transformer = ThinPlateSplineTransformer(n_basis=7)
+    transformer = ThinPlateSplineTransformer(output_dim=7)
     transformer.fit(X)
     P = transformer.get_penalty_matrix()
 
@@ -36,11 +37,11 @@ def test_tprs_penalty_shape_and_symmetry():
 
 def test_tprs_multivariate_error():
     X = np.random.rand(10, 2)
-    transformer = ThinPlateSplineTransformer(n_basis=4)
+    transformer = ThinPlateSplineTransformer(output_dim=4)
     with pytest.raises(ValueError, match="univariate"):
         transformer.fit(X)
 
-    transformer = ThinPlateSplineTransformer(n_basis=4)
+    transformer = ThinPlateSplineTransformer(output_dim=4)
     transformer.fit(np.random.rand(10, 1))
     with pytest.raises(ValueError, match="univariate"):
         transformer.transform(X)
@@ -48,7 +49,7 @@ def test_tprs_multivariate_error():
 
 def test_tprs_feature_names_out():
     X = np.random.rand(20, 1)
-    transformer = ThinPlateSplineTransformer(n_basis=6)
+    transformer = ThinPlateSplineTransformer(output_dim=6)
     Xt = transformer.fit_transform(X)
 
     names = transformer.get_feature_names_out(["a"])
@@ -59,7 +60,7 @@ def test_tprs_feature_names_out():
 
 def test_tprs_feature_names_out_default_input():
     X = np.random.rand(15, 1)
-    transformer = ThinPlateSplineTransformer(n_basis=5).fit(X)
+    transformer = ThinPlateSplineTransformer(output_dim=5).fit(X)
 
     names = transformer.get_feature_names_out()
     assert len(names) == transformer.n_basis_[0]

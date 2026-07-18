@@ -7,27 +7,30 @@ from pretab.transformers import CubicSplineTransformer
 
 def test_cubic_spline_single_feature_shape():
     X = np.linspace(0, 1, 20).reshape(-1, 1)
-    transformer = CubicSplineTransformer(n_knots=5)
+    transformer = CubicSplineTransformer(output_dim=8)
     Xt = transformer.fit_transform(X)
 
-    expected_dim = 3 + 5  # x, x², x³, and 5 truncated cubics
-    assert Xt.shape == (20, expected_dim)
+    # output_dim non-bias columns (m = 3 + K interior knots) per feature
+    assert Xt.shape == (20, 8)
+    assert transformer.n_knots_ == [5]
+    assert transformer.total_output_dim_ == 8
     assert np.isfinite(Xt).all()
 
 
 def test_cubic_spline_multi_feature_shape():
     X = np.random.rand(15, 3)
-    transformer = CubicSplineTransformer(n_knots=6, include_bias=True)
+    transformer = CubicSplineTransformer(output_dim=9, include_bias=True)
     Xt = transformer.fit_transform(X)
 
-    expected_dim = (1 + 3 + 6) * 3  # bias + x,x²,x³ + 6 truncated cubics, per feature
+    expected_dim = (1 + 9) * 3  # bias + output_dim columns, per feature
     assert Xt.shape == (15, expected_dim)
+    assert transformer.total_output_dim_ == expected_dim
     assert np.isfinite(Xt).all()
 
 
 def test_cubic_spline_output_consistency():
     X = np.random.rand(10, 2)
-    transformer = CubicSplineTransformer(n_knots=4)
+    transformer = CubicSplineTransformer(output_dim=7)
     transformer.fit(X)
     Xt1 = transformer.transform(X)
     Xt2 = transformer.fit_transform(X)
@@ -38,18 +41,17 @@ def test_cubic_spline_output_consistency():
 
 def test_cubic_spline_penalty_matrix_shape():
     X = np.linspace(0, 1, 30).reshape(-1, 1)
-    transformer = CubicSplineTransformer(n_knots=7)
+    transformer = CubicSplineTransformer(output_dim=10)
     transformer.fit(X)
     P = transformer.get_penalty_matrix()
 
-    expected_dim = 3 + 7
-    assert P.shape == (expected_dim, expected_dim)
+    assert P.shape == (10, 10)
     assert np.allclose(P, P.T, atol=1e-6)
 
 
 def test_cubic_feature_names_out():
     X = np.random.rand(20, 2)
-    transformer = CubicSplineTransformer(n_knots=5)
+    transformer = CubicSplineTransformer(output_dim=8)
     Xt = transformer.fit_transform(X)
 
     names = transformer.get_feature_names_out(["a", "b"])
@@ -60,7 +62,7 @@ def test_cubic_feature_names_out():
 
 def test_cubic_feature_names_out_default_input():
     X = np.random.rand(15, 2)
-    transformer = CubicSplineTransformer(n_knots=4).fit(X)
+    transformer = CubicSplineTransformer(output_dim=7).fit(X)
 
     names = transformer.get_feature_names_out()
     assert len(names) == sum(transformer.n_basis_)

@@ -7,17 +7,19 @@ from pretab.transformers import NaturalCubicSplineTransformer
 
 def test_natural_spline_single_feature_shape():
     X = np.linspace(0, 1, 20).reshape(-1, 1)
-    transformer = NaturalCubicSplineTransformer(n_knots=5)
+    transformer = NaturalCubicSplineTransformer(output_dim=5)
     Xt = transformer.fit_transform(X)
 
-    n_basis = transformer.designs_[0].shape[1]
-    assert Xt.shape == (20, n_basis)
+    # width equals output_dim exactly (m = T - 1, T = output_dim + 1 spanning knots)
+    assert Xt.shape == (20, 5)
+    assert transformer.n_knots_ == [4]
+    assert transformer.total_output_dim_ == 5
     assert np.isfinite(Xt).all()
 
 
 def test_natural_spline_multi_feature_shape():
     X = np.random.rand(25, 2)
-    transformer = NaturalCubicSplineTransformer(n_knots=6, include_bias=True)
+    transformer = NaturalCubicSplineTransformer(output_dim=6, include_bias=True)
     Xt = transformer.fit_transform(X)
 
     n_features = X.shape[1]
@@ -28,7 +30,7 @@ def test_natural_spline_multi_feature_shape():
 
 def test_natural_spline_output_consistency():
     X = np.random.rand(30, 2)
-    transformer = NaturalCubicSplineTransformer(n_knots=4)
+    transformer = NaturalCubicSplineTransformer(output_dim=4)
     transformer.fit(X)
     Xt1 = transformer.transform(X)
     Xt2 = transformer.fit_transform(X)
@@ -38,7 +40,7 @@ def test_natural_spline_output_consistency():
 
 def test_natural_spline_penalty_matrix_symmetry():
     X = np.linspace(0, 1, 50).reshape(-1, 1)
-    transformer = NaturalCubicSplineTransformer(n_knots=5)
+    transformer = NaturalCubicSplineTransformer(output_dim=5)
     transformer.fit(X)
     P = transformer.get_penalty_matrix()
 
@@ -48,7 +50,7 @@ def test_natural_spline_penalty_matrix_symmetry():
 
 def test_natural_spline_feature_names_out():
     X = np.random.rand(20, 2)
-    transformer = NaturalCubicSplineTransformer(n_knots=5)
+    transformer = NaturalCubicSplineTransformer(output_dim=5)
     Xt = transformer.fit_transform(X)
 
     names = transformer.get_feature_names_out(["a", "b"])
@@ -59,7 +61,7 @@ def test_natural_spline_feature_names_out():
 
 def test_natural_spline_feature_names_out_default_input():
     X = np.random.rand(15, 2)
-    transformer = NaturalCubicSplineTransformer(n_knots=4).fit(X)
+    transformer = NaturalCubicSplineTransformer(output_dim=4).fit(X)
 
     names = transformer.get_feature_names_out()
     assert len(names) == sum(transformer.n_basis_)

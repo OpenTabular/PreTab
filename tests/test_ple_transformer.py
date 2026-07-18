@@ -23,25 +23,26 @@ def y_regression():
 
 def test_ple_transformer_single_feature_shape(X_single_feature):
     y = np.linspace(0, 1, 10)
-    n_bins = 4
-    transformer = PLETransformer(n_bins=n_bins)
+    output_dim = 4
+    transformer = PLETransformer(output_dim=output_dim)
     transformer.fit(X_single_feature, y)
     Xt = transformer.transform(X_single_feature)
 
-    # Each feature → output should have n_bins - 1 + 1 = n_bins columns
-    assert Xt.shape == (X_single_feature.shape[0], n_bins)
+    # Each feature → output should have output_dim columns (bin cap)
+    assert Xt.shape == (X_single_feature.shape[0], output_dim)
+    assert transformer.total_output_dim_ == Xt.shape[1]
     assert np.isfinite(Xt).all()
     assert (Xt >= 0).all()
 
 
 def test_ple_transformer_multi_feature_shape(X_multi_feature, y_regression):
-    n_bins = 5
-    transformer = PLETransformer(n_bins=n_bins)
+    output_dim = 5
+    transformer = PLETransformer(output_dim=output_dim)
     transformer.fit(X_multi_feature, y_regression)
     Xt = transformer.transform(X_multi_feature)
 
-    # Each feature → n_bins columns, 2 features → 2 * n_bins
-    assert Xt.shape == (X_multi_feature.shape[0], 2 * n_bins)
+    # Each feature → output_dim columns, 2 features → 2 * output_dim
+    assert Xt.shape == (X_multi_feature.shape[0], 2 * output_dim)
     assert np.isfinite(Xt).all()
     assert (Xt >= 0).all()
 
@@ -55,12 +56,12 @@ def test_ple_invalid_task_raises(X_single_feature):
 def test_ple_exact_bin_dimension_single_feature():
     X = np.random.randn(20, 1)
     y = np.random.randn(20, 1)
-    n_bins = 6
-    transformer = PLETransformer(n_bins=n_bins)
+    output_dim = 6
+    transformer = PLETransformer(output_dim=output_dim)
     transformer.fit(X, y)
     Xt = transformer.transform(X)
 
-    assert Xt.shape[1] == n_bins
+    assert Xt.shape[1] == output_dim
 
 
 def test_ple_exact_bin_dimension_multi_feature():
@@ -68,13 +69,13 @@ def test_ple_exact_bin_dimension_multi_feature():
     rng = np.random.RandomState(42)
     X = rng.rand(20, 2)
     y = rng.randint(0, 2, size=20)
-    n_bins = 6
+    output_dim = 6
 
-    transformer = PLETransformer(n_bins=n_bins)
+    transformer = PLETransformer(output_dim=output_dim)
     transformer.fit(X, y)
     Xt = transformer.transform(X)
 
-    assert Xt.shape == (20, 2 * n_bins)
+    assert Xt.shape == (20, 2 * output_dim)
 
 
 def test_ple_thresholds_extracted_from_tree():
@@ -82,7 +83,7 @@ def test_ple_thresholds_extracted_from_tree():
     X = rng.rand(50, 1)
     y = rng.rand(50)
 
-    transformer = PLETransformer(n_bins=5)
+    transformer = PLETransformer(output_dim=5)
     transformer.fit(X, y)
 
     # Thresholds are read straight from the fitted tree and are sorted/unique.
@@ -97,8 +98,8 @@ def test_ple_is_reproducible():
     X = rng.rand(40, 2)
     y = rng.rand(40)
 
-    a = PLETransformer(n_bins=5).fit_transform(X, y)
-    b = PLETransformer(n_bins=5).fit_transform(X, y)
+    a = PLETransformer(output_dim=5).fit_transform(X, y)
+    b = PLETransformer(output_dim=5).fit_transform(X, y)
 
     np.testing.assert_array_equal(a, b)
 
@@ -108,7 +109,7 @@ def test_ple_handles_nan_with_median():
     X = rng.rand(30, 1)
     y = rng.rand(30)
 
-    transformer = PLETransformer(n_bins=5, handle_missing="median")
+    transformer = PLETransformer(output_dim=5, handle_missing="median")
     transformer.fit(X, y)
 
     X_missing = X.copy()
@@ -123,7 +124,7 @@ def test_ple_raises_on_nan_when_configured():
     X = rng.rand(30, 1)
     y = rng.rand(30)
 
-    transformer = PLETransformer(n_bins=5, handle_missing="error")
+    transformer = PLETransformer(output_dim=5, handle_missing="error")
     transformer.fit(X, y)
 
     X_missing = X.copy()
@@ -137,7 +138,7 @@ def test_ple_feature_names_out():
     X = rng.rand(30, 2)
     y = rng.rand(30)
 
-    transformer = PLETransformer(n_bins=4)
+    transformer = PLETransformer(output_dim=4)
     transformer.fit(X, y)
 
     names = transformer.get_feature_names_out(["age", "income"])

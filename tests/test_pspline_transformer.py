@@ -9,27 +9,30 @@ from pretab.transformers import PSplineTransformer
 
 def test_pspline_single_feature_shape():
     X = np.linspace(0, 1, 30).reshape(-1, 1)
-    transformer = PSplineTransformer(n_knots=6)
+    transformer = PSplineTransformer(output_dim=8)
     Xt = transformer.fit_transform(X)
 
-    n_basis = transformer.n_basis_[0]
-    assert Xt.shape == (30, n_basis)
+    # width equals output_dim exactly (m = len(knots) - p - 1)
+    assert Xt.shape == (30, 8)
+    assert transformer.n_basis_ == [8]
+    assert transformer.total_output_dim_ == 8
     assert np.isfinite(Xt).all()
 
 
 def test_pspline_multi_feature_shape():
     X = np.random.rand(25, 2)
-    transformer = PSplineTransformer(n_knots=5)
+    transformer = PSplineTransformer(output_dim=5)
     Xt = transformer.fit_transform(X)
 
     total_basis = sum(transformer.n_basis_)
     assert Xt.shape == (25, total_basis)
+    assert total_basis == 2 * 5
     assert np.isfinite(Xt).all()
 
 
 def test_pspline_output_consistency():
     X = np.random.rand(20, 2)
-    transformer = PSplineTransformer(n_knots=4)
+    transformer = PSplineTransformer(output_dim=4)
     transformer.fit(X)
     Xt1 = transformer.transform(X)
     Xt2 = transformer.fit_transform(X)
@@ -39,7 +42,7 @@ def test_pspline_output_consistency():
 
 def test_pspline_penalty_matrix_shape_and_symmetry():
     X = np.linspace(0, 1, 50).reshape(-1, 1)
-    transformer = PSplineTransformer(n_knots=6)
+    transformer = PSplineTransformer(output_dim=6)
     transformer.fit(X)
     P = transformer.get_penalty_matrix()
 
@@ -49,7 +52,7 @@ def test_pspline_penalty_matrix_shape_and_symmetry():
 
 def test_pspline_feature_names_out():
     X = np.random.rand(20, 2)
-    transformer = PSplineTransformer(n_knots=5)
+    transformer = PSplineTransformer(output_dim=5)
     Xt = transformer.fit_transform(X)
 
     names = transformer.get_feature_names_out(["a", "b"])
@@ -60,7 +63,7 @@ def test_pspline_feature_names_out():
 
 def test_pspline_feature_names_out_default_input():
     X = np.random.rand(15, 2)
-    transformer = PSplineTransformer(n_knots=4).fit(X)
+    transformer = PSplineTransformer(output_dim=4).fit(X)
 
     names = transformer.get_feature_names_out()
     assert len(names) == sum(transformer.n_basis_)

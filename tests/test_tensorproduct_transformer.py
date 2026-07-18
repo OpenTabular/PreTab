@@ -7,18 +7,21 @@ from pretab.transformers import TensorProductSplineTransformer
 
 def test_tensorproduct_spline_output_shape():
     X = np.random.rand(20, 2)
-    transformer = TensorProductSplineTransformer(n_knots=4)
+    transformer = TensorProductSplineTransformer(output_dim=4)
     Xt = transformer.fit_transform(X)
 
     n_basis_0 = transformer.bases_[0].shape[1]
     n_basis_1 = transformer.bases_[1].shape[1]
     assert Xt.shape == (20, n_basis_0 * n_basis_1)
+    # output_dim is per-marginal; total width is the product across dimensions
+    assert Xt.shape == (20, 4**2)
+    assert transformer.total_output_dim_ == 4**2
     assert np.isfinite(Xt).all()
 
 
 def test_tensorproduct_spline_output_consistency():
     X = np.random.rand(30, 2)
-    transformer = TensorProductSplineTransformer(n_knots=5)
+    transformer = TensorProductSplineTransformer(output_dim=5)
     transformer.fit(X)
     Xt1 = transformer.transform(X)
     Xt2 = transformer.fit_transform(X)
@@ -28,7 +31,7 @@ def test_tensorproduct_spline_output_consistency():
 
 def test_tensorproduct_spline_penalty_matrices():
     X = np.random.rand(25, 2)
-    transformer = TensorProductSplineTransformer(n_knots=4)
+    transformer = TensorProductSplineTransformer(output_dim=4)
     transformer.fit(X)
     penalties = transformer.get_penalty_matrices()
 
@@ -40,7 +43,7 @@ def test_tensorproduct_spline_penalty_matrices():
 
 def test_tensorproduct_feature_names_out():
     X = np.random.rand(20, 2)
-    transformer = TensorProductSplineTransformer(n_knots=4)
+    transformer = TensorProductSplineTransformer(output_dim=4)
     Xt = transformer.fit_transform(X)
 
     names = transformer.get_feature_names_out(["a", "b"])
@@ -51,7 +54,7 @@ def test_tensorproduct_feature_names_out():
 
 def test_tensorproduct_feature_names_out_default_input():
     X = np.random.rand(15, 2)
-    transformer = TensorProductSplineTransformer(n_knots=4).fit(X)
+    transformer = TensorProductSplineTransformer(output_dim=4).fit(X)
 
     names = transformer.get_feature_names_out()
     n_expected = transformer.bases_[0].shape[1] * transformer.bases_[1].shape[1]
