@@ -51,7 +51,7 @@ preprocessor.get_feature_info(verbose=True)
 
 ```{tip}
 When no per-feature config is provided, the `Preprocessor` falls back to the global
-`numerical_preprocessing` and `categorical_preprocessing` strategies. See the
+`numerical_method` and `categorical_method` strategies. See the
 [User Guide](../user_guide/preprocessing.md) for the full list of options.
 ```
 

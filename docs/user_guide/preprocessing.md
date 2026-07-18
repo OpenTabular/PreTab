@@ -20,14 +20,11 @@ The behaviour is controlled by several constructor arguments:
 `treat_all_integers_as_numerical`
 : When `True`, every integer column is treated as numerical regardless of cardinality.
 
-`min_unique_vals`
-: Minimum number of distinct values a column needs to be treated as numerical.
-
 ## Choosing strategies
 
 There are two ways to configure preprocessing:
 
-1. **Globally** via `numerical_preprocessing` and `categorical_preprocessing`.
+1. **Globally** via `numerical_method` and `categorical_method`.
 2. **Per feature** via the `feature_preprocessing` dict, which overrides the global
    defaults for specific columns.
 
@@ -36,8 +33,8 @@ from pretab import Preprocessor
 
 # Global strategy for every column of a given type
 preprocessor = Preprocessor(
-    numerical_preprocessing="ple",
-    categorical_preprocessing="int",
+    numerical_method="ple",
+    categorical_method="int",
 )
 
 # Or override individual columns

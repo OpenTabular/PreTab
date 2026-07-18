@@ -56,7 +56,7 @@ df = pd.DataFrame({
 y = np.random.randn(100)
 
 # Global strategies: PLE for numerics, integer codes for categoricals
-preprocessor = Preprocessor(numerical_preprocessing="ple", categorical_preprocessing="int")
+preprocessor = Preprocessor(numerical_method="ple", categorical_method="int")
 
 X = preprocessor.fit_transform(df, y)   # dict of transformed feature blocks
 ```
@@ -244,13 +244,12 @@ penalty = tp.get_penalty_matrix()   # (n_basis, n_basis) smoothing penalty
 By default PreTab inspects each column and classifies it as numerical or categorical.
 String and object columns are treated as categorical, low-cardinality integer columns are
 categorical, and integer columns with enough distinct values stay numerical. Tune the
-behavior with `cat_cutoff`, `min_unique_vals`, and `treat_all_integers_as_numerical`.
+behavior with `cat_cutoff` and `treat_all_integers_as_numerical`.
 
 ```python
 preprocessor = Preprocessor(
     treat_all_integers_as_numerical=False,
     cat_cutoff=0.03,
-    min_unique_vals=5,
 )
 ```
 
@@ -275,9 +274,8 @@ target.
 
 ```python
 preprocessor = Preprocessor(
-    numerical_preprocessing="custombin",
-    use_decision_tree_bins=True,
-    n_bins=32,
+    numerical_method="custombin",
+    output_dim=32,
 )
 ```
 
