@@ -74,6 +74,7 @@ class RBFExpansionTransformer(BaseCenterExpansion):
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
+        random_state: int | None = None,
     ):
         super().__init__(
             output_dim=output_dim,
@@ -84,6 +85,7 @@ class RBFExpansionTransformer(BaseCenterExpansion):
             adaptive=adaptive,
             min_output_dim=min_output_dim,
             max_output_dim=max_output_dim,
+            random_state=random_state,
         )
         self.gamma = gamma
 

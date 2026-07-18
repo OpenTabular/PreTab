@@ -14,7 +14,7 @@ from .exceptions import InvalidParamError
 __all__ = ["center_identification_using_decision_tree"]
 
 
-def center_identification_using_decision_tree(X, y, task="regression", n_centers=5):
+def center_identification_using_decision_tree(X, y, task="regression", n_centers=5, random_state=None):
     """Return per-feature center locations from decision-tree split thresholds.
 
     Parameters
@@ -28,6 +28,9 @@ def center_identification_using_decision_tree(X, y, task="regression", n_centers
     n_centers : int, default=5
         Target number of centers per feature (the tree uses
         ``max_leaf_nodes = n_centers + 1``).
+    random_state : int or None, default=None
+        Seed for the per-feature decision trees, controlling split tie-breaking
+        so center placement is reproducible.
 
     Returns
     -------
@@ -42,9 +45,9 @@ def center_identification_using_decision_tree(X, y, task="regression", n_centers
     for i in range(X.shape[1]):
         x_feat = X[:, [i]]
         if task == "classification":
-            tree = DecisionTreeClassifier(max_leaf_nodes=n_centers + 1)
+            tree = DecisionTreeClassifier(max_leaf_nodes=n_centers + 1, random_state=random_state)
         elif task == "regression":
-            tree = DecisionTreeRegressor(max_leaf_nodes=n_centers + 1)
+            tree = DecisionTreeRegressor(max_leaf_nodes=n_centers + 1, random_state=random_state)
         else:
             raise InvalidParamError(
                 f"Invalid task. Choose 'regression' or 'classification'. Got {task!r}."

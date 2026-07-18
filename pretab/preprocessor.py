@@ -98,6 +98,19 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     treat_all_integers_as_numerical : bool, default=False
         If True, every integer-typed column is treated as numerical regardless of cardinality,
         bypassing the ``cat_cutoff`` heuristic.
+    random_state : int or None, default=None
+        Global seed forwarded to every stochastic numerical method (PLE and feature-map
+        decision trees, the ``quantile`` transformer, and target-aware spline knot
+        selectors) to make ``fit`` reproducible. When ``None`` (the default) each transformer
+        keeps its own default seed, so the value is only propagated when explicitly set --
+        preserving prior behavior while giving a single knob to pin reproducibility. Forwarded
+        by ``get_params`` / ``clone`` so an embedding host (e.g. DeepTab) can pass it through.
+    handle_missing : {"error", "median"}, default="median"
+        Missing-value policy. ``"median"`` keeps the default mean ``SimpleImputer`` that runs
+        before every numerical method (so NaNs are filled and, e.g., PLE uses its median
+        handling). ``"error"`` drops that imputer so missing values are *not* silently filled
+        and reach the transformers, which then raise on NaN. Forwarded to the NaN-aware
+        methods (currently PLE) via the numerical pipeline.
     verbose : int, default=0
         Verbosity level controlling ``fit``-time logging, applied through the shared
         ``"pretab"`` logger so a single setting on this entry point governs the whole
@@ -196,6 +209,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         scaling="minmax",
         cat_cutoff=0.03,
         treat_all_integers_as_numerical=False,
+        random_state=None,
+        handle_missing="median",
         verbose=0,
     ):
         """
@@ -219,6 +234,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.scaling = scaling
         self.cat_cutoff = cat_cutoff
         self.treat_all_integers_as_numerical = treat_all_integers_as_numerical
+        self.random_state = random_state
+        self.handle_missing = handle_missing
         self.verbose = verbose
 
     def _detect_column_types(self, X):
@@ -330,11 +347,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         for feature in numerical_features:
             method = feature_preprocessing.get(feature, numerical_method)
+            # Forward ``random_state`` only when the user set one, so unset keeps
+            # each transformer's own default seed (PLE / selectors = 51, others
+            # unseeded) and a set value pins every stochastic method globally.
+            seed_kwargs = {} if self.random_state is None else {"random_state": self.random_state}
             steps = get_numerical_transformer_steps(
                 method=method,
                 task=self.task,
                 use_decision_tree=self.use_target,
-                add_imputer=True,
+                add_imputer=self.handle_missing != "error",
                 imputer_strategy="mean",
                 output_dim=self.output_dim,
                 adaptive=self.adaptive,
@@ -343,6 +364,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 degree=self.degree,
                 scaling=self.scaling,
                 strategy=self.strategy,
+                handle_missing=self.handle_missing,
+                **seed_kwargs,
             )
             transformers.append((f"num_{feature}", Pipeline(steps), [feature]))
 

@@ -58,6 +58,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
+        random_state: int | None = None,
     ):
         self.output_dim = output_dim
         self.use_target = use_target
@@ -67,6 +68,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
+        self.random_state = random_state
 
         if self.strategy not in ("uniform", "quantile"):
             raise InvalidParamError(
@@ -107,7 +109,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
                 n_centers, min_req, max_req, floor=1
             )
             raw_centers = center_identification_using_decision_tree(
-                X, y, self.task, max_centers
+                X, y, self.task, max_centers, random_state=self.random_state
             )
             centers_list = [
                 self._adjust_centers(X[:, i], centers, min_centers, max_centers)
@@ -115,7 +117,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
             ]
         elif use_target:
             centers_list = center_identification_using_decision_tree(
-                X, y, self.task, n_centers
+                X, y, self.task, n_centers, random_state=self.random_state
             )
         elif self.strategy == "quantile":
             centers_list = [

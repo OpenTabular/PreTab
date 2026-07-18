@@ -54,7 +54,7 @@ NUMERICAL_METHODS = {
     "robust": (RobustScaler, []),
     "box-cox": (PowerTransformer, []),
     "yeo-johnson": (PowerTransformer, []),
-    "ple": (PLETransformer, ["output_dim", "task", "adaptive", "min_output_dim", "max_output_dim"]),
+    "ple": (PLETransformer, ["output_dim", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state", "handle_missing"]),
     "custombin": (CustomBinTransformer, ["output_dim"]),
     "rbf": (
         RBFExpansionTransformer,
@@ -67,6 +67,7 @@ NUMERICAL_METHODS = {
             "adaptive",
             "min_output_dim",
             "max_output_dim",
+            "random_state",
         ],
     ),
     "relu": (
@@ -79,6 +80,7 @@ NUMERICAL_METHODS = {
             "adaptive",
             "min_output_dim",
             "max_output_dim",
+            "random_state",
         ],
     ),
     "sigmoid": (
@@ -91,6 +93,7 @@ NUMERICAL_METHODS = {
             "adaptive",
             "min_output_dim",
             "max_output_dim",
+            "random_state",
         ],
     ),
     "tanh": (
@@ -104,6 +107,7 @@ NUMERICAL_METHODS = {
             "adaptive",
             "min_output_dim",
             "max_output_dim",
+            "random_state",
         ],
     ),
     "cubicspline": (CubicSplineTransformer, ["output_dim", "degree", "include_bias"]),

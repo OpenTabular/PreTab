@@ -108,10 +108,13 @@ def get_numerical_transformer_steps(
             spline_kwargs["strategy"] = strategy
 
         if kwargs.get("use_decision_tree"):
-            spline_kwargs["selector"] = CARTKnotSelector(
-                degree=spline_kwargs.get("degree", 3),
-                spline_type=method,
-            )
+            selector_kwargs = {
+                "degree": spline_kwargs.get("degree", 3),
+                "spline_type": method,
+            }
+            if kwargs.get("random_state") is not None:
+                selector_kwargs["random_state"] = kwargs["random_state"]
+            spline_kwargs["selector"] = CARTKnotSelector(**selector_kwargs)
 
         steps.append((method, cls(**spline_kwargs)))
     else:
