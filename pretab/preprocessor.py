@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
-from sklearn.base import TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
-from sklearn.exceptions import NotFittedError
 from sklearn.pipeline import Pipeline
+from sklearn.utils.validation import check_is_fitted
 
 from .pipeline import (
     get_categorical_transformer_steps,
@@ -11,7 +11,7 @@ from .pipeline import (
 )
 
 
-class Preprocessor(TransformerMixin):
+class Preprocessor(TransformerMixin, BaseEstimator):
     """
     Preprocessor class for automated tabular feature preprocessing using scikit-learn-compatible pipelines.
 
@@ -88,16 +88,21 @@ class Preprocessor(TransformerMixin):
     treat_all_integers_as_numerical : bool, default=False
         If True, every integer-typed column is treated as numerical regardless of cardinality,
         bypassing the ``cat_cutoff`` heuristic.
+    verbose : int, default=0
+        Verbosity level for ``fit``-time logging (``0`` = silent). Reserved for the logging UX;
+        higher values will emit progressively more detail. Stored verbatim and forwarded by
+        ``get_params`` / ``clone``.
 
     Attributes
     ----------
-    column_transformer : ColumnTransformer
+    column_transformer_ : ColumnTransformer
         The internal scikit-learn column transformer that handles feature-wise preprocessing.
-    fitted : bool
-        Whether the preprocessor has been fitted.
-    embeddings : bool
-        Whether embedding vectors are expected and used in transformation.
-    embedding_dimensions : dict
+        Set when the preprocessor is fitted.
+    n_features_in_ : int
+        Number of input features seen during ``fit``.
+    embeddings_ : bool
+        Whether embedding vectors were provided at ``fit`` time and are expected in transformation.
+    embedding_dimensions_ : dict
         Dictionary of embedding feature names to their expected dimensionality.
 
     Notes
@@ -170,6 +175,7 @@ class Preprocessor(TransformerMixin):
         scaling="minmax",
         cat_cutoff=0.03,
         treat_all_integers_as_numerical=False,
+        verbose=0,
     ):
         """
         Initialize the Preprocessor with various transformation options for tabular data.
@@ -178,13 +184,9 @@ class Preprocessor(TransformerMixin):
         available ``numerical_method`` / ``categorical_method`` values, and usage examples.
         """
 
-        self.numerical_method = (
-            numerical_method.lower() if numerical_method is not None else "none"
-        )
-        self.categorical_method = (
-            categorical_method.lower() if categorical_method is not None else "none"
-        )
-        self.feature_preprocessing = feature_preprocessing or {}
+        self.numerical_method = numerical_method
+        self.categorical_method = categorical_method
+        self.feature_preprocessing = feature_preprocessing
         self.output_dim = output_dim
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
@@ -196,58 +198,7 @@ class Preprocessor(TransformerMixin):
         self.scaling = scaling
         self.cat_cutoff = cat_cutoff
         self.treat_all_integers_as_numerical = treat_all_integers_as_numerical
-        self.column_transformer = None
-        self.fitted = False
-        self.embeddings = False
-        self.embedding_dimensions = {}
-
-    def get_params(self, deep=True):
-        """Get parameters for the preprocessor.
-
-        Parameters
-        ----------
-        deep : bool, default=True
-            If True, will return parameters of subobjects that are estimators.
-
-        Returns
-        -------
-        params : dict
-            Parameter names mapped to their values.
-        """
-        params = {
-            "numerical_method": self.numerical_method,
-            "categorical_method": self.categorical_method,
-            "feature_preprocessing": self.feature_preprocessing,
-            "output_dim": self.output_dim,
-            "adaptive": self.adaptive,
-            "min_output_dim": self.min_output_dim,
-            "max_output_dim": self.max_output_dim,
-            "task": self.task,
-            "use_target": self.use_target,
-            "strategy": self.strategy,
-            "degree": self.degree,
-            "scaling": self.scaling,
-            "cat_cutoff": self.cat_cutoff,
-            "treat_all_integers_as_numerical": self.treat_all_integers_as_numerical,
-        }
-        return params
-
-    def set_params(self, **params):
-        """Set parameters for the preprocessor.
-
-        Parameters
-        ----------
-        **params : dict
-            Parameter names mapped to their new values.
-
-        Returns
-        -------
-        self : object
-            Preprocessor instance.
-        """
-        for key, value in params.items():
-            setattr(self, key, value)
-        return self
+        self.verbose = verbose
 
     def _detect_column_types(self, X):
         """
@@ -325,19 +276,33 @@ class Preprocessor(TransformerMixin):
         elif isinstance(X, np.ndarray):
             X = pd.DataFrame(X, columns=[f"feature_{i}" for i in range(X.shape[1])])
 
+        numerical_method = (
+            self.numerical_method.lower()
+            if self.numerical_method is not None
+            else "none"
+        )
+        categorical_method = (
+            self.categorical_method.lower()
+            if self.categorical_method is not None
+            else "none"
+        )
+        feature_preprocessing = self.feature_preprocessing or {}
+
+        self.embeddings_ = False
+        self.embedding_dimensions_ = {}
         if embeddings is not None:
-            self.embeddings = True
+            self.embeddings_ = True
             if isinstance(embeddings, np.ndarray):
-                self.embedding_dimensions["embedding_1"] = embeddings.shape[1]
+                self.embedding_dimensions_["embedding_1"] = embeddings.shape[1]
             elif isinstance(embeddings, list):
                 for i, e in enumerate(embeddings):
-                    self.embedding_dimensions[f"embedding_{i + 1}"] = e.shape[1]
+                    self.embedding_dimensions_[f"embedding_{i + 1}"] = e.shape[1]
 
         numerical_features, categorical_features = self._detect_column_types(X)
         transformers = []
 
         for feature in numerical_features:
-            method = self.feature_preprocessing.get(feature, self.numerical_method)
+            method = feature_preprocessing.get(feature, numerical_method)
             steps = get_numerical_transformer_steps(
                 method=method,
                 task=self.task,
@@ -355,15 +320,15 @@ class Preprocessor(TransformerMixin):
             transformers.append((f"num_{feature}", Pipeline(steps), [feature]))
 
         for feature in categorical_features:
-            method = self.feature_preprocessing.get(feature, self.categorical_method)
+            method = feature_preprocessing.get(feature, categorical_method)
             steps = get_categorical_transformer_steps(method)
             transformers.append((f"cat_{feature}", Pipeline(steps), [feature]))
 
-        self.column_transformer = ColumnTransformer(
+        self.column_transformer_ = ColumnTransformer(
             transformers=transformers, remainder="passthrough"
         )
-        self.column_transformer.fit(X, y)
-        self.fitted = True
+        self.column_transformer_.fit(X, y)
+        self.n_features_in_ = X.shape[1]
         return self
 
     def transform(self, X, embeddings=None, return_array=False):
@@ -385,10 +350,7 @@ class Preprocessor(TransformerMixin):
             Transformed data. A dictionary if return_array=False, else a NumPy array.
         """
 
-        if not self.fitted:
-            raise NotFittedError(
-                "Preprocessor must be fitted before calling transform."
-            )
+        check_is_fitted(self)
 
         if isinstance(X, dict):
             X = pd.DataFrame(X)
@@ -397,14 +359,14 @@ class Preprocessor(TransformerMixin):
         else:
             X = X.copy()
 
-        transformed_X = self.column_transformer.transform(X)
+        transformed_X = self.column_transformer_.transform(X)
 
         if return_array:
             return transformed_X
 
         transformed_dict = {}
         start = 0
-        for name, transformer, columns in self.column_transformer.transformers_:
+        for name, transformer, columns in self.column_transformer_.transformers_:
             if transformer == "drop":
                 continue
             if hasattr(transformer, "transform"):
@@ -415,7 +377,7 @@ class Preprocessor(TransformerMixin):
             start += width
 
         if embeddings is not None:
-            if not self.embeddings:
+            if not self.embeddings_:
                 raise ValueError("Embeddings were not expected, but were provided.")
             if isinstance(embeddings, np.ndarray):
                 transformed_dict["embedding_1"] = embeddings.astype(np.float32)
@@ -450,6 +412,28 @@ class Preprocessor(TransformerMixin):
             X, embeddings, return_array
         )
 
+    def get_feature_names_out(self, input_features=None):
+        """
+        Get output feature names for transformation.
+
+        Delegates to the fitted internal :class:`~sklearn.compose.ColumnTransformer`,
+        returning one name per output column of the stacked array produced by
+        ``transform(..., return_array=True)``.
+
+        Parameters
+        ----------
+        input_features : array-like of str or None, default=None
+            Input feature names. Passed through to the underlying column transformer.
+
+        Returns
+        -------
+        feature_names_out : numpy.ndarray of str
+            Transformed feature names.
+        """
+
+        check_is_fitted(self)
+        return self.column_transformer_.get_feature_names_out(input_features)
+
     def get_feature_info(self, verbose=True):
         """
         Retrieves metadata about the transformed features.
@@ -476,10 +460,7 @@ class Preprocessor(TransformerMixin):
                 Metadata for embedding features, if used.
         """
 
-        if not self.fitted:
-            raise NotFittedError(
-                "Preprocessor must be fitted before calling get_feature_info."
-            )
+        check_is_fitted(self)
 
         numerical_feature_info = {}
         categorical_feature_info = {}
@@ -487,9 +468,9 @@ class Preprocessor(TransformerMixin):
         embedding_feature_info = (
             {
                 key: {"preprocessing": None, "dimension": dim, "categories": None}
-                for key, dim in self.embedding_dimensions.items()
+                for key, dim in self.embedding_dimensions_.items()
             }
-            if self.embeddings
+            if self.embeddings_
             else {}
         )
 
@@ -497,7 +478,7 @@ class Preprocessor(TransformerMixin):
             name,
             transformer_pipeline,
             columns,
-        ) in self.column_transformer.transformers_:
+        ) in self.column_transformer_.transformers_:
             steps = [step[0] for step in transformer_pipeline.steps]
 
             for feature_name in columns:
@@ -592,7 +573,7 @@ class Preprocessor(TransformerMixin):
                 if verbose:
                     print("-" * 50)
 
-        if verbose and self.embeddings:
+        if verbose and self.embeddings_:
             print("Embeddings:")
             for key, value in embedding_feature_info.items():
                 print(f"  Feature: {key}, Dimension: {value['dimension']}")
