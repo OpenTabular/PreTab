@@ -14,16 +14,13 @@ _MIN_SPLINE_BASIS = 5
 _MAX_SPLINE_BASIS = 50
 
 # Legacy constructor argument names mapped to the canonical vocabulary. The
-# Preprocessor shares a single kwargs bag using historical names; renaming them
-# here keeps the transformer constructors on the canonical spelling and avoids
-# emitting deprecation warnings during normal pipeline use.
+# Preprocessor shares a single kwargs bag; every width name now collapses to the
+# canonical ``output_dim`` at the transformer boundary, so only the non-count
+# alias (``use_decision_tree`` -> ``use_target``) needs translating here to keep
+# the feature-map constructors on their canonical spelling and avoid emitting
+# deprecation warnings during normal pipeline use.
 _ARG_CANONICAL = {
-    "n_knots": "n_basis",
-    "n_bins": "n_basis",
-    "n_centers": "n_basis",
-    "bins": "n_basis",
     "use_decision_tree": "use_target",
-    "knot_strategy": "strategy",
 }
 
 
@@ -38,18 +35,19 @@ def filter_kwargs(transformer_cls, kwargs, allowed=None):
     return kwargs
 
 
-def _clamp_spline_basis(n_knots):
-    """Clamp a requested basis-function count into the supported spline range.
+def _clamp_spline_basis(output_dim):
+    """Clamp a requested output dimension into the supported spline range.
 
-    The Preprocessor shares a single ``n_knots`` setting across every numerical
-    strategy (default 64), but the B/M/I spline transformers accept between
-    ``5`` and ``50`` basis functions. Values outside that window are clamped so
-    switching to a spline strategy keeps working with the shared default.
+    The Preprocessor shares a single ``output_dim`` setting across every
+    numerical strategy (default 64), but the B/M/I spline transformers accept
+    between ``5`` and ``50`` basis functions. Values outside that window are
+    clamped so switching to a spline strategy keeps working with the shared
+    default.
     """
-    clamped = max(_MIN_SPLINE_BASIS, min(int(n_knots), _MAX_SPLINE_BASIS))
-    if clamped != n_knots:
+    clamped = max(_MIN_SPLINE_BASIS, min(int(output_dim), _MAX_SPLINE_BASIS))
+    if clamped != output_dim:
         warnings.warn(
-            f"n_knots={n_knots} is outside the spline range "
+            f"output_dim={output_dim} is outside the spline range "
             f"[{_MIN_SPLINE_BASIS}, {_MAX_SPLINE_BASIS}]; using {clamped} basis functions.",
             UserWarning,
             stacklevel=2,
@@ -96,9 +94,9 @@ def get_numerical_transformer_steps(
     elif method in SPLINE_EXPANSION_METHODS:
         spline_kwargs = dict(filtered)
 
-        n_knots = kwargs.get("n_knots")
-        if n_knots is not None:
-            spline_kwargs["n_basis"] = _clamp_spline_basis(n_knots)
+        output_dim = kwargs.get("output_dim")
+        if output_dim is not None:
+            spline_kwargs["output_dim"] = _clamp_spline_basis(output_dim)
 
         strategy = kwargs.get("strategy")
         if strategy in ("uniform", "quantile"):

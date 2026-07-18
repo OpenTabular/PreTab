@@ -33,8 +33,10 @@ class Preprocessor(TransformerMixin):
     ----------
     feature_preprocessing : dict, optional
         Dictionary mapping feature names to specific preprocessing methods. Overrides global defaults.
-    n_bins : int, default=64
-        Number of bins used for binning-based preprocessing (e.g., for discretizers or PLE).
+    output_dim : int, default=64
+        The single width knob shared by every numerical method: the number of non-bias output columns
+        produced per input feature (e.g. bins for PLE/binning, centers for the feature maps, basis
+        functions for the splines). The B/M/I splines clamp it into their supported ``[5, 50]`` range.
     numerical_preprocessing : str, default="ple"
         Preprocessing method for numerical features (e.g., "standardization", "minmax", "ple", "rbf", etc.).
     categorical_preprocessing : str, default="int"
@@ -53,8 +55,6 @@ class Preprocessor(TransformerMixin):
         Degree of polynomial or spline basis functions where applicable.
     scaling_strategy : str, default="minmax"
         Strategy for feature scaling (e.g., "standardization", "minmax", etc.).
-    n_knots : int, default=64
-        Number of knots used in spline-based feature expansions.
     use_decision_tree_knots : bool, default=True
         Whether to use decision tree-based knot placement for spline transformations.
     knots_strategy : str, default="uniform"
@@ -93,7 +93,7 @@ class Preprocessor(TransformerMixin):
     def __init__(
         self,
         feature_preprocessing=None,
-        n_bins=64,
+        output_dim=64,
         numerical_preprocessing="ple",
         categorical_preprocessing="int",
         use_decision_tree_bins=False,
@@ -103,7 +103,6 @@ class Preprocessor(TransformerMixin):
         treat_all_integers_as_numerical=False,
         degree=3,
         scaling_strategy="minmax",
-        n_knots=64,
         use_decision_tree_knots=True,
         knots_strategy="uniform",
         spline_implementation="sklearn",
@@ -116,8 +115,9 @@ class Preprocessor(TransformerMixin):
         ----------
         feature_preprocessing : dict, optional
             Dictionary specifying preprocessing methods per feature. If None, global settings are used.
-        n_bins : int, default=64
-            Number of bins to use for binning-based transformations.
+        output_dim : int, default=64
+            The single width knob shared by every numerical method: the number of non-bias output
+            columns produced per input feature. The B/M/I splines clamp it into their ``[5, 50]`` range.
         numerical_preprocessing : str, default="ple"
             Preprocessing strategy for numerical features.
         categorical_preprocessing : str, default="int"
@@ -136,8 +136,6 @@ class Preprocessor(TransformerMixin):
             Degree of polynomial or spline basis expansion.
         scaling_strategy : str, default="minmax"
             Scaling method for numerical data ("standardization", "minmax", etc.).
-        n_knots : int, default=64
-            Number of knots for spline transformations.
         use_decision_tree_knots : bool, default=True
             Use decision tree-based knot placement for splines.
         knots_strategy : str, default="uniform"
@@ -148,7 +146,7 @@ class Preprocessor(TransformerMixin):
             Minimum number of unique values required for numerical processing.
         """
 
-        self.n_bins = n_bins
+        self.output_dim = output_dim
         self.numerical_preprocessing = (
             numerical_preprocessing.lower()
             if numerical_preprocessing is not None
@@ -170,7 +168,6 @@ class Preprocessor(TransformerMixin):
         self.treat_all_integers_as_numerical = treat_all_integers_as_numerical
         self.degree = degree
         self.scaling_strategy = scaling_strategy
-        self.n_knots = n_knots
         self.use_decision_tree_knots = use_decision_tree_knots
         self.knots_strategy = knots_strategy
         self.spline_implementation = spline_implementation
@@ -192,7 +189,7 @@ class Preprocessor(TransformerMixin):
             Parameter names mapped to their values.
         """
         params = {
-            "n_bins": self.n_bins,
+            "output_dim": self.output_dim,
             "numerical_preprocessing": self.numerical_preprocessing,
             "categorical_preprocessing": self.categorical_preprocessing,
             "use_decision_tree_bins": self.use_decision_tree_bins,
@@ -202,7 +199,6 @@ class Preprocessor(TransformerMixin):
             "treat_all_integers_as_numerical": self.treat_all_integers_as_numerical,
             "degree": self.degree,
             "scaling_strategy": self.scaling_strategy,
-            "n_knots": self.n_knots,
             "use_decision_tree_knots": self.use_decision_tree_knots,
             "knots_strategy": self.knots_strategy,
         }
@@ -322,9 +318,8 @@ class Preprocessor(TransformerMixin):
                 use_decision_tree=self.use_decision_tree_knots,
                 add_imputer=True,
                 imputer_strategy="mean",
-                bins=self.n_bins,
+                output_dim=self.output_dim,
                 degree=self.degree,
-                n_knots=self.n_knots,
                 scaling=self.scaling_strategy,
                 strategy=self.knots_strategy,
                 implementation=self.spline_implementation,
