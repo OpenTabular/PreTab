@@ -53,12 +53,12 @@ def test_relu_tree_centering(X_multi_feature, y_regression):
 
 def test_relu_invalid_strategy():
     with pytest.raises(ValueError, match="Invalid strategy"):
-        ReLUExpansionTransformer(strategy="nonsense")
+        ReLUExpansionTransformer(strategy="nonsense").fit(np.random.rand(5, 1))
 
 
 def test_relu_invalid_task():
     with pytest.raises(ValueError, match="Invalid task"):
-        ReLUExpansionTransformer(task="nonsense")
+        ReLUExpansionTransformer(task="nonsense").fit(np.random.rand(5, 1))
 
 
 def test_relu_missing_y_tree(X_single_feature):

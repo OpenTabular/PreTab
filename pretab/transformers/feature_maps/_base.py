@@ -70,15 +70,6 @@ class BaseCenterExpansion(BasePreTabTransformer):
         self.max_output_dim = max_output_dim
         self.random_state = random_state
 
-        if self.strategy not in ("uniform", "quantile"):
-            raise InvalidParamError(
-                f"Invalid strategy. Choose 'uniform' or 'quantile'. Got {self.strategy!r}."
-            )
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(
-                f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}."
-            )
-
     def _expand_column(self, x_col, centers):
         """Expand a single column ``x_col`` (shape ``(n, 1)``) against ``centers``.
 
@@ -88,6 +79,14 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Place per-feature centers from a decision tree or quantile/uniform spacing."""
+        if self.strategy not in ("uniform", "quantile"):
+            raise InvalidParamError(
+                f"Invalid strategy. Choose 'uniform' or 'quantile'. Got {self.strategy!r}."
+            )
+        if self.task not in ("regression", "classification"):
+            raise InvalidParamError(
+                f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}."
+            )
         n_centers = self._resolve_param("output_dim", default=10)
         use_target = self._resolve_param("use_target", default=True)
         min_req = self._resolve_param("min_output_dim", default=None)

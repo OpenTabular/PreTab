@@ -44,9 +44,9 @@ def test_tanh_transformer_output_consistency(X_float_2d, y_dummy):
 
 def test_tanh_invalid_strategy_raises():
     with pytest.raises(ValueError, match="Invalid strategy"):
-        TanhExpansionTransformer(strategy="invalid")
+        TanhExpansionTransformer(strategy="invalid").fit(np.random.rand(5, 1))
 
 
 def test_tanh_invalid_task_raises():
     with pytest.raises(ValueError, match="Invalid task"):
-        TanhExpansionTransformer(task="invalid")
+        TanhExpansionTransformer(task="invalid").fit(np.random.rand(5, 1))

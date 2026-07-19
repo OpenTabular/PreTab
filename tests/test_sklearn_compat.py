@@ -52,11 +52,6 @@ SENTINEL = (
     "check_parameters_default_constructible rejects. Closing this needs an alias "
     "redesign that drops sentinel defaults."
 )
-INIT_VALIDATION = (
-    "Feature maps validate `strategy`/`task` eagerly in __init__ (deferred Phase-2 "
-    "constraint: existing tests assert construction-time errors). sklearn requires "
-    "parameter validation to happen in fit, not __init__."
-)
 REQUIRES_Y_NONE = (
     "Supervised transformer does not yet raise a clear message when y=None is "
     "passed to fit."
@@ -91,7 +86,6 @@ NEAR_CONFORMANT = [
         RBFExpansionTransformer(),
         {
             "check_parameters_default_constructible": SENTINEL,
-            "check_do_not_raise_errors_in_init_or_set_params": INIT_VALIDATION,
             "check_requires_y_none": REQUIRES_Y_NONE,
         },
     ),
@@ -99,7 +93,6 @@ NEAR_CONFORMANT = [
         ReLUExpansionTransformer(),
         {
             "check_parameters_default_constructible": SENTINEL,
-            "check_do_not_raise_errors_in_init_or_set_params": INIT_VALIDATION,
             "check_requires_y_none": REQUIRES_Y_NONE,
         },
     ),
@@ -107,7 +100,6 @@ NEAR_CONFORMANT = [
         SigmoidExpansionTransformer(),
         {
             "check_parameters_default_constructible": SENTINEL,
-            "check_do_not_raise_errors_in_init_or_set_params": INIT_VALIDATION,
             "check_requires_y_none": REQUIRES_Y_NONE,
         },
     ),
@@ -115,7 +107,6 @@ NEAR_CONFORMANT = [
         TanhExpansionTransformer(),
         {
             "check_parameters_default_constructible": SENTINEL,
-            "check_do_not_raise_errors_in_init_or_set_params": INIT_VALIDATION,
             "check_requires_y_none": REQUIRES_Y_NONE,
         },
     ),

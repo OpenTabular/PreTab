@@ -56,12 +56,12 @@ def test_sigmoid_tree_centering(X_multi_feature, y_regression):
 
 def test_sigmoid_invalid_strategy():
     with pytest.raises(ValueError, match="Invalid strategy"):
-        SigmoidExpansionTransformer(strategy="nonsense")
+        SigmoidExpansionTransformer(strategy="nonsense").fit(np.random.rand(5, 1))
 
 
 def test_sigmoid_invalid_task():
     with pytest.raises(ValueError, match="Invalid task"):
-        SigmoidExpansionTransformer(task="nonsense")
+        SigmoidExpansionTransformer(task="nonsense").fit(np.random.rand(5, 1))
 
 
 def test_sigmoid_missing_y_tree(X_single_feature):
