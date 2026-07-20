@@ -36,7 +36,13 @@ from ..transformers.splines.pspline import PSplineTransformer
 from ..transformers.splines.tensor_product import TensorProductSplineTransformer
 from ..transformers.splines.thinplate_spline import ThinPlateSplineTransformer
 
-__all__ = ["NUMERICAL_METHODS"]
+__all__ = [
+    "CATEGORICAL_ALIASES",
+    "CATEGORICAL_METHODS",
+    "NUMERICAL_ALIASES",
+    "NUMERICAL_METHODS",
+    "resolve_method",
+]
 
 
 # name -> (transformer class, constructor arguments it accepts)
@@ -123,3 +129,104 @@ NUMERICAL_METHODS = {
     "ispline": (ISplineTransformer, ["degree", "task"]),
     "none": (NoTransformer, []),
 }
+
+
+# Canonical categorical method names (numerical ones are the NUMERICAL_METHODS
+# keys). Kept here so both pipeline sides resolve names through one module.
+CATEGORICAL_METHODS = frozenset(
+    {"int", "one-hot", "onehot_from_ordinal", "pretrained", "custombin", "none"}
+)
+
+
+def _squash(name: str) -> str:
+    """Collapse a method name for separator/case-insensitive comparison.
+
+    Lowercases, trims surrounding whitespace, and drops the ``-``, ``_`` and
+    space separators so ``"One-Hot"``, ``"one_hot"`` and ``"onehot"`` all map to
+    the same key. Canonical names that only differ by a separator (``"box-cox"``
+    vs ``"boxcox"``, ``"cubicspline"`` vs ``"cubic spline"``) therefore match
+    without needing an explicit alias entry.
+    """
+    return name.strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+
+
+# Genuine synonyms / abbreviations that are *not* just separator variants of a
+# canonical name (those are handled by :func:`_squash`). Keys are already
+# squashed; values are canonical numerical method names.
+NUMERICAL_ALIASES = {
+    "standard": "standardization",
+    "standardize": "standardization",
+    "standardscaler": "standardization",
+    "std": "standardization",
+    "zscore": "standardization",
+    "minmaxscaler": "minmax",
+    "quantiletransformer": "quantile",
+    "poly": "polynomial",
+    "robustscaler": "robust",
+    "piecewiselinear": "ple",
+    "bin": "custombin",
+    "binning": "custombin",
+    "cubic": "cubicspline",
+    "natural": "naturalspline",
+    "naturalcubic": "naturalspline",
+    "tensor": "tensorspline",
+    "tensorproduct": "tensorspline",
+    "tensorproductspline": "tensorspline",
+    "thinplate": "tprs",
+    "thinplatespline": "tprs",
+    "passthrough": "none",
+    "identity": "none",
+    "raw": "none",
+}
+
+# Genuine synonyms / abbreviations for the categorical methods (keys squashed).
+CATEGORICAL_ALIASES = {
+    "integer": "int",
+    "ordinal": "int",
+    "label": "int",
+    "labelencoder": "int",
+    "ordinalencoder": "int",
+    "ohe": "one-hot",
+    "dummy": "one-hot",
+    "onehotencoder": "one-hot",
+    "embedding": "pretrained",
+    "embeddings": "pretrained",
+    "language": "pretrained",
+    "llm": "pretrained",
+    "bin": "custombin",
+    "binning": "custombin",
+    "passthrough": "none",
+    "identity": "none",
+    "raw": "none",
+}
+
+
+def resolve_method(name, canonical, aliases):
+    """Resolve a user-supplied method name to its canonical spelling.
+
+    Matching is case-insensitive, ignores ``-`` / ``_`` / space separators, and
+    honours the explicit ``aliases`` map of synonyms and abbreviations. An
+    unrecognized name is returned lowercased and stripped so the caller's own
+    "unrecognized method" error lists the canonical options.
+
+    Parameters
+    ----------
+    name : str
+        The method name the user supplied.
+    canonical : set or dict
+        The canonical method names (``NUMERICAL_METHODS`` keys or
+        ``CATEGORICAL_METHODS``).
+    aliases : dict
+        Squashed-alias to canonical-name mapping for this side of the pipeline.
+    """
+    key = name.strip().lower()
+    if key in canonical:
+        return key
+
+    squashed = _squash(name)
+    for canon in canonical:
+        if _squash(canon) == squashed:
+            return canon
+    if squashed in aliases:
+        return aliases[squashed]
+    return key

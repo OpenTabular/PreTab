@@ -157,6 +157,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"pretrained"``, ``"custombin"``, ``"none"``. The ``"pretrained"`` method requires the optional
     ``sentence-transformers`` dependency (``pip install "pretab[embeddings]"``).
 
+    Method names are resolved case-insensitively and ignore ``-`` / ``_`` / space separators, so
+    ``"one-hot"``, ``"one_hot"`` and ``"OneHot"`` are equivalent. Common synonyms and abbreviations
+    are also accepted, e.g. ``"std"`` / ``"standard"`` -> ``"standardization"``, ``"ohe"`` /
+    ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
+    ``"polynomial"``, ``"thin-plate"`` -> ``"tprs"``, and ``"passthrough"`` -> ``"none"``.
+
     ``transform`` returns a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` by
     default, or a single stacked array when ``return_array=True``.
 

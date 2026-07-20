@@ -5,7 +5,7 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..core.exceptions import ConfigWarning, invalid_param_error
 from ..transformers.splines.knot_selectors import CARTKnotSelector
-from .registry import NUMERICAL_METHODS
+from .registry import NUMERICAL_ALIASES, NUMERICAL_METHODS, resolve_method
 
 # Spline basis expansions that share the target-aware knot API.
 SPLINE_EXPANSION_METHODS = ("bspline", "mspline", "ispline")
@@ -64,7 +64,7 @@ def get_numerical_transformer_steps(
     scaling: str = None,
     **kwargs,
 ):
-    method = method.lower()
+    method = resolve_method(method, NUMERICAL_METHODS, NUMERICAL_ALIASES)
     steps = []
 
     if add_imputer:
@@ -78,6 +78,8 @@ def get_numerical_transformer_steps(
     }
 
     # Add optional scaling step only if not already part of method
+    if scaling is not None:
+        scaling = resolve_method(scaling, NUMERICAL_METHODS, NUMERICAL_ALIASES)
     if scaling in scalers and scaling != method:
         steps.append(scalers[scaling])
 

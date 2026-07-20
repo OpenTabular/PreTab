@@ -7,6 +7,7 @@ from ..transformers.embeddings import LanguageEmbeddingTransformer
 from ..transformers.encoders.continuous_ordinal import ContinuousOrdinalTransformer
 from ..transformers.encoders.floats import NoTransformer, ToFloatTransformer
 from ..transformers.onehot import OneHotFromOrdinalTransformer
+from .registry import CATEGORICAL_ALIASES, CATEGORICAL_METHODS, resolve_method
 
 
 def get_categorical_transformer_steps(
@@ -19,7 +20,7 @@ def get_categorical_transformer_steps(
     """
     Returns a list of (name, transformer) steps for a given categorical preprocessing method.
     """
-    method = method.lower()
+    method = resolve_method(method, CATEGORICAL_METHODS, CATEGORICAL_ALIASES)
     steps = []
 
     if add_imputer:
@@ -45,7 +46,7 @@ def get_categorical_transformer_steps(
         raise invalid_param_error(
             "get_categorical_transformer_steps", "method", method,
             "unrecognized categorical preprocessing method",
-            valid={"int", "one-hot", "pretrained", "none", "custombin", "onehot_from_ordinal"},
+            valid=set(CATEGORICAL_METHODS),
         )
 
     return steps
