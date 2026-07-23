@@ -14,7 +14,7 @@ def get_categorical_transformer_steps(
     method: str,
     add_imputer: bool = True,
     imputer_strategy: str = "most_frequent",
-    imputer_kwargs: dict = None,
+    imputer_kwargs: dict | None = None,
     **kwargs,
 ):
     """

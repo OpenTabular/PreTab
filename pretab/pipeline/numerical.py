@@ -60,8 +60,8 @@ def get_numerical_transformer_steps(
     method: str,
     add_imputer: bool = True,
     imputer_strategy: str = "mean",
-    imputer_kwargs: dict = None,
-    scaling: str = None,
+    imputer_kwargs: dict | None = None,
+    scaling: str | None = None,
     **kwargs,
 ):
     method = resolve_method(method, NUMERICAL_METHODS, NUMERICAL_ALIASES)
