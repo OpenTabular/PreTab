@@ -14,7 +14,7 @@ class NoTransformer(TransformerMixin, BaseEstimator):
     Attributes
     ----------
     n_features_in_ : int
-        Number of input features. Always set to 1 for this transformer.
+        Number of input features seen during ``fit``.
 
     Examples
     --------
@@ -40,7 +40,8 @@ class NoTransformer(TransformerMixin, BaseEstimator):
         self : object
             Fitted transformer.
         """
-        self.n_features_in_ = 1
+        X = np.asarray(X)
+        self.n_features_in_ = X.shape[1] if X.ndim > 1 else 1
         return self
 
     def transform(self, X):
@@ -92,7 +93,7 @@ class ToFloatTransformer(TransformerMixin, BaseEstimator):
     Attributes
     ----------
     n_features_in_ : int
-        Number of input features. Always set to 1 for this transformer.
+        Number of input features seen during ``fit``.
 
     Examples
     --------
@@ -118,7 +119,8 @@ class ToFloatTransformer(TransformerMixin, BaseEstimator):
         self : object
             Fitted transformer.
         """
-        self.n_features_in_ = 1
+        X = np.asarray(X)
+        self.n_features_in_ = X.shape[1] if X.ndim > 1 else 1
         return self
 
     def transform(self, X):

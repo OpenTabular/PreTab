@@ -189,8 +189,8 @@ DEFERRED = [
         NoTransformer(),
         id="NoTransformer",
         marks=pytest.mark.xfail(
-            reason="Identity pass-through with a hardcoded n_features_in_=1; does "
-            "not perform 2D feature validation.",
+            reason="Identity pass-through that does not perform 2D feature "
+            "validation (no validate_data), so numeric multi-feature checks fail.",
             strict=True,
         ),
     ),
@@ -198,8 +198,8 @@ DEFERRED = [
         ToFloatTransformer(),
         id="ToFloatTransformer",
         marks=pytest.mark.xfail(
-            reason="Per-column float cast with a hardcoded n_features_in_=1; does "
-            "not perform 2D feature validation.",
+            reason="Per-column float cast that does not perform 2D feature "
+            "validation (no validate_data), so numeric multi-feature checks fail.",
             strict=True,
         ),
     ),

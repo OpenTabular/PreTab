@@ -27,7 +27,7 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
     Attributes
     ----------
     n_features_in_ : int
-        The number of input features. Always set to 1 for this transformer.
+        The number of input features seen during ``fit`` (expected to be 1).
 
     total_output_dim_ : int
         Total number of output columns (fitted). Always ``1`` because the output
@@ -76,7 +76,8 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
             Fitted transformer.
         """
         # Fit doesn't need to do anything as we are directly using provided bins
-        self.n_features_in_ = 1
+        X = np.asarray(X)
+        self.n_features_in_ = X.shape[1] if X.ndim > 1 else 1
         self.total_output_dim_ = 1
         return self
 
