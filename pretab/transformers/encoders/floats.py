@@ -2,8 +2,6 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.exceptions import InvalidParamError
-
 
 class NoTransformer(TransformerMixin, BaseEstimator):
     """Pass-through transformer that returns the input unchanged.
@@ -61,24 +59,23 @@ class NoTransformer(TransformerMixin, BaseEstimator):
         return X
 
     def get_feature_names_out(self, input_features=None):
-        """Return the original feature names.
+        """Return the output feature names.
 
         Parameters
         ----------
         input_features : list of str or None
-            The names of the input features.
+            The names of the input features. When ``None``, names of the form
+            ``x0, x1, ...`` are generated.
 
         Returns
         -------
         feature_names : ndarray of shape (n_features,)
-            The original feature names.
+            The output feature names.
         """
         check_is_fitted(self, "n_features_in_")
         if input_features is None:
-            raise InvalidParamError(
-                "input_features must be provided to generate feature names."
-            )
-        return np.array(input_features)
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        return np.asarray(input_features, dtype=object)
 
     def __sklearn_tags__(self):
         """Declare that missing values pass through unchanged."""
@@ -140,24 +137,23 @@ class ToFloatTransformer(TransformerMixin, BaseEstimator):
         return X.astype(float)
 
     def get_feature_names_out(self, input_features=None):
-        """Return the original feature names.
+        """Return the output feature names.
 
         Parameters
         ----------
         input_features : list of str or None
-            The names of the input features.
+            The names of the input features. When ``None``, names of the form
+            ``x0, x1, ...`` are generated.
 
         Returns
         -------
         feature_names : ndarray of shape (n_features,)
-            The original feature names.
+            The output feature names.
         """
         check_is_fitted(self, "n_features_in_")
         if input_features is None:
-            raise InvalidParamError(
-                "input_features must be provided to generate feature names."
-            )
-        return np.array(input_features)
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        return np.asarray(input_features, dtype=object)
 
     def __sklearn_tags__(self):
         """Declare that missing values pass through the float cast."""

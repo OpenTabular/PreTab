@@ -2,8 +2,6 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.exceptions import InvalidParamError
-
 
 class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
     """Encode categorical features as continuous integer values.
@@ -85,18 +83,19 @@ class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        input_features : list of str
-            The names of the input features.
+        input_features : list of str or None
+            The names of the input features. When ``None``, names of the form
+            ``x0, x1, ...`` are generated.
 
         Returns
         -------
-        input_features : ndarray of shape (n_features,)
+        feature_names : ndarray of shape (n_features,)
             The names of the output features after transformation.
         """
         check_is_fitted(self, "mapping_")
         if input_features is None:
-            raise InvalidParamError("input_features must be specified")
-        return input_features
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        return np.asarray(input_features, dtype=object)
 
     def __sklearn_tags__(self):
         """Declare that missing/unknown categories are handled (mapped to 0)."""
