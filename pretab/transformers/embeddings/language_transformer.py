@@ -21,8 +21,9 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
 
     Attributes
     ----------
-    model : object
-        The SentenceTransformer model used to compute embeddings.
+    model_ : object
+        The SentenceTransformer model used to compute embeddings, resolved during
+        ``fit`` from ``model`` or by loading ``model_name``.
     n_features_in_ : int
         Number of input features seen during ``fit``.
 
@@ -41,22 +42,24 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
     """
 
     def __init__(self, model_name="paraphrase-MiniLM-L3-v2", model=None):
-        """Initialize the transformer and load the embedding model if needed."""
+        """Store parameters only; the embedding model is loaded lazily in ``fit``."""
         self.model_name = model_name
         self.model = model  # Allow user to pass a preloaded model
 
-        if self.model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-
-                self.model = SentenceTransformer(model_name)
-            except ImportError as e:
-                raise OptionalDependencyError(
-                    "sentence-transformers is not installed. Install it via `pip install sentence-transformers` or provide a preloaded model."
-                ) from e
+    def _resolve_model(self):
+        """Return the preloaded ``model`` or load one from ``model_name``."""
+        if self.model is not None:
+            return self.model
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as e:
+            raise OptionalDependencyError(
+                "sentence-transformers is not installed. Install it via `pip install sentence-transformers` or provide a preloaded model."
+            ) from e
+        return SentenceTransformer(self.model_name)
 
     def fit(self, X, y=None):
-        """Record the number of input features (no fitting required).
+        """Load the embedding model and record the number of input features.
 
         Parameters
         ----------
@@ -71,6 +74,7 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
             Fitted transformer.
         """
         self.n_features_in_ = X.shape[1] if len(X.shape) > 1 else 1
+        self.model_ = self._resolve_model()
         return self
 
     def transform(self, X):
@@ -93,11 +97,11 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         elif isinstance(X, list):
             X = [str(x) for x in X]  # Ensure everything is a string
 
-        if self.model is None:
+        if getattr(self, "model_", None) is None:
             raise PretabConfigError(
-                "Model is not initialized. Ensure that the model is properly loaded."
+                "Model is not initialized. Call `fit` before `transform`."
             )
-        embeddings = self.model.encode(
+        embeddings = self.model_.encode(
             X, convert_to_numpy=True
         )  # Get sentence embeddings
         return embeddings
