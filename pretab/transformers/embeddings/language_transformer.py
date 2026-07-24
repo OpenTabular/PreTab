@@ -80,6 +80,10 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
     def transform(self, X):
         """Transform text features into numerical embeddings.
 
+        Each column is encoded independently and the resulting embeddings are
+        concatenated horizontally, so the output always has one row per input
+        sample regardless of the number of text columns.
+
         Parameters
         ----------
         X : array-like
@@ -87,21 +91,24 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
 
         Returns
         -------
-        embeddings : ndarray of shape (n_samples, embedding_dim)
-            The embedding for each text input.
+        embeddings : ndarray of shape (n_samples, n_features * embedding_dim)
+            The concatenated embeddings for each text input.
         """
-        if isinstance(X, np.ndarray):
-            X = (
-                X.flatten().astype(str).tolist()
-            )  # Convert to a list of strings if passed as an array
-        elif isinstance(X, list):
-            X = [str(x) for x in X]  # Ensure everything is a string
-
         if getattr(self, "model_", None) is None:
             raise PretabConfigError(
                 "Model is not initialized. Call `fit` before `transform`."
             )
-        embeddings = self.model_.encode(
-            X, convert_to_numpy=True
-        )  # Get sentence embeddings
-        return embeddings
+
+        # Normalise to a 2D array of strings so each column is encoded on its own
+        # and the row count is preserved (a flat encode would return
+        # n_samples * n_features rows).
+        arr = np.asarray(X)
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        arr = arr.astype(str)
+
+        column_embeddings = [
+            self.model_.encode(arr[:, i].tolist(), convert_to_numpy=True)
+            for i in range(arr.shape[1])
+        ]
+        return np.hstack(column_embeddings)
