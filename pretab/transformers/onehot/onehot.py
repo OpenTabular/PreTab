@@ -66,13 +66,25 @@ class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
         -------
         X_one_hot : ndarray of shape (n_samples, n_output_features)
             The one-hot encoded features.
+
+        Notes
+        -----
+        Codes outside the range learned during :meth:`fit` (negative values or
+        values ``>= max_bins_[i]``) are treated as unknown and encoded as an
+        all-zero row, mirroring scikit-learn's ``handle_unknown="ignore"``.
         """
         check_is_fitted(self, "max_bins_")
+        X = np.asarray(X)
         # Initialize an empty list to hold the one-hot encoded arrays
         one_hot_encoded = []
         for i, max_bins in enumerate(self.max_bins_):
-            # Convert each feature to one-hot using its max_bins
-            feature_one_hot = np.eye(max_bins)[X[:, i].astype(int)]
+            max_bins = int(max_bins)
+            codes = X[:, i].astype(int)
+            # Codes outside the fitted range map to an all-zero row instead of
+            # raising an IndexError on np.eye indexing.
+            in_range = (codes >= 0) & (codes < max_bins)
+            feature_one_hot = np.zeros((codes.shape[0], max_bins))
+            feature_one_hot[np.nonzero(in_range)[0], codes[in_range]] = 1.0
             one_hot_encoded.append(feature_one_hot)
         # Concatenate the one-hot encoded features horizontally
         return np.hstack(one_hot_encoded)
