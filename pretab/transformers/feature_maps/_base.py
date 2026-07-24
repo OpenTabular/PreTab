@@ -13,7 +13,6 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
-from ...core.centers import center_identification_using_decision_tree
 from ...core.exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -22,6 +21,7 @@ from ...core.exceptions import (
 from ...core.knots import select_knots, spanning_knots
 from ...core.locations import resolve_locations
 from ...core.params import UNSET, is_set
+from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
 
 
 class BaseCenterExpansion(BasePreTabTransformer):
@@ -31,13 +31,13 @@ class BaseCenterExpansion(BasePreTabTransformer):
     :meth:`_expand_column`; they typically add a single kernel parameter (such as
     ``gamma`` or ``scale``) in their own ``__init__``.
 
-    Centers are placed either from decision-tree split thresholds (when
-    ``use_decision_tree`` is True, which then requires ``y``) or from ``quantile``
-    / ``uniform`` spacing.
+    Centers are placed either from a target-aware location selector (when
+    ``use_target`` is True, which then requires ``y``) or from ``quantile`` /
+    ``uniform`` spacing. The selector -- ``"cart"`` (default) or ``"lightgbm"`` --
+    fits a per-feature model and places centers at informative split points.
 
     Adaptive sizing (``adaptive=True``) only takes effect on the target-aware
-    decision-tree path: the tree is grown up to ``max_output_dim`` leaves and the
-    resulting per-feature centers are clamped into
+    path: each feature's centers are clamped into
     ``[min_output_dim, max_output_dim]``. On the ``quantile`` / ``uniform`` paths
     (and whenever ``adaptive`` is False) each feature keeps exactly ``output_dim``
     centers, reproducing the non-adaptive behavior.
@@ -60,6 +60,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = None,
+        selector: str = "cart",
     ):
         self.output_dim = output_dim
         self.use_target = use_target
@@ -70,6 +71,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
         self.random_state = random_state
+        self.selector = selector
 
     def _expand_column(self, x_col, centers):
         """Expand a single column ``x_col`` (shape ``(n, 1)``) against ``centers``.
@@ -102,23 +104,25 @@ class BaseCenterExpansion(BasePreTabTransformer):
                 "Target variable 'y' must be provided when use_decision_tree=True."
             )
 
-        if use_target and self.adaptive:
-            # Adaptive sizing only applies on the target-aware tree path: grow the
-            # tree up to ``max`` leaves, then clamp each feature into [min, max].
-            min_centers, max_centers = self._resolve_output_bounds(
-                n_centers, min_req, max_req, floor=1
-            )
-            raw_centers = center_identification_using_decision_tree(
-                X, y, self.task, max_centers, random_state=self.random_state
-            )
+        if use_target:
+            # Centers come from a target-aware location selector (CART by default,
+            # optionally LightGBM): split points spaced out and ranked by impurity
+            # / gain. Adaptive sizing clamps each feature into [min, max]; otherwise
+            # each feature keeps exactly ``output_dim`` centers.
+            selector = self._build_selector()
+            if self.adaptive:
+                min_centers, max_centers = self._resolve_output_bounds(
+                    n_centers, min_req, max_req, floor=1
+                )
+            else:
+                min_centers = max_centers = n_centers
             centers_list = [
-                self._adjust_centers(X[:, i], centers, min_centers, max_centers)
-                for i, centers in enumerate(raw_centers)
+                selector.select(
+                    X[:, i], y, task=self.task,
+                    min_count=min_centers, max_count=max_centers,
+                )
+                for i in range(X.shape[1])
             ]
-        elif use_target:
-            centers_list = center_identification_using_decision_tree(
-                X, y, self.task, n_centers, random_state=self.random_state
-            )
         elif self.strategy == "quantile":
             centers_list = [
                 np.percentile(X[:, i], np.linspace(0, 100, n_centers))
@@ -151,6 +155,16 @@ class BaseCenterExpansion(BasePreTabTransformer):
     def _output_sizes(self) -> list[int]:
         """Number of output columns contributed by each input feature."""
         return [int(np.asarray(centers).shape[0]) for centers in self.centers_]
+
+    def _build_selector(self):
+        """Construct the target-aware location selector named by ``self.selector``."""
+        if self.selector == "cart":
+            return CARTLocationSelector(random_state=self.random_state)
+        if self.selector == "lightgbm":
+            return LightGBMLocationSelector(random_state=self.random_state)
+        raise InvalidParamError(
+            f"Invalid selector. Choose 'cart' or 'lightgbm'. Got {self.selector!r}."
+        )
 
     def _adjust_centers(
         self, x: np.ndarray, centers: np.ndarray, min_centers: int, max_centers: int

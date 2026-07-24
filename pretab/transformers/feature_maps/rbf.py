@@ -75,6 +75,7 @@ class RBFExpansionTransformer(BaseCenterExpansion):
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = None,
+        selector: str = "cart",
     ):
         super().__init__(
             output_dim=output_dim,
@@ -86,6 +87,7 @@ class RBFExpansionTransformer(BaseCenterExpansion):
             min_output_dim=min_output_dim,
             max_output_dim=max_output_dim,
             random_state=random_state,
+            selector=selector,
         )
         self.gamma = gamma
 

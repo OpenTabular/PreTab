@@ -91,7 +91,10 @@ class BaseLocationSelector(ABC):
             x = x.reshape(-1, 1)
         y = np.asarray(y).ravel()
 
-        valid_mask = ~(np.isnan(x).any(axis=1) | np.isnan(y))
+        # Only float targets can carry NaN; for integer / object (e.g. string
+        # class label) targets, leave the target validation to the fitted model.
+        y_missing = np.isnan(y) if y.dtype.kind == "f" else np.zeros(len(y), dtype=bool)
+        valid_mask = ~(np.isnan(x).any(axis=1) | y_missing)
         x_valid = x[valid_mask]
         y_valid = y[valid_mask]
 
