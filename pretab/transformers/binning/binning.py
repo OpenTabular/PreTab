@@ -42,6 +42,11 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
     regardless of ``output_dim`` -- this is a documented exception to the
     exact-width contract that the fixed-basis families follow.
 
+    The input must be numeric: binning is performed with :func:`pandas.cut`, so
+    string / categorical data cannot be processed and raises a
+    :class:`~pretab.core.exceptions.PretabDataError`. Encode such columns with a
+    categorical method (e.g. ``"int"`` or ``"one-hot"``) before binning.
+
     Examples
     --------
     >>> import numpy as np
@@ -102,6 +107,17 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
 
         if X.shape[0] <= 2:
             raise InsufficientSamplesError("Input must have more than 2 observations.")
+
+        if not np.issubdtype(X.dtype, np.number):
+            try:
+                X = X.astype(np.float64)
+            except (ValueError, TypeError) as exc:
+                raise PretabDataError(
+                    "CustomBinTransformer requires numeric input: it bins continuous "
+                    "values with pandas.cut and cannot process string/categorical "
+                    "data. Encode string columns with a categorical method (e.g. "
+                    "'int' or 'one-hot') before binning."
+                ) from exc
 
         bins_spec = self._resolve_param("output_dim", default=UNSET)
         if bins_spec is UNSET:

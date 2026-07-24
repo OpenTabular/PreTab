@@ -2,6 +2,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder
 
 from ..core.exceptions import invalid_param_error
+from ..core.params import UNSET
 from ..transformers.binning import CustomBinTransformer
 from ..transformers.embeddings import LanguageEmbeddingTransformer
 from ..transformers.encoders.continuous_ordinal import ContinuousOrdinalTransformer
@@ -15,6 +16,7 @@ def get_categorical_transformer_steps(
     add_imputer: bool = True,
     imputer_strategy: str = "most_frequent",
     imputer_kwargs: dict | None = None,
+    output_dim=UNSET,
     **kwargs,
 ):
     """
@@ -42,7 +44,10 @@ def get_categorical_transformer_steps(
     elif method == "none":
         steps.append(("none", NoTransformer()))
     elif method == "custombin":
-        steps.append(("custombin", CustomBinTransformer(**kwargs)))
+        bin_kwargs = dict(kwargs)
+        if output_dim is not UNSET:
+            bin_kwargs.setdefault("output_dim", output_dim)
+        steps.append(("custombin", CustomBinTransformer(**bin_kwargs)))
     elif method == "onehot_from_ordinal":
         steps.append(("onehot_from_ordinal", OneHotFromOrdinalTransformer()))
     else:

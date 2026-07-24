@@ -395,7 +395,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         for feature in categorical_features:
             method = feature_preprocessing.get(feature, categorical_method)
-            steps = get_categorical_transformer_steps(method)
+            steps = get_categorical_transformer_steps(method, output_dim=self.output_dim)
             transformers.append((f"cat_{feature}", Pipeline(steps), [feature]))
 
         self.column_transformer_ = ColumnTransformer(
