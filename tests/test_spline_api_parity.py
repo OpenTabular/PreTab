@@ -1,4 +1,4 @@
-"""Phase 9 regression tests: shared spline API (strategy / selector / task / include_bias).
+"""Shared spline API tests (placement_strategy / target_aware / task / include_bias).
 
 These lock in that the new options default to the historical behaviour (so legacy
 output is preserved) and that they are actually wired through ``fit``.
@@ -15,14 +15,20 @@ from pretab.transformers import (
     TensorProductSplineTransformer,
     ThinPlateSplineTransformer,
 )
-from pretab.transformers.splines.knot_selectors import CARTKnotSelector
 
-# (class, output_dim) for the four knot-based legacy splines that gained strategy/selector.
+# (class, output_dim) for the four knot-based splines that share the placement API.
 KNOT_SPLINES = [
     (CubicSplineTransformer, 8),
     (NaturalCubicSplineTransformer, 6),
     (PSplineTransformer, 8),
     (TensorProductSplineTransformer, 5),
+]
+
+# The knot-based splines that also support the target-aware placement path.
+# (The penalized ``pspline`` / ``tensorspline`` are unsupervised-only.)
+TARGET_AWARE_SPLINES = [
+    (CubicSplineTransformer, 8),
+    (NaturalCubicSplineTransformer, 6),
 ]
 
 
@@ -46,40 +52,38 @@ def y_reg():
 
 @pytest.mark.parametrize(("cls", "output_dim"), KNOT_SPLINES)
 def test_default_strategy_matches_explicit_uniform(cls, output_dim, X_uniform):
-    """Not passing strategy must equal strategy='uniform' (legacy placement)."""
+    """Not passing a strategy must equal placement_strategy='uniform' (legacy placement)."""
     default = cls(output_dim=output_dim).fit_transform(X_uniform)
-    explicit = cls(output_dim=output_dim, strategy="uniform").fit_transform(X_uniform)
+    explicit = cls(output_dim=output_dim, placement_strategy="uniform").fit_transform(X_uniform)
     assert default.shape == explicit.shape
     np.testing.assert_allclose(default, explicit, rtol=1e-10)
 
 
 @pytest.mark.parametrize(("cls", "output_dim"), KNOT_SPLINES)
 def test_quantile_strategy_runs_and_differs(cls, output_dim, X_skewed):
-    """strategy='quantile' produces a finite basis of the same width as uniform."""
-    uniform = cls(output_dim=output_dim, strategy="uniform").fit_transform(X_skewed)
-    quantile = cls(output_dim=output_dim, strategy="quantile").fit_transform(X_skewed)
+    """placement_strategy='quantile' produces a finite basis of the same width as uniform."""
+    uniform = cls(output_dim=output_dim, placement_strategy="uniform").fit_transform(X_skewed)
+    quantile = cls(output_dim=output_dim, placement_strategy="quantile").fit_transform(X_skewed)
     assert quantile.shape == uniform.shape
     assert np.isfinite(quantile).all()
     # On skewed data, quantile placement should differ from uniform placement.
     assert not np.allclose(quantile, uniform)
 
 
-@pytest.mark.parametrize(("cls", "output_dim"), KNOT_SPLINES)
+@pytest.mark.parametrize(("cls", "output_dim"), TARGET_AWARE_SPLINES)
 def test_selector_places_target_aware_knots(cls, output_dim, X_uniform, y_reg):
-    """A selector yields a finite, fit-consistent basis when y is supplied."""
-    selector = CARTKnotSelector(spline_type="bspline", degree=3)
-    transformer = cls(output_dim=output_dim, selector=selector)
+    """Target-aware placement yields a finite, fit-consistent basis when y is supplied."""
+    transformer = cls(output_dim=output_dim, target_aware=True, placement_strategy="cart")
     Xt = transformer.fit_transform(X_uniform, y_reg)
     assert np.isfinite(Xt).all()
     np.testing.assert_allclose(Xt, transformer.transform(X_uniform), rtol=1e-10)
 
 
-@pytest.mark.parametrize(("cls", "output_dim"), KNOT_SPLINES)
+@pytest.mark.parametrize(("cls", "output_dim"), TARGET_AWARE_SPLINES)
 def test_selector_requires_y(cls, output_dim, X_uniform):
-    """Using a selector without y raises a typed error."""
-    selector = CARTKnotSelector(spline_type="bspline", degree=3)
+    """Target-aware placement without y raises a typed error."""
     with pytest.raises(IncompatibleParamsError):
-        cls(output_dim=output_dim, selector=selector).fit(X_uniform)
+        cls(output_dim=output_dim, target_aware=True, placement_strategy="cart").fit(X_uniform)
 
 
 def test_pspline_include_bias_adds_one_column_per_feature(X_uniform):
@@ -107,10 +111,10 @@ def test_thinplate_include_bias_adds_one_column():
 @pytest.mark.parametrize(
     ("cls", "expected"),
     [
-        (CubicSplineTransformer, {"strategy", "selector", "task", "include_bias"}),
-        (NaturalCubicSplineTransformer, {"degree", "strategy", "selector", "task"}),
-        (PSplineTransformer, {"strategy", "selector", "task", "include_bias"}),
-        (TensorProductSplineTransformer, {"strategy", "selector", "task", "include_bias"}),
+        (CubicSplineTransformer, {"target_aware", "placement_strategy", "task", "include_bias"}),
+        (NaturalCubicSplineTransformer, {"degree", "target_aware", "placement_strategy", "task"}),
+        (PSplineTransformer, {"placement_strategy", "include_bias"}),
+        (TensorProductSplineTransformer, {"placement_strategy", "include_bias"}),
         (ThinPlateSplineTransformer, {"include_bias"}),
     ],
 )

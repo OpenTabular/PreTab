@@ -131,7 +131,7 @@ def test_center_identification_is_seedable(data):
 
 def test_rbf_transformer_seeded_centers_reproducible(data):
     X, y = data
-    r1 = RBFExpansionTransformer(output_dim=5, use_target=True, random_state=3).fit(X.values, y.values)
-    r2 = RBFExpansionTransformer(output_dim=5, use_target=True, random_state=3).fit(X.values, y.values)
+    r1 = RBFExpansionTransformer(output_dim=5, target_aware=True, random_state=3).fit(X.values, y.values)
+    r2 = RBFExpansionTransformer(output_dim=5, target_aware=True, random_state=3).fit(X.values, y.values)
     for a, b in zip(r1.centers_, r2.centers_):
         np.testing.assert_array_equal(a, b)

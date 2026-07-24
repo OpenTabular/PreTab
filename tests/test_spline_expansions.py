@@ -6,7 +6,6 @@ from pretab.transformers import (
     ISplineTransformer,
     MSplineTransformer,
 )
-from pretab.transformers.splines import CARTKnotSelector
 
 
 @pytest.fixture
@@ -119,8 +118,9 @@ def test_ispline_shape_multi_feature():
 
 def test_spline_with_cart_knot_selector(data):
     X, y = data
-    selector = CARTKnotSelector(max_basis_functions=10, degree=3)
-    transformer = BSplineTransformer(output_dim=8, include_bias=False, knot_selector=selector)
+    transformer = BSplineTransformer(
+        output_dim=8, include_bias=False, target_aware=True, placement_strategy="cart"
+    )
     Xt = transformer.fit_transform(X, y)
     assert Xt.shape == (200, 8)
     assert np.isfinite(Xt).all()

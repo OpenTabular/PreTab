@@ -18,14 +18,12 @@ from pretab.transformers import (
     CubicSplineTransformer,
     NaturalCubicSplineTransformer,
     PLETransformer,
-    PSplineTransformer,
     RBFExpansionTransformer,
     ReLUExpansionTransformer,
     SigmoidExpansionTransformer,
     TanhExpansionTransformer,
     TensorProductSplineTransformer,
 )
-from pretab.transformers.splines import CARTKnotSelector
 
 
 @pytest.fixture
@@ -88,7 +86,7 @@ FEATURE_MAPS = [
 @pytest.mark.parametrize("Cls", FEATURE_MAPS)
 def test_feature_map_adaptive_tree_clamps_within_window(Cls, data):
     X, y = data
-    t = Cls(output_dim=4, use_target=True, adaptive=True, min_output_dim=2, max_output_dim=8)
+    t = Cls(output_dim=4, target_aware=True, adaptive=True, min_output_dim=2, max_output_dim=8)
     Xt = t.fit_transform(X, y)
     for centers in t.centers_:
         assert 2 <= len(centers) <= 8
@@ -98,8 +96,8 @@ def test_feature_map_adaptive_tree_clamps_within_window(Cls, data):
 @pytest.mark.parametrize("Cls", FEATURE_MAPS)
 def test_feature_map_adaptive_false_reproduces_fixed(Cls, data):
     X, y = data
-    fixed = Cls(output_dim=5, use_target=True).fit(X, y)
-    non_adaptive = Cls(output_dim=5, use_target=True, adaptive=False).fit(X, y)
+    fixed = Cls(output_dim=5, target_aware=True).fit(X, y)
+    non_adaptive = Cls(output_dim=5, target_aware=True, adaptive=False).fit(X, y)
     assert [len(c) for c in fixed.centers_] == [len(c) for c in non_adaptive.centers_]
 
 
@@ -108,8 +106,8 @@ def test_feature_map_adaptive_is_noop_on_quantile_path(Cls, data):
     X, _ = data
     t = Cls(
         output_dim=5,
-        use_target=False,
-        strategy="quantile",
+        target_aware=False,
+        placement_strategy="quantile",
         adaptive=True,
         min_output_dim=2,
         max_output_dim=9,
@@ -118,12 +116,11 @@ def test_feature_map_adaptive_is_noop_on_quantile_path(Cls, data):
 
 
 # --------------------------------------------------------------------------- #
-# Legacy splines (selector = target-aware path)                               #
+# Legacy splines (target-aware placement path)                                #
 # --------------------------------------------------------------------------- #
 LEGACY_SPLINES = [
     (CubicSplineTransformer, 8),
     (NaturalCubicSplineTransformer, 6),
-    (PSplineTransformer, 10),
 ]
 
 
@@ -133,7 +130,8 @@ def test_legacy_spline_adaptive_clamps_basis_within_window(Cls, output_dim, data
     lo, hi = max(output_dim - 3, 2), output_dim + 6
     t = Cls(
         output_dim=output_dim,
-        selector=CARTKnotSelector(max_basis_functions=25),
+        target_aware=True,
+        placement_strategy="cart",
         task="regression",
         adaptive=True,
         min_output_dim=lo,
@@ -149,33 +147,31 @@ def test_legacy_spline_adaptive_false_reproduces_selector_output(Cls, output_dim
     X, y = data
     fixed = Cls(
         output_dim=output_dim,
-        selector=CARTKnotSelector(max_basis_functions=25),
+        target_aware=True,
+        placement_strategy="cart",
         task="regression",
     ).fit(X, y)
     non_adaptive = Cls(
         output_dim=output_dim,
-        selector=CARTKnotSelector(max_basis_functions=25),
+        target_aware=True,
+        placement_strategy="cart",
         task="regression",
         adaptive=False,
     ).fit(X, y)
     assert fixed.n_basis_ == non_adaptive.n_basis_
 
 
-def test_tensor_product_adaptive_clamps_per_marginal(data):
+def test_tensor_product_adaptive_is_noop(data):
+    """Penalized tensor splines are unsupervised: the adaptive window is a no-op."""
     X, y = data
-    t = TensorProductSplineTransformer(
+    fixed = TensorProductSplineTransformer(output_dim=5).fit_transform(X, y).shape[1]
+    adaptive = TensorProductSplineTransformer(
         output_dim=5,
-        selector=CARTKnotSelector(max_basis_functions=12),
-        task="regression",
         adaptive=True,
         min_output_dim=4,
         max_output_dim=7,
-    )
-    Xt = t.fit_transform(X, y)
-    marginals = [n + t.degree + 1 for n in t.n_knots_]
-    for n_basis in marginals:
-        assert 4 <= n_basis <= 7
-    assert Xt.shape[1] == int(np.prod(marginals))
+    ).fit_transform(X, y).shape[1]
+    assert fixed == adaptive
 
 
 # --------------------------------------------------------------------------- #
@@ -185,7 +181,8 @@ def test_bspline_adaptive_selector_within_window(data):
     X, y = data
     t = BSplineTransformer(
         output_dim=8,
-        selector=CARTKnotSelector(max_basis_functions=25),
+        target_aware=True,
+        placement_strategy="cart",
         adaptive=True,
         min_output_dim=6,
         max_output_dim=14,
@@ -249,7 +246,7 @@ def test_preprocessor_adaptive_rbf_within_window(frame):
     pre = Preprocessor(
         numerical_method="rbf",
         adaptive=True,
-        use_target=True,
+        target_aware=True,
         min_output_dim=3,
         max_output_dim=9,
         cat_cutoff=0.0,

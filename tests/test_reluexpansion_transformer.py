@@ -22,7 +22,7 @@ def y_regression():
 
 def test_relu_uniform_single_feature(X_single_feature):
     transformer = ReLUExpansionTransformer(
-        output_dim=4, use_decision_tree=False, strategy="uniform"
+        output_dim=4, target_aware=False, placement_strategy="uniform"
     )
     transformer.fit(X_single_feature)
     Xt = transformer.transform(X_single_feature)
@@ -33,7 +33,7 @@ def test_relu_uniform_single_feature(X_single_feature):
 
 def test_relu_quantile_multi_feature(X_multi_feature):
     transformer = ReLUExpansionTransformer(
-        output_dim=5, use_decision_tree=False, strategy="quantile"
+        output_dim=5, target_aware=False, placement_strategy="quantile"
     )
     transformer.fit(X_multi_feature)
     Xt = transformer.transform(X_multi_feature)
@@ -43,7 +43,7 @@ def test_relu_quantile_multi_feature(X_multi_feature):
 
 
 def test_relu_tree_centering(X_multi_feature, y_regression):
-    transformer = ReLUExpansionTransformer(output_dim=3, use_decision_tree=True)
+    transformer = ReLUExpansionTransformer(output_dim=3, target_aware=True)
     transformer.fit(X_multi_feature, y_regression)
     Xt = transformer.transform(X_multi_feature)
 
@@ -52,8 +52,8 @@ def test_relu_tree_centering(X_multi_feature, y_regression):
 
 
 def test_relu_invalid_strategy():
-    with pytest.raises(ValueError, match="Invalid strategy"):
-        ReLUExpansionTransformer(strategy="nonsense").fit(np.random.rand(5, 1))
+    with pytest.raises(ValueError, match="placement_strategy must be 'uniform' or 'quantile'"):
+        ReLUExpansionTransformer(target_aware=False, placement_strategy="nonsense").fit(np.random.rand(5, 1))
 
 
 def test_relu_invalid_task():
@@ -62,13 +62,13 @@ def test_relu_invalid_task():
 
 
 def test_relu_missing_y_tree(X_single_feature):
-    transformer = ReLUExpansionTransformer(use_decision_tree=True)
+    transformer = ReLUExpansionTransformer(target_aware=True)
     with pytest.raises(ValueError, match="Target variable.*must be provided"):
         transformer.fit(X_single_feature)
 
 
 def test_relu_feature_mismatch(X_multi_feature, y_regression):
-    transformer = ReLUExpansionTransformer(output_dim=3, use_decision_tree=True)
+    transformer = ReLUExpansionTransformer(output_dim=3, target_aware=True)
     transformer.fit(X_multi_feature[:, :2], y_regression)
     with pytest.raises(ValueError, match="is expecting"):
         transformer.transform(X_multi_feature)

@@ -28,7 +28,7 @@ def test_tanh_transformer_output_shape(X_float_2d, y_dummy):
 
 
 def test_tanh_transformer_single_feature(X_float_1d):
-    transformer = TanhExpansionTransformer(output_dim=6, use_decision_tree=False)
+    transformer = TanhExpansionTransformer(output_dim=6, target_aware=False, placement_strategy="uniform")
     Xt = transformer.fit_transform(X_float_1d)
     assert Xt.shape == (X_float_1d.shape[0], 6)
     assert np.isfinite(Xt).all()
@@ -43,8 +43,8 @@ def test_tanh_transformer_output_consistency(X_float_2d, y_dummy):
 
 
 def test_tanh_invalid_strategy_raises():
-    with pytest.raises(ValueError, match="Invalid strategy"):
-        TanhExpansionTransformer(strategy="invalid").fit(np.random.rand(5, 1))
+    with pytest.raises(ValueError, match="placement_strategy must be 'uniform' or 'quantile'"):
+        TanhExpansionTransformer(target_aware=False, placement_strategy="invalid").fit(np.random.rand(5, 1))
 
 
 def test_tanh_invalid_task_raises():

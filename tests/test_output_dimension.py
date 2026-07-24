@@ -75,7 +75,7 @@ FEATURE_MAP_CLASSES = [
 
 @pytest.mark.parametrize("cls", FEATURE_MAP_CLASSES)
 def test_feature_map_width_is_n_features_times_output_dim(cls, X):
-    transformer = cls(output_dim=OUTPUT_DIM, use_target=False).fit(X)
+    transformer = cls(output_dim=OUTPUT_DIM, target_aware=False, placement_strategy="uniform").fit(X)
     Xt = transformer.transform(X)
     assert Xt.shape[1] == X.shape[1] * OUTPUT_DIM
     assert transformer.total_output_dim_ == Xt.shape[1]

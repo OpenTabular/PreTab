@@ -25,7 +25,6 @@ from pretab.core.exceptions import InvalidParamError
 from pretab.preprocessor import Preprocessor
 from pretab.transformers.splines.bspline import BSplineTransformer
 from pretab.transformers.splines.integrated_spline import ISplineTransformer
-from pretab.transformers.splines.knot_selectors import CARTKnotSelector
 from pretab.transformers.splines.mspline import MSplineTransformer
 
 OUTPUT_DIM = 6
@@ -113,7 +112,7 @@ def test_fixed_width_matches_expected(data, method):
     X, y = data
     width = _num_width(
         X, y, method,
-        output_dim=OUTPUT_DIM, adaptive=False, use_target=True, task="regression",
+        output_dim=OUTPUT_DIM, adaptive=False, target_aware=True, task="regression",
     )
     assert width == FIXED_WIDTH[method], f"{method}: got {width}, want {FIXED_WIDTH[method]}"
 
@@ -124,7 +123,7 @@ def test_ple_fixed_width_tracks_output_dim(data, output_dim):
     X, y = data
     width = _num_width(
         X, y, "ple",
-        output_dim=output_dim, adaptive=False, use_target=True, task="regression",
+        output_dim=output_dim, adaptive=False, target_aware=True, task="regression",
     )
     assert width == output_dim
 
@@ -148,12 +147,12 @@ def test_adaptive_width_within_window(data, method):
     X, y = data
     fixed = _num_width(
         X, y, method,
-        output_dim=10, adaptive=False, use_target=True, task="regression",
+        output_dim=10, adaptive=False, target_aware=True, task="regression",
     )
     adaptive = _num_width(
         X, y, method,
         output_dim=10, adaptive=True, min_output_dim=3, max_output_dim=5,
-        use_target=True, task="regression",
+        target_aware=True, task="regression",
     )
     assert fixed == 10
     assert 3 <= adaptive <= 5
@@ -164,21 +163,16 @@ def test_adaptive_width_within_window(data, method):
 # Adaptive mode at the transformer level: the B/M/I splines honor the window.
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
-    ("cls", "spline_type"),
-    [
-        (BSplineTransformer, "bspline"),
-        (MSplineTransformer, "mspline"),
-        (ISplineTransformer, "ispline"),
-    ],
+    "cls",
+    [BSplineTransformer, MSplineTransformer, ISplineTransformer],
 )
-def test_spline_adaptive_transformer_level(data, cls, spline_type):
+def test_spline_adaptive_transformer_level(data, cls):
     X, y = data
     Xv = X.to_numpy()
     fixed = cls(output_dim=10).fit_transform(Xv, y).shape[1]
-    selector = CARTKnotSelector(degree=3, spline_type=spline_type)
     adaptive = cls(
         output_dim=10, adaptive=True, min_output_dim=4, max_output_dim=5,
-        selector=selector, task="regression",
+        target_aware=True, placement_strategy="cart", task="regression",
     ).fit_transform(Xv, y).shape[1]
     assert adaptive < fixed
     assert adaptive <= 5 + 1  # allow the optional bias column
@@ -193,12 +187,12 @@ def test_bmi_spline_adaptive_via_preprocessor(data, method):
     X, y = data
     fixed = _num_width(
         X, y, method,
-        output_dim=10, adaptive=False, use_target=True, task="regression",
+        output_dim=10, adaptive=False, target_aware=True, task="regression",
     )
     adaptive = _num_width(
         X, y, method,
         output_dim=10, adaptive=True, min_output_dim=4, max_output_dim=6,
-        use_target=True, task="regression",
+        target_aware=True, task="regression",
     )
     assert adaptive < fixed
     assert 4 <= adaptive <= 6 + 1  # allow the optional bias column
@@ -211,7 +205,7 @@ def test_bmi_spline_selector_choice_via_preprocessor(data):
     adaptive = _num_width(
         X, y, "bspline",
         output_dim=10, adaptive=True, min_output_dim=4, max_output_dim=6,
-        use_target=True, task="regression", selector="lightgbm",
+        target_aware=True, task="regression", placement_strategy="lightgbm",
     )
     assert 4 <= adaptive <= 6 + 1  # allow the optional bias column
 
@@ -225,12 +219,12 @@ def test_legacy_spline_adaptive_via_preprocessor(data, method):
     X, y = data
     fixed = _num_width(
         X, y, method,
-        output_dim=10, adaptive=False, use_target=True, task="regression",
+        output_dim=10, adaptive=False, target_aware=True, task="regression",
     )
     adaptive = _num_width(
         X, y, method,
         output_dim=10, adaptive=True, min_output_dim=4, max_output_dim=6,
-        use_target=True, task="regression",
+        target_aware=True, task="regression",
     )
     assert adaptive < fixed
     assert 4 <= adaptive <= 6
@@ -247,12 +241,12 @@ def test_fixed_only_spline_ignores_adaptive(data, method):
     X, y = data
     fixed = _num_width(
         X, y, method,
-        output_dim=10, adaptive=False, use_target=True, task="regression",
+        output_dim=10, adaptive=False, target_aware=True, task="regression",
     )
     adaptive = _num_width(
         X, y, method,
         output_dim=10, adaptive=True, min_output_dim=4, max_output_dim=6,
-        use_target=True, task="regression",
+        target_aware=True, task="regression",
     )
     assert fixed == adaptive == 10
 

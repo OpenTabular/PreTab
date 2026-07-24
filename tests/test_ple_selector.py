@@ -74,15 +74,15 @@ def test_thresholds_are_sorted_and_unique(data):
 
 def test_invalid_selector_raises(data):
     X, y = data
-    with pytest.raises(InvalidParamError, match="Invalid selector"):
-        PLETransformer(selector="bogus").fit(X, y)
+    with pytest.raises(InvalidParamError, match="Invalid placement_strategy"):
+        PLETransformer(placement_strategy="bogus").fit(X, y)
 
 
 def test_selector_is_a_clonable_hyperparameter():
-    t = PLETransformer(selector="lightgbm")
-    assert t.get_params()["selector"] == "lightgbm"
+    t = PLETransformer(placement_strategy="lightgbm")
+    assert t.get_params()["placement_strategy"] == "lightgbm"
     cloned = cast(PLETransformer, clone(t))
-    assert cloned.selector == "lightgbm"
+    assert cloned.placement_strategy == "lightgbm"
 
 
 def test_classification_task_places_thresholds(data):
@@ -96,6 +96,6 @@ def test_classification_task_places_thresholds(data):
 def test_lightgbm_selector_places_thresholds(data):
     pytest.importorskip("lightgbm")
     X, y = data
-    t = PLETransformer(output_dim=5, task="regression", selector="lightgbm").fit(X, y)
+    t = PLETransformer(output_dim=5, task="regression", placement_strategy="lightgbm").fit(X, y)
     assert t.n_bins_per_feature_ == [5]
     assert np.all(np.diff(t.thresholds_[0]) > 0)
