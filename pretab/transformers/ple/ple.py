@@ -21,6 +21,7 @@ from ...core.exceptions import (
     InvalidParamError,
     PretabDataError,
 )
+from ...core.locations import resolve_locations
 from ...core.params import UNSET, AliasResolverMixin
 
 
@@ -386,16 +387,16 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
     def _adjust_thresholds(
         self, feature: np.ndarray, thresholds: np.ndarray, min_bins: int, max_bins: int
     ) -> np.ndarray:
-        thresholds = np.sort(np.asarray(thresholds))
         min_thresholds = max(0, min_bins - 1)
         max_thresholds = max(0, max_bins - 1)
-
-        if len(thresholds) < min_thresholds:
-            thresholds = self._supplement_thresholds(feature, thresholds, min_thresholds)
-        if len(thresholds) > max_thresholds:
-            thresholds = self._select_thresholds(thresholds, max_thresholds)
-
-        return np.sort(thresholds)
+        resolved = resolve_locations(
+            thresholds,
+            min_count=min_thresholds,
+            max_count=max_thresholds,
+            supplement=lambda current, target: self._supplement_thresholds(feature, current, target),
+            dedupe=False,
+        )
+        return np.sort(resolved)
 
     def _supplement_thresholds(self, feature: np.ndarray, thresholds: np.ndarray, target_count: int) -> np.ndarray:
         if target_count <= len(thresholds):

@@ -20,6 +20,7 @@ from ...core.exceptions import (
     PretabDataError,
 )
 from ...core.knots import select_knots, spanning_knots
+from ...core.locations import resolve_locations
 from ...core.params import UNSET, is_set
 
 
@@ -155,12 +156,12 @@ class BaseCenterExpansion(BasePreTabTransformer):
         self, x: np.ndarray, centers: np.ndarray, min_centers: int, max_centers: int
     ) -> np.ndarray:
         """Clamp a data-driven set of centers into the ``[min, max]`` window."""
-        centers = np.unique(np.sort(np.asarray(centers, dtype=float)))
-        if len(centers) > max_centers:
-            centers = select_knots(centers, max_centers)
-        if len(centers) < min_centers:
-            centers = self._supplement_centers(x, centers, min_centers)
-        return centers
+        return resolve_locations(
+            centers,
+            min_count=min_centers,
+            max_count=max_centers,
+            supplement=lambda current, target: self._supplement_centers(x, current, target),
+        )
 
     def _supplement_centers(
         self, x: np.ndarray, centers: np.ndarray, target: int

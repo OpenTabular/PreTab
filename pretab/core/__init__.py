@@ -32,6 +32,7 @@ from .knots import (
     spanning_knots,
     uniform_knots,
 )
+from .locations import resolve_locations, trim_to_count
 from .logging import get_logger
 from .params import CANONICAL_PARAMS, UNSET, AliasResolverMixin, is_set
 from .validation import validate_2d_allow_nan
@@ -62,8 +63,10 @@ __all__ = [
     "invalid_param_error",
     "is_set",
     "quantile_knots",
+    "resolve_locations",
     "select_knots",
     "spanning_knots",
+    "trim_to_count",
     "uniform_knots",
     "validate_2d_allow_nan",
 ]
