@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.special import expit
 
 from ...core.params import UNSET
 from ._base import BaseCenterExpansion
@@ -89,4 +90,4 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
         self.scale = scale
 
     def _expand_column(self, x_col, centers):
-        return 1 / (1 + np.exp(-(x_col - centers[np.newaxis, :]) / self.scale))
+        return expit((x_col - centers[np.newaxis, :]) / self.scale)
