@@ -32,7 +32,10 @@ def get_categorical_transformer_steps(
     if method == "int":
         steps.append(("continuous_ordinal", ContinuousOrdinalTransformer()))
     elif method == "one-hot":
-        steps.append(("onehot", OneHotEncoder(**kwargs)))
+        # Default to ignoring unseen categories so transform never crashes on
+        # categories absent at fit time; callers can override via kwargs.
+        onehot_kwargs = {"handle_unknown": "ignore", **kwargs}
+        steps.append(("onehot", OneHotEncoder(**onehot_kwargs)))
         steps.append(("to_float", ToFloatTransformer()))
     elif method == "pretrained":
         steps.append(("pretrained", LanguageEmbeddingTransformer()))
