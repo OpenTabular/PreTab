@@ -120,8 +120,10 @@ NUMERICAL_METHODS = {
             "selector",
         ],
     ),
-    "cubicspline": (CubicSplineTransformer, ["output_dim", "degree", "include_bias"]),
-    "naturalspline": (NaturalCubicSplineTransformer, ["output_dim", "include_bias"]),
+    "cubicspline": (CubicSplineTransformer, ["output_dim", "degree", "include_bias", "task"]),
+    "naturalspline": (NaturalCubicSplineTransformer, ["output_dim", "include_bias", "task"]),
+    # pspline / tensorspline are penalized (difference-penalty) splines that rely
+    # on equally-spaced knots, so they are *not* target-aware: no ``task`` here.
     "pspline": (PSplineTransformer, ["output_dim", "degree", "diff_order"]),
     "tensorspline": (
         TensorProductSplineTransformer,

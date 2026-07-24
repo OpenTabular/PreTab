@@ -63,7 +63,7 @@ class SplineBasisMixin(BasePreTabTransformer):
         x = np.asarray(x)
         if selector is not None:
             interior = self._place_interior_knots(
-                x, y, 0, strategy, selector, task, min_interior, max_interior
+                x, y, n_basis - 2, strategy, selector, task, min_interior, max_interior
             )
             x_min, x_max = x.min(), x.max()
             return np.concatenate([[x_min], interior, [x_max]])
@@ -76,11 +76,14 @@ class SplineBasisMixin(BasePreTabTransformer):
         returned array holds only the strictly-interior knots that the B/M/I,
         cubic, p-spline and tensor-product families use to reach an exact
         ``output_dim``. When ``selector`` is provided the interior knots come from
-        the target-aware selector (their count is data-driven and may differ from
-        ``n_interior``); otherwise ``n_interior`` knots are placed with
-        :func:`pretab.core.knots.generate_internal_knots`. When ``min_interior`` /
-        ``max_interior`` are given (the adaptive selector path) the data-driven
-        count is clamped into that window.
+        the target-aware selector. On the fixed (non-adaptive) path -- signalled by
+        ``min_interior`` and ``max_interior`` both being ``None`` -- the selected
+        knots are clamped to exactly ``n_interior`` so the output width stays
+        ``output_dim``, matching the fixed-width contract of the B/M/I base class.
+        On the adaptive selector path ``min_interior`` / ``max_interior`` clamp the
+        data-driven count into that window instead. Without a ``selector``,
+        ``n_interior`` knots are placed with
+        :func:`pretab.core.knots.generate_internal_knots`.
         """
         x = np.asarray(x)
         if selector is not None:
@@ -93,8 +96,11 @@ class SplineBasisMixin(BasePreTabTransformer):
             )
             x_min, x_max = x.min(), x.max()
             selected = np.unique(selected[(selected > x_min) & (selected < x_max)])
-            if min_interior is not None or max_interior is not None:
-                selected = self._clamp_interior_knots(x, selected, min_interior, max_interior, strategy)
+            if min_interior is None and max_interior is None:
+                # Fixed (non-adaptive) selector path: force exactly ``n_interior``
+                # interior knots so the width stays ``output_dim``.
+                min_interior = max_interior = n_interior
+            selected = self._clamp_interior_knots(x, selected, min_interior, max_interior, strategy)
             return selected
         return generate_internal_knots(x, n_interior, strategy)
 

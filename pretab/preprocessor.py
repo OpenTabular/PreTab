@@ -88,7 +88,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Target-aware location selector used to place basis units / knots when ``use_target`` is
         True: ``"cart"`` (a single decision tree, always available) or ``"lightgbm"`` (a
         gradient-boosted ensemble, requires the optional ``lightgbm`` dependency). Applies to the
-        feature maps, PLE, and the B/M/I splines; ignored by methods that are not target-aware.
+        feature maps, PLE, and the knot-based splines that support target-aware placement
+        (``"bspline"`` / ``"mspline"`` / ``"ispline"`` / ``"cubicspline"`` / ``"naturalspline"``);
+        ignored by methods that are not target-aware, i.e. the penalized ``"pspline"`` /
+        ``"tensorspline"`` (which assume equally-spaced knots) and the kernel-based ``"tprs"``.
     degree : int, default=3
         Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
         (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.

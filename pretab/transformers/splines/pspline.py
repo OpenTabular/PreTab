@@ -67,12 +67,30 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
     selector : BaseKnotSelector or None, default=None
         Optional target-aware knot selector (for example ``CARTKnotSelector``).
-        When provided it determines the interior knots from the target and requires
-        ``y`` during ``fit``; the resulting output width is then data-driven and may
-        differ from ``output_dim``.
+        When provided it places the interior knots from the target and requires
+        ``y`` during ``fit``. On the fixed path the width stays ``output_dim``;
+        with ``adaptive=True`` it may vary within
+        ``[min_output_dim, max_output_dim]``.
+
+        .. note::
+           P-splines are penalized (difference-penalty) splines that assume
+           **equally-spaced** knots, so target-aware placement is not
+           recommended and is *not* enabled by the :class:`~pretab.preprocessor.Preprocessor`
+           pipeline (it always builds this family with fixed, evenly-spaced knots).
 
     task : {"regression", "classification"} or None, default=None
         Task forwarded to a target-aware ``selector``.
+
+    adaptive : bool, default=False
+        If True (with a ``selector``), the per-feature output dimension may vary
+        within ``[min_output_dim, max_output_dim]`` instead of being fixed to
+        ``output_dim``.
+
+    min_output_dim : int or None, default=None
+        Lower bound on the per-feature output dimension in adaptive mode.
+
+    max_output_dim : int or None, default=None
+        Upper bound on the per-feature output dimension in adaptive mode.
 
     Attributes
     ----------

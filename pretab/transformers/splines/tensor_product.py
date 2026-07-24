@@ -67,11 +67,30 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     selector : BaseKnotSelector or None, default=None
         Optional target-aware knot selector applied per marginal dimension. When
-        provided it requires ``y`` during ``fit``; the resulting width is then
-        data-driven and may differ from ``output_dim ** d``.
+        provided it requires ``y`` during ``fit``. On the fixed path each marginal
+        width stays ``output_dim``; with ``adaptive=True`` it may vary within
+        ``[min_output_dim, max_output_dim]``.
+
+        .. note::
+           The tensor-product spline is a penalized (difference-penalty) spline
+           per marginal, exactly like :class:`~pretab.transformers.splines.pspline.PSplineTransformer`,
+           so it assumes **equally-spaced** knots. Target-aware placement is not
+           recommended and is *not* enabled by the :class:`~pretab.preprocessor.Preprocessor`
+           pipeline (it always builds this family with fixed, evenly-spaced knots).
 
     task : {"regression", "classification"} or None, default=None
         Task forwarded to a target-aware ``selector``.
+
+    adaptive : bool, default=False
+        If True (with a ``selector``), the per-marginal output dimension may vary
+        within ``[min_output_dim, max_output_dim]`` instead of being fixed to
+        ``output_dim``.
+
+    min_output_dim : int or None, default=None
+        Lower bound on the per-marginal output dimension in adaptive mode.
+
+    max_output_dim : int or None, default=None
+        Upper bound on the per-marginal output dimension in adaptive mode.
 
     Attributes
     ----------

@@ -10,6 +10,42 @@ from .registry import NUMERICAL_ALIASES, NUMERICAL_METHODS, resolve_method
 # Spline basis expansions that share the target-aware knot API.
 SPLINE_EXPANSION_METHODS = ("bspline", "mspline", "ispline")
 
+# Legacy knot-based spline families that also support target-aware placement.
+# They use freely-placed knots (cubic / natural-cubic regression splines), so the
+# selector / task / strategy / adaptive knobs apply; their knot selector uses the
+# ``"bspline"`` spline_type. The penalized families (``pspline``, ``tensorspline``)
+# assume equally-spaced knots for their difference penalty, and the thin-plate
+# spline (``tprs``) is kernel-based (knot-free): none of those three are
+# target-aware, so they stay on the generic fixed construction path.
+LEGACY_SPLINE_METHODS = ("cubicspline", "naturalspline")
+
+# Every spline family for which target-aware (data-driven) knot placement is
+# meaningful. Exposed via :func:`supports_target_aware` so callers can query it.
+TARGET_AWARE_SPLINE_METHODS = SPLINE_EXPANSION_METHODS + LEGACY_SPLINE_METHODS
+
+# spline_type passed to the knot selector for each target-aware spline family.
+_SELECTOR_SPLINE_TYPE = {
+    "bspline": "bspline",
+    "mspline": "mspline",
+    "ispline": "ispline",
+    "cubicspline": "bspline",
+    "naturalspline": "bspline",
+}
+
+
+def supports_target_aware(method: str) -> bool:
+    """Return whether a spline ``method`` supports target-aware knot placement.
+
+    Only freely-placed knot splines qualify: ``bspline``, ``mspline``,
+    ``ispline``, ``cubicspline`` and ``naturalspline``. The penalized splines
+    (``pspline``, ``tensorspline``) require equally-spaced knots for their
+    difference penalty, and the kernel-based ``tprs`` has no knots, so those
+    three always use fixed knot placement regardless of ``use_target`` /
+    ``selector`` / ``adaptive``.
+    """
+    resolved = resolve_method(method, NUMERICAL_METHODS, NUMERICAL_ALIASES)
+    return resolved in TARGET_AWARE_SPLINE_METHODS
+
 # Valid range for the number of spline basis functions per feature.
 _MIN_SPLINE_BASIS = 5
 _MAX_SPLINE_BASIS = 50
@@ -44,15 +80,15 @@ def _wants_target(kwargs):
     return bool(value)
 
 
-def _build_knot_selector(method, degree, kwargs):
-    """Build a target-aware knot selector for a B/M/I spline family.
+def _build_knot_selector(spline_type, degree, kwargs):
+    """Build a target-aware knot selector for a spline family.
 
-    ``method`` names the spline family (also the selector's ``spline_type``); the
-    ``selector`` kwarg picks ``"cart"`` (default) or ``"lightgbm"``.
-    ``random_state`` is forwarded only when the caller set one.
+    ``spline_type`` is the selector's basis type (``"bspline"`` / ``"mspline"`` /
+    ``"ispline"``); the ``selector`` kwarg picks ``"cart"`` (default) or
+    ``"lightgbm"``. ``random_state`` is forwarded only when the caller set one.
     """
     selector_name = kwargs.get("selector") or "cart"
-    selector_kwargs = {"degree": degree, "spline_type": method}
+    selector_kwargs = {"degree": degree, "spline_type": spline_type}
     if kwargs.get("random_state") is not None:
         selector_kwargs["random_state"] = kwargs["random_state"]
     if selector_name == "cart":
@@ -127,12 +163,16 @@ def get_numerical_transformer_steps(
         steps.append(("boxcox", cls(method="box-cox", **filtered)))
     elif method == "yeo-johnson":
         steps.append(("yeojohnson", cls(method="yeo-johnson", **filtered)))
-    elif method in SPLINE_EXPANSION_METHODS:
+    elif method in SPLINE_EXPANSION_METHODS or method in LEGACY_SPLINE_METHODS:
         spline_kwargs = dict(filtered)
 
-        output_dim = kwargs.get("output_dim")
-        if output_dim is not None:
-            spline_kwargs["output_dim"] = _clamp_spline_basis(output_dim)
+        # The B/M/I splines share the Preprocessor's default ``output_dim`` (which
+        # can sit outside their [5, 50] basis range); the legacy families keep
+        # their own wider bounds, so only clamp for B/M/I.
+        if method in SPLINE_EXPANSION_METHODS:
+            output_dim = kwargs.get("output_dim")
+            if output_dim is not None:
+                spline_kwargs["output_dim"] = _clamp_spline_basis(output_dim)
 
         strategy = kwargs.get("strategy")
         if strategy in ("uniform", "quantile"):
@@ -140,7 +180,7 @@ def get_numerical_transformer_steps(
 
         if _wants_target(kwargs):
             spline_kwargs["selector"] = _build_knot_selector(
-                method, spline_kwargs.get("degree", 3), kwargs
+                _SELECTOR_SPLINE_TYPE[method], spline_kwargs.get("degree", 3), kwargs
             )
             # The adaptive window only takes effect on the target-aware
             # (selector) path, so forward it here: each feature is then sized
