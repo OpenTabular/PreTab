@@ -74,6 +74,16 @@ def test_fit_transform_invokes_model_encode():
     assert dummy.calls == 1
 
 
+def test_transform_multi_column_preserves_row_count():
+    # Two text columns must yield one row per sample (not n_samples * n_cols),
+    # encoding each column independently and concatenating the embeddings.
+    dummy = _DummyModel()
+    transformer = LanguageEmbeddingTransformer(model=dummy)
+    embeddings = transformer.fit_transform(np.array([["a", "b"], ["c", "d"], ["e", "f"]]))
+    assert embeddings.shape == (3, 8)  # 2 columns x 4-dim embedding
+    assert dummy.calls == 2  # one encode call per column
+
+
 def test_fit_without_dependency_raises(monkeypatch):
     # Simulate sentence-transformers being absent; construction still succeeds,
     # and only ``fit`` surfaces the optional-dependency error.
