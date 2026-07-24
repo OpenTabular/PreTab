@@ -1,9 +1,9 @@
 """Piecewise Linear Encoding (PLE) transformer.
 
 Encodes numerical features into a piecewise linear representation using bin
-edges learned from a decision tree. Thresholds are read directly from the fitted
-tree structure and the encoding is fully vectorized, so there is no ``eval`` of
-generated strings and no regular-expression parsing of split conditions.
+edges from a target-aware location selector (CART by default, optionally
+LightGBM). The encoding is fully vectorized, so there is no ``eval`` of generated
+strings and no regular-expression parsing of split conditions.
 """
 
 import warnings
@@ -11,7 +11,6 @@ from typing import ClassVar, Literal
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.utils.validation import check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
@@ -23,6 +22,7 @@ from ...core.exceptions import (
 )
 from ...core.locations import resolve_locations
 from ...core.params import UNSET, AliasResolverMixin
+from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
 
 
 def extract_thresholds_from_tree(tree) -> np.ndarray:
@@ -53,9 +53,10 @@ def extract_thresholds_from_tree(tree) -> np.ndarray:
 class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator):
     """Piecewise Linear Encoding (PLE) transformer for numerical features.
 
-    Each feature is discretized with a decision tree, and the split thresholds
-    define the bin edges. Every input feature is expanded into one column per
-    bin. Within the bin that a value falls into, the value is encoded linearly;
+    Each feature is discretized by a target-aware location selector (``"cart"``
+    by default, optionally ``"lightgbm"``) whose split thresholds define the bin
+    edges. Every input feature is expanded into one column per bin. Within the
+    bin that a value falls into, the value is encoded linearly;
     all lower bins are set to ``1`` and all higher bins to ``0``. This preserves
     an ordinal, piecewise linear signal that downstream models can exploit while
     keeping the representation interpretable.
@@ -94,6 +95,11 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         Minimum number of bins per feature when ``adaptive=True``.
     max_output_dim : int or None, default=None
         Maximum number of bins per feature when ``adaptive=True``.
+    selector : {"cart", "lightgbm"}, default="cart"
+        Which target-aware location selector places the bin thresholds.
+        ``"cart"`` fits a single decision tree (always available); ``"lightgbm"``
+        fits a gradient-boosted ensemble and requires the optional ``lightgbm``
+        dependency (``pip install pretab[knots]``).
 
     Attributes
     ----------
@@ -117,6 +123,11 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
     an upper bound (bin cap), not an exact width; this is a documented exception
     to the exact-width contract that the fixed-basis families follow.
 
+    The ``max_depth`` / ``min_samples_split`` / ``min_samples_leaf`` parameters
+    are retained for backward-compatible construction but no longer affect
+    threshold placement: the ``selector`` fits its own model with its own
+    settings. They are slated for reconciliation in a later cleanup.
+
     Examples
     --------
     >>> from sklearn.datasets import make_regression
@@ -139,6 +150,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
+        selector: str = "cart",
     ):
         self.output_dim = output_dim
         self.task = task
@@ -150,6 +162,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
+        self.selector = selector
 
     def __sklearn_tags__(self):
         """Declare NaN-passthrough (median policy) and the required-target tag."""
@@ -210,34 +223,28 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         max_bins_req = self._resolve_param("max_output_dim", default=None)
         min_bins, max_bins = self._resolve_bin_bounds(n_bins, min_bins_req, max_bins_req)
 
+        if self.task not in ("regression", "classification"):
+            raise InvalidParamError(
+                f"Unsupported task: {self.task}. Use 'regression' or 'classification'."
+            )
+
+        # Thresholds come from a target-aware location selector (CART by default,
+        # optionally LightGBM): split points spaced out and ranked by impurity /
+        # gain, then trimmed / topped up to fit the bin-count window. Each feature
+        # produces ``len(thresholds) + 1`` bins, so we ask for one fewer location
+        # than bins: the non-adaptive window pins the count to exactly
+        # ``output_dim`` bins, adaptive clamps it into ``[min, max]``.
+        selector = self._build_selector()
+        min_thresholds = max(0, min_bins - 1)
+        max_thresholds = max(0, max_bins - 1)
+
         for i in range(X.shape[1]):
-            x_feat = X[:, [i]]
-
-            tree_max_leaf_nodes = max_bins if self.adaptive else n_bins
-
-            if self.task == "regression":
-                dt = DecisionTreeRegressor(
-                    max_leaf_nodes=tree_max_leaf_nodes,
-                    max_depth=self.max_depth,
-                    min_samples_split=self.min_samples_split,
-                    min_samples_leaf=self.min_samples_leaf,
-                    random_state=self.random_state,
+            thresholds = np.sort(
+                selector.select(
+                    X[:, i], y, task=self.task,
+                    min_count=min_thresholds, max_count=max_thresholds,
                 )
-            elif self.task == "classification":
-                dt = DecisionTreeClassifier(
-                    max_leaf_nodes=tree_max_leaf_nodes,
-                    max_depth=self.max_depth,
-                    min_samples_split=self.min_samples_split,
-                    min_samples_leaf=self.min_samples_leaf,
-                    random_state=self.random_state,
-                )
-            else:
-                raise InvalidParamError(f"Unsupported task: {self.task}. Use 'regression' or 'classification'.")
-
-            dt.fit(x_feat, y)
-
-            thresholds = extract_thresholds_from_tree(dt)
-            thresholds = self._adjust_thresholds(x_feat.ravel(), thresholds, min_bins=min_bins, max_bins=max_bins)
+            )
 
             self.thresholds_.append(thresholds)
             self.n_bins_per_feature_.append(len(thresholds) + 1)
@@ -383,6 +390,16 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
 
     def _resolve_bin_bounds(self, n_bins: int, min_bins_req, max_bins_req) -> tuple[int, int]:
         return self._resolve_output_bounds(n_bins, min_bins_req, max_bins_req, floor=1)
+
+    def _build_selector(self):
+        """Construct the target-aware location selector named by ``self.selector``."""
+        if self.selector == "cart":
+            return CARTLocationSelector(random_state=self.random_state)
+        if self.selector == "lightgbm":
+            return LightGBMLocationSelector(random_state=self.random_state)
+        raise InvalidParamError(
+            f"Invalid selector. Choose 'cart' or 'lightgbm'. Got {self.selector!r}."
+        )
 
     def _adjust_thresholds(
         self, feature: np.ndarray, thresholds: np.ndarray, min_bins: int, max_bins: int
