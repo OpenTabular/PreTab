@@ -9,10 +9,10 @@ columns a single input feature expands to:
 * **Adaptive mode** (``adaptive=True``) -- width must be data-driven inside
   ``[min_output_dim, max_output_dim]`` for the adaptive-capable families.
 
-They also document, via ``xfail`` markers, the two places where the
-``Preprocessor`` does *not* forward the adaptive knobs yet (all spline families
-and the categorical ``custombin`` path), so those gaps stay visible and any
-future fix flips the marker.
+They also document, via an ``xfail`` marker, the one place where the
+``Preprocessor`` does *not* forward the adaptive knobs yet (the categorical
+``custombin`` path), so that gap stays visible and any future fix flips the
+marker.
 """
 
 from typing import cast
@@ -64,24 +64,28 @@ FIXED_WIDTH = {
 # Families that honor the adaptive window when driven through the Preprocessor.
 ADAPTIVE_VIA_PREPROCESSOR = ["ple", "rbf", "relu", "sigmoid", "tanh"]
 
-# Spline families whose adaptive/min/max knobs are silently dropped by the
-# Preprocessor today (transformer-level support exists; the wiring does not).
 # B/M/I spline families whose adaptive window + selector choice the Preprocessor
-# now forwards (Phase 5). Each has a native ``spline_type`` for the knot selector.
+# forwards (Phase 5). Each has a native ``spline_type`` for the knot selector.
 BMI_SPLINE_METHODS = ["bspline", "mspline", "ispline"]
 
-# Legacy spline families whose adaptive/selector knobs the Preprocessor still
-# drops -- they need the Phase 6 ``spline_type`` mapping to become target-aware.
-LEGACY_SPLINE_METHODS = [
+# Legacy freely-placed knot splines the Preprocessor also routes through the
+# selector + adaptive window (Phase 6), via the ``"bspline"`` knot mapping.
+TARGET_AWARE_LEGACY_SPLINE_METHODS = [
     "cubicspline",
     "naturalspline",
-    "pspline",
-    "tensorspline",
-    "tprs",
 ]
 
+# Fixed-only spline families: target-aware placement does not apply. The
+# penalized splines (``pspline``, ``tensorspline``) assume equally-spaced knots
+# for their difference penalty, and the thin-plate spline (``tprs``) is
+# kernel-based (knot-free). All three stay fixed-width regardless of the adaptive
+# / selector knobs.
+FIXED_ONLY_SPLINE_METHODS = ["pspline", "tensorspline", "tprs"]
+
 # All spline families (kept for callers that want the full set).
-SPLINE_METHODS = LEGACY_SPLINE_METHODS + BMI_SPLINE_METHODS
+SPLINE_METHODS = (
+    TARGET_AWARE_LEGACY_SPLINE_METHODS + FIXED_ONLY_SPLINE_METHODS + BMI_SPLINE_METHODS
+)
 
 
 @pytest.fixture
@@ -213,15 +217,11 @@ def test_bmi_spline_selector_choice_via_preprocessor(data):
 
 
 # --------------------------------------------------------------------------- #
-# Known gaps -- documented as strict xfails so a future fix is flagged.
+# Legacy knot splines honor the adaptive window via the Preprocessor (Phase 6).
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(
-    reason="Preprocessor does not forward adaptive/min/max to the legacy spline "
-    "families yet (Phase 6: they still need a selector spline_type mapping)",
-    strict=True,
-)
-@pytest.mark.parametrize("method", LEGACY_SPLINE_METHODS)
-def test_spline_adaptive_via_preprocessor_gap(data, method):
+@pytest.mark.parametrize("method", TARGET_AWARE_LEGACY_SPLINE_METHODS)
+def test_legacy_spline_adaptive_via_preprocessor(data, method):
+    """Legacy knot splines size each feature inside the adaptive window through the pipeline."""
     X, y = data
     fixed = _num_width(
         X, y, method,
@@ -229,12 +229,37 @@ def test_spline_adaptive_via_preprocessor_gap(data, method):
     )
     adaptive = _num_width(
         X, y, method,
-        output_dim=10, adaptive=True, min_output_dim=3, max_output_dim=5,
+        output_dim=10, adaptive=True, min_output_dim=4, max_output_dim=6,
         use_target=True, task="regression",
     )
     assert adaptive < fixed
+    assert 4 <= adaptive <= 6
 
 
+@pytest.mark.parametrize("method", FIXED_ONLY_SPLINE_METHODS)
+def test_fixed_only_spline_ignores_adaptive(data, method):
+    """Penalized / kernel splines are not target-aware: the adaptive window is a no-op.
+
+    ``pspline`` / ``tensorspline`` need equally-spaced knots for their difference
+    penalty and ``tprs`` is knot-free, so the Preprocessor never routes them
+    through the selector / adaptive path -- the width stays ``output_dim``.
+    """
+    X, y = data
+    fixed = _num_width(
+        X, y, method,
+        output_dim=10, adaptive=False, use_target=True, task="regression",
+    )
+    adaptive = _num_width(
+        X, y, method,
+        output_dim=10, adaptive=True, min_output_dim=4, max_output_dim=6,
+        use_target=True, task="regression",
+    )
+    assert fixed == adaptive == 10
+
+
+# --------------------------------------------------------------------------- #
+# Known gaps -- documented as strict xfails so a future fix is flagged.
+# --------------------------------------------------------------------------- #
 @pytest.mark.xfail(
     reason="Preprocessor does not pass output_dim to categorical custombin",
     raises=InvalidParamError,
