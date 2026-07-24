@@ -35,6 +35,11 @@ from .knots import (
 from .locations import resolve_locations, trim_to_count
 from .logging import get_logger
 from .params import CANONICAL_PARAMS, UNSET, AliasResolverMixin, is_set
+from .selectors import (
+    BaseLocationSelector,
+    CARTLocationSelector,
+    LightGBMLocationSelector,
+)
 from .validation import validate_2d_allow_nan
 
 __all__ = [
@@ -42,13 +47,16 @@ __all__ = [
     "UNSET",
     "AdaptiveResolutionMixin",
     "AliasResolverMixin",
+    "BaseLocationSelector",
     "BasePreTabTransformer",
+    "CARTLocationSelector",
     "ConfigWarning",
     "DataWarning",
     "EmptyDataError",
     "IncompatibleParamsError",
     "InsufficientSamplesError",
     "InvalidParamError",
+    "LightGBMLocationSelector",
     "OptionalDependencyError",
     "PretabConfigError",
     "PretabDataError",
