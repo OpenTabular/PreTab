@@ -84,6 +84,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     strategy : str, default="uniform"
         Placement strategy for basis units when ``use_target`` is False: ``"uniform"`` (evenly
         spaced across the feature range) or ``"quantile"`` (spaced by the data quantiles).
+    selector : str, default="cart"
+        Target-aware location selector used to place basis units / knots when ``use_target`` is
+        True: ``"cart"`` (a single decision tree, always available) or ``"lightgbm"`` (a
+        gradient-boosted ensemble, requires the optional ``lightgbm`` dependency). Applies to the
+        feature maps, PLE, and the B/M/I splines; ignored by methods that are not target-aware.
     degree : int, default=3
         Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
         (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.
@@ -217,6 +222,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         task="regression",
         use_target=True,
         strategy="uniform",
+        selector="cart",
         degree=3,
         scaling="minmax",
         cat_cutoff=0.03,
@@ -242,6 +248,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.task = task
         self.use_target = use_target
         self.strategy = strategy
+        self.selector = selector
         self.degree = degree
         self.scaling = scaling
         self.cat_cutoff = cat_cutoff
@@ -376,6 +383,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 degree=self.degree,
                 scaling=self.scaling,
                 strategy=self.strategy,
+                selector=self.selector,
                 handle_missing=self.handle_missing,
                 **seed_kwargs,
             )

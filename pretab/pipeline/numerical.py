@@ -4,7 +4,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..core.exceptions import ConfigWarning, invalid_param_error
-from ..transformers.splines.knot_selectors import CARTKnotSelector
+from ..transformers.splines.knot_selectors import CARTKnotSelector, LightGBMKnotSelector
 from .registry import NUMERICAL_ALIASES, NUMERICAL_METHODS, resolve_method
 
 # Spline basis expansions that share the target-aware knot API.
@@ -34,6 +34,35 @@ def filter_kwargs(transformer_cls, kwargs, allowed=None):
     if allowed is not None:
         return {k: kwargs[k] for k in allowed if k in kwargs}
     return kwargs
+
+
+def _wants_target(kwargs):
+    """Whether the caller asked for target-aware (selector-driven) placement."""
+    value = kwargs.get("use_target")
+    if value is None:
+        value = kwargs.get("use_decision_tree")
+    return bool(value)
+
+
+def _build_knot_selector(method, degree, kwargs):
+    """Build a target-aware knot selector for a B/M/I spline family.
+
+    ``method`` names the spline family (also the selector's ``spline_type``); the
+    ``selector`` kwarg picks ``"cart"`` (default) or ``"lightgbm"``.
+    ``random_state`` is forwarded only when the caller set one.
+    """
+    selector_name = kwargs.get("selector") or "cart"
+    selector_kwargs = {"degree": degree, "spline_type": method}
+    if kwargs.get("random_state") is not None:
+        selector_kwargs["random_state"] = kwargs["random_state"]
+    if selector_name == "cart":
+        return CARTKnotSelector(**selector_kwargs)
+    if selector_name == "lightgbm":
+        return LightGBMKnotSelector(**selector_kwargs)
+    raise invalid_param_error(
+        "get_numerical_transformer_steps", "selector", selector_name,
+        "must be 'cart' or 'lightgbm'", valid={"cart", "lightgbm"},
+    )
 
 
 def _clamp_spline_basis(output_dim):
@@ -109,14 +138,19 @@ def get_numerical_transformer_steps(
         if strategy in ("uniform", "quantile"):
             spline_kwargs["strategy"] = strategy
 
-        if kwargs.get("use_decision_tree"):
-            selector_kwargs = {
-                "degree": spline_kwargs.get("degree", 3),
-                "spline_type": method,
-            }
-            if kwargs.get("random_state") is not None:
-                selector_kwargs["random_state"] = kwargs["random_state"]
-            spline_kwargs["selector"] = CARTKnotSelector(**selector_kwargs)
+        if _wants_target(kwargs):
+            spline_kwargs["selector"] = _build_knot_selector(
+                method, spline_kwargs.get("degree", 3), kwargs
+            )
+            # The adaptive window only takes effect on the target-aware
+            # (selector) path, so forward it here: each feature is then sized
+            # within [min_output_dim, max_output_dim] instead of the fixed
+            # output_dim.
+            if kwargs.get("adaptive"):
+                spline_kwargs["adaptive"] = True
+                for bound in ("min_output_dim", "max_output_dim"):
+                    if kwargs.get(bound) is not None:
+                        spline_kwargs[bound] = kwargs[bound]
 
         steps.append((method, cls(**spline_kwargs)))
     else:
