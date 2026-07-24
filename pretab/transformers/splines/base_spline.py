@@ -5,7 +5,7 @@ The base class handles the parts that are common to every spline family:
 
 - resolving the number of basis functions and the derived number of internal knots,
 - placing knots per feature using one of three strategies with a fixed priority
-  (``knot_selector`` > ``knot_locations`` > automatic ``n_basis_functions``),
+  (``knot_locations`` > target-aware ``placement_strategy`` > automatic strategy),
 - looping over columns so that multi-column input is supported,
 - assembling the design matrix, optional bias column, penalty matrix and feature
   names.
@@ -32,8 +32,8 @@ from ...core.knots import (
     select_knots,
     uniform_knots,
 )
-from ...core.params import UNSET
-from .knot_selectors import BaseKnotSelector
+from ...core.params import UNSET, validate_placement
+from .knot_selectors import BaseKnotSelector, build_knot_selector
 
 
 class BaseSplineTransformer(BasePreTabTransformer):
@@ -52,28 +52,28 @@ class BaseSplineTransformer(BasePreTabTransformer):
     output_dim : int, default=5
         Number of non-bias output columns per feature (``m``). The number of
         interior knots is derived as ``output_dim - degree - 1``. Must be at least
-        ``degree + 1`` and at most 50. Ignored when ``knot_locations`` or a
-        ``selector`` is provided.
+        ``degree + 1`` and at most 50. Ignored when ``knot_locations`` is provided.
 
     degree : int, default=3
         Degree of the spline (3 is cubic, 2 quadratic, 1 linear).
 
-    strategy : {"uniform", "quantile"}, default="quantile"
-        Placement rule used for the automatic strategy. ``"uniform"`` spaces knots
+    target_aware : bool, default=False
+        If True, knots are placed by a target-aware selector built from
+        ``placement_strategy`` (requires ``y`` during fit). If False, knots are
+        placed by the unsupervised ``placement_strategy`` spacing.
+
+    placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, default="quantile"
+        When ``target_aware=True``, the selector: ``"cart"`` or ``"lightgbm"``.
+        When ``target_aware=False``, the spacing rule: ``"uniform"`` spaces knots
         evenly across the range, ``"quantile"`` places them at data quantiles.
-        The legacy alias ``knot_strategy`` still works (emits a ``FutureWarning``).
 
     include_bias : bool, default=False
         Whether to prepend a constant intercept column per feature.
 
     knot_locations : ndarray or None, default=None
-        Explicit internal knot locations applied to every feature. Overrides
+        Explicit internal knot locations applied to every feature. Takes priority
+        over ``target_aware`` placement and the automatic strategy, and overrides
         ``output_dim``.
-
-    selector : BaseKnotSelector or None, default=None
-        Target-aware knot selector (for example ``CARTKnotSelector``). Takes
-        priority over all other placement options and requires ``y`` during fit.
-        The legacy alias ``knot_selector`` still works (emits a ``FutureWarning``).
 
     adaptive : bool, default=False
         If True, the per-feature output dimension may vary within
@@ -86,7 +86,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
         Upper bound on the per-feature output dimension used in adaptive mode.
 
     task : {"regression", "classification"} or None, default=None
-        Task passed to a target-aware ``selector``.
+        Task passed to the target-aware selector when ``target_aware=True``.
+
+    random_state : int or None, default=None
+        Random state forwarded to the target-aware selector for reproducibility.
 
     Attributes
     ----------
@@ -109,10 +112,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     Notes
     -----
-    Knot placement follows a fixed priority: a target-aware ``selector`` takes
-    precedence over explicit ``knot_locations``, which in turn take precedence over
-    the automatic ``output_dim`` strategy. Multi-column input is expanded column by
-    column and stacked horizontally.
+    Knot placement follows a fixed priority: explicit ``knot_locations`` take
+    precedence over target-aware ``placement_strategy`` selection, which in turn
+    takes precedence over the automatic ``output_dim`` strategy. Multi-column input
+    is expanded column by column and stacked horizontally.
 
     Examples
     --------
@@ -127,34 +130,29 @@ class BaseSplineTransformer(BasePreTabTransformer):
         self,
         output_dim=UNSET,
         degree: int = 3,
-        strategy=UNSET,
+        target_aware: bool = False,
+        placement_strategy: str = "quantile",
         include_bias: bool = False,
         knot_locations: np.ndarray | None = None,
-        selector=UNSET,
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         task: Literal["regression", "classification"] | None = None,
-        knot_strategy=UNSET,
-        knot_selector=UNSET,
+        random_state: int | None = None,
     ):
         self.output_dim = output_dim
         self.degree = degree
-        self.strategy = strategy
+        self.target_aware = target_aware
+        self.placement_strategy = placement_strategy
         self.include_bias = include_bias
         self.knot_locations = knot_locations
-        self.selector = selector
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
         self.task: Literal["regression", "classification"] | None = task
-        self.knot_strategy = knot_strategy
-        self.knot_selector = knot_selector
+        self.random_state = random_state
 
-    _param_aliases: ClassVar[dict[str, str]] = {
-        "knot_strategy": "strategy",
-        "knot_selector": "selector",
-    }
+    _selector_spline_type: ClassVar[Literal["bspline", "mspline", "ispline"]] = "bspline"
 
     def _basis_to_knots(self, n_basis: int) -> int:
         """Convert a basis-function count to the number of internal knots."""
@@ -225,14 +223,14 @@ class BaseSplineTransformer(BasePreTabTransformer):
         x_min = x_valid.min()
         x_max = x_valid.max()
 
-        if selector is not None:
-            selected = selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)
-            internal_knots = self._adjust_internal_knots(x_valid, np.asarray(selected), min_knots, max_knots)
-        elif self.knot_locations is not None:
+        if self.knot_locations is not None:
             expected_knots = self._basis_to_knots(n_basis)
             if not self.adaptive and len(self.knot_locations) != expected_knots:
                 raise IncompatibleParamsError("knot_locations length must match output_dim - degree - 1 when adaptive=False")
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
+        elif selector is not None:
+            selected = selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)
+            internal_knots = self._adjust_internal_knots(x_valid, np.asarray(selected), min_knots, max_knots)
         else:
             n_internal = self._basis_to_knots(n_basis)
             internal_knots = self._generate_knots(x_valid, n_internal, strategy)
@@ -247,9 +245,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Determine per-feature knot vectors."""
+        validate_placement(self.target_aware, self.placement_strategy)
         n_basis = self._resolve_param("output_dim", default=5)
-        strategy = self._resolve_param("strategy", default="quantile")
-        selector = self._resolve_param("selector", default=None)
         min_basis_req = self._resolve_param("min_output_dim", default=None)
         max_basis_req = self._resolve_param("max_output_dim", default=None)
         if n_basis < self.degree + 1:
@@ -260,6 +257,21 @@ class BaseSplineTransformer(BasePreTabTransformer):
         X = self._validate(X, reset=True)
 
         y_arr = None if y is None else np.asarray(y).ravel()
+
+        # Knot placement priority: explicit knot_locations win, then a target-aware
+        # selector built from placement_strategy, then the automatic (unsupervised)
+        # spacing named by placement_strategy.
+        if self.target_aware and self.knot_locations is None:
+            selector = build_knot_selector(
+                self.placement_strategy,
+                degree=self.degree,
+                spline_type=self._selector_spline_type,
+                random_state=self.random_state,
+            )
+            strategy = "quantile"
+        else:
+            selector = None
+            strategy = self.placement_strategy if not self.target_aware else "quantile"
 
         self.knots_ = []
         for i in range(X.shape[1]):

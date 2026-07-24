@@ -4,7 +4,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..core.exceptions import ConfigWarning, invalid_param_error
-from ..transformers.splines.knot_selectors import CARTKnotSelector, LightGBMKnotSelector
 from .registry import NUMERICAL_ALIASES, NUMERICAL_METHODS, resolve_method
 
 # Spline basis expansions that share the target-aware knot API.
@@ -23,15 +22,6 @@ LEGACY_SPLINE_METHODS = ("cubicspline", "naturalspline")
 # meaningful. Exposed via :func:`supports_target_aware` so callers can query it.
 TARGET_AWARE_SPLINE_METHODS = SPLINE_EXPANSION_METHODS + LEGACY_SPLINE_METHODS
 
-# spline_type passed to the knot selector for each target-aware spline family.
-_SELECTOR_SPLINE_TYPE = {
-    "bspline": "bspline",
-    "mspline": "mspline",
-    "ispline": "ispline",
-    "cubicspline": "bspline",
-    "naturalspline": "bspline",
-}
-
 
 def supports_target_aware(method: str) -> bool:
     """Return whether a spline ``method`` supports target-aware knot placement.
@@ -40,8 +30,8 @@ def supports_target_aware(method: str) -> bool:
     ``ispline``, ``cubicspline`` and ``naturalspline``. The penalized splines
     (``pspline``, ``tensorspline``) require equally-spaced knots for their
     difference penalty, and the kernel-based ``tprs`` has no knots, so those
-    three always use fixed knot placement regardless of ``use_target`` /
-    ``selector`` / ``adaptive``.
+    three always use fixed knot placement regardless of ``target_aware`` /
+    ``placement_strategy`` / ``adaptive``.
     """
     resolved = resolve_method(method, NUMERICAL_METHODS, NUMERICAL_ALIASES)
     return resolved in TARGET_AWARE_SPLINE_METHODS
@@ -50,21 +40,6 @@ def supports_target_aware(method: str) -> bool:
 _MIN_SPLINE_BASIS = 5
 _MAX_SPLINE_BASIS = 50
 
-# Legacy constructor argument names mapped to the canonical vocabulary. The
-# Preprocessor shares a single kwargs bag; every width name now collapses to the
-# canonical ``output_dim`` at the transformer boundary, so only the non-count
-# alias (``use_decision_tree`` -> ``use_target``) needs translating here to keep
-# the feature-map constructors on their canonical spelling and avoid emitting
-# deprecation warnings during normal pipeline use.
-_ARG_CANONICAL = {
-    "use_decision_tree": "use_target",
-}
-
-
-def _canonicalize(filtered):
-    """Rename legacy constructor argument keys to their canonical spelling."""
-    return {_ARG_CANONICAL.get(key, key): value for key, value in filtered.items()}
-
 
 def filter_kwargs(transformer_cls, kwargs, allowed=None):
     if allowed is not None:
@@ -72,33 +47,44 @@ def filter_kwargs(transformer_cls, kwargs, allowed=None):
     return kwargs
 
 
-def _wants_target(kwargs):
-    """Whether the caller asked for target-aware (selector-driven) placement."""
-    value = kwargs.get("use_target")
-    if value is None:
-        value = kwargs.get("use_decision_tree")
-    return bool(value)
+# Method families grouped by which placement modes they support. The Preprocessor
+# shares a single ``target_aware`` / ``placement_strategy`` pair; each family only
+# receives the placement kwargs it can honor.
+BOTH_MODE_METHODS = frozenset({
+    "rbf", "relu", "sigmoid", "tanh",
+    "bspline", "mspline", "ispline", "cubicspline", "naturalspline",
+})
+# PLE is inherently target-aware: only the supervised selectors apply.
+TARGET_AWARE_ONLY_METHODS = frozenset({"ple"})
+# Penalized splines assume equally-spaced knots: only the spacing rules apply.
+UNSUPERVISED_ONLY_METHODS = frozenset({"pspline", "tensorspline"})
 
 
-def _build_knot_selector(spline_type, degree, kwargs):
-    """Build a target-aware knot selector for a spline family.
+def _placement_kwargs(method, kwargs):
+    """Return the placement kwargs to inject for ``method``.
 
-    ``spline_type`` is the selector's basis type (``"bspline"`` / ``"mspline"`` /
-    ``"ispline"``); the ``selector`` kwarg picks ``"cart"`` (default) or
-    ``"lightgbm"``. ``random_state`` is forwarded only when the caller set one.
+    Honors each family's applicability: both-mode families receive
+    ``target_aware`` + ``placement_strategy``; PLE receives a supervised
+    ``placement_strategy`` only when target-aware; the penalized splines receive
+    an unsupervised ``placement_strategy`` only when not target-aware. Anything
+    else receives nothing.
     """
-    selector_name = kwargs.get("selector") or "cart"
-    selector_kwargs = {"degree": degree, "spline_type": spline_type}
-    if kwargs.get("random_state") is not None:
-        selector_kwargs["random_state"] = kwargs["random_state"]
-    if selector_name == "cart":
-        return CARTKnotSelector(**selector_kwargs)
-    if selector_name == "lightgbm":
-        return LightGBMKnotSelector(**selector_kwargs)
-    raise invalid_param_error(
-        "get_numerical_transformer_steps", "selector", selector_name,
-        "must be 'cart' or 'lightgbm'", valid={"cart", "lightgbm"},
-    )
+    target_aware = bool(kwargs.get("target_aware", False))
+    placement_strategy = kwargs.get("placement_strategy")
+    if method in BOTH_MODE_METHODS:
+        out = {"target_aware": target_aware}
+        if placement_strategy is not None:
+            out["placement_strategy"] = placement_strategy
+        return out
+    if method in TARGET_AWARE_ONLY_METHODS:
+        if target_aware and placement_strategy in ("cart", "lightgbm"):
+            return {"placement_strategy": placement_strategy}
+        return {}
+    if method in UNSUPERVISED_ONLY_METHODS:
+        if not target_aware and placement_strategy in ("uniform", "quantile"):
+            return {"placement_strategy": placement_strategy}
+        return {}
+    return {}
 
 
 def _clamp_spline_basis(output_dim):
@@ -156,7 +142,8 @@ def get_numerical_transformer_steps(
         )
 
     cls, allowed_args = NUMERICAL_METHODS[method]
-    filtered = _canonicalize(filter_kwargs(cls, kwargs, allowed=allowed_args))
+    filtered = filter_kwargs(cls, kwargs, allowed=allowed_args)
+    placement = _placement_kwargs(method, kwargs)
 
     if method == "box-cox":
         steps.append(("scale_positive", MinMaxScaler(feature_range=(1e-3, 1))))
@@ -165,6 +152,7 @@ def get_numerical_transformer_steps(
         steps.append(("yeojohnson", cls(method="yeo-johnson", **filtered)))
     elif method in SPLINE_EXPANSION_METHODS or method in LEGACY_SPLINE_METHODS:
         spline_kwargs = dict(filtered)
+        spline_kwargs.update(placement)
 
         # The B/M/I splines share the Preprocessor's default ``output_dim`` (which
         # can sit outside their [5, 50] basis range); the legacy families keep
@@ -174,27 +162,11 @@ def get_numerical_transformer_steps(
             if output_dim is not None:
                 spline_kwargs["output_dim"] = _clamp_spline_basis(output_dim)
 
-        strategy = kwargs.get("strategy")
-        if strategy in ("uniform", "quantile"):
-            spline_kwargs["strategy"] = strategy
-
-        if _wants_target(kwargs):
-            spline_kwargs["selector"] = _build_knot_selector(
-                _SELECTOR_SPLINE_TYPE[method], spline_kwargs.get("degree", 3), kwargs
-            )
-            # The adaptive window only takes effect on the target-aware
-            # (selector) path, so forward it here: each feature is then sized
-            # within [min_output_dim, max_output_dim] instead of the fixed
-            # output_dim.
-            if kwargs.get("adaptive"):
-                spline_kwargs["adaptive"] = True
-                for bound in ("min_output_dim", "max_output_dim"):
-                    if kwargs.get(bound) is not None:
-                        spline_kwargs[bound] = kwargs[bound]
-
         steps.append((method, cls(**spline_kwargs)))
     else:
         name = method if method != "none" else "noop"
-        steps.append((name, cls(**filtered)))
+        call_kwargs = dict(filtered)
+        call_kwargs.update(placement)
+        steps.append((name, cls(**call_kwargs)))
 
     return steps

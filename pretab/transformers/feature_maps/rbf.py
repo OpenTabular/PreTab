@@ -9,8 +9,8 @@ class RBFExpansionTransformer(BaseCenterExpansion):
     Radial Basis Function (RBF) feature expansion for numerical tabular data.
 
     This transformer expands each feature into a set of RBF (Gaussian) basis functions
-    centered at fixed points. The centers can be determined either by a decision tree
-    (based on supervised splits) or based on quantiles or uniform spacing.
+    centered at fixed points. The centers can be determined either by a target-aware
+    selector (based on supervised splits) or based on quantiles or uniform spacing.
 
     Parameters
     ----------
@@ -20,14 +20,15 @@ class RBFExpansionTransformer(BaseCenterExpansion):
     gamma : float, default=1.0
         Width parameter of the RBF kernel. Larger values make the kernel narrower.
 
-    use_decision_tree : bool, default=True
-        Whether to use a decision tree to select center locations based on `y`.
+    target_aware : bool, default=True
+        Whether to place centers with a target-aware selector (requires `y`).
 
     task : {"regression", "classification"}, default="regression"
-        Type of task for the decision tree used to find center locations.
+        Task type for the target-aware selector used to place centers.
 
-    strategy : {"uniform", "quantile"}, default="uniform"
-        Strategy for choosing centers when not using a decision tree.
+    placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, default="cart"
+        Selector when `target_aware=True` (`"cart"` or `"lightgbm"`); spacing when
+        `target_aware=False` (`"uniform"` or `"quantile"`).
 
     Attributes
     ----------
@@ -46,15 +47,15 @@ class RBFExpansionTransformer(BaseCenterExpansion):
 
         \phi_i(x) = \exp\left(-\gamma (x - c_i)^2\right),
 
-    producing ``output_dim`` new features per original feature (on the default,
-    non-decision-tree path; a decision tree may place a data-driven number).
+    producing ``output_dim`` new features per original feature on the
+    non-target-aware path; the target-aware default may place a data-driven number.
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import RBFExpansionTransformer
     >>> X = np.array([[1.0], [2.0], [3.0]])
-    >>> transformer = RBFExpansionTransformer(output_dim=3, gamma=0.5, use_decision_tree=False)
+    >>> transformer = RBFExpansionTransformer(output_dim=3, gamma=0.5, target_aware=False, placement_strategy="uniform")
     >>> transformer.fit(X)
     RBFExpansionTransformer(...)
     >>> transformer.transform(X).shape
@@ -67,27 +68,23 @@ class RBFExpansionTransformer(BaseCenterExpansion):
         self,
         output_dim=UNSET,
         gamma: float = 1.0,
-        use_target=UNSET,
+        target_aware: bool = True,
         task: str = "regression",
-        strategy="uniform",
-        use_decision_tree=UNSET,
+        placement_strategy: str = "cart",
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = None,
-        selector: str = "cart",
     ):
         super().__init__(
             output_dim=output_dim,
-            use_target=use_target,
+            target_aware=target_aware,
             task=task,
-            strategy=strategy,
-            use_decision_tree=use_decision_tree,
+            placement_strategy=placement_strategy,
             adaptive=adaptive,
             min_output_dim=min_output_dim,
             max_output_dim=max_output_dim,
             random_state=random_state,
-            selector=selector,
         )
         self.gamma = gamma
 

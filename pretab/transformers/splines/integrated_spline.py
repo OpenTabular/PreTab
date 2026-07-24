@@ -21,9 +21,9 @@ class ISplineTransformer(BaseSplineTransformer):
 
     Each basis function is the integral of an M-spline over the fitted range,
     which yields a monotonically increasing, non-negative function normalized to
-    ``[0, 1]``. Knot placement follows the shared priority: target-aware
-    (``selector``) > explicit (``knot_locations``) > automatic
-    (``output_dim`` with ``strategy``).
+    ``[0, 1]``. Knot placement follows the shared priority: explicit
+    (``knot_locations``) > target-aware (``placement_strategy``) > automatic
+    (``output_dim`` with ``placement_strategy``).
 
     See :class:`~pretab.transformers.splines.base_spline.BaseSplineTransformer`
     for the full parameter description. ``include_bias`` defaults to False here.
@@ -43,30 +43,28 @@ class ISplineTransformer(BaseSplineTransformer):
         self,
         output_dim=UNSET,
         degree: int = 3,
-        strategy=UNSET,
+        target_aware: bool = False,
+        placement_strategy: str = "quantile",
         include_bias: bool = False,
         knot_locations: np.ndarray | None = None,
-        selector=UNSET,
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         task: Literal["regression", "classification"] | None = None,
-        knot_strategy=UNSET,
-        knot_selector=UNSET,
+        random_state: int | None = None,
     ):
         super().__init__(
             output_dim=output_dim,
             degree=degree,
-            strategy=strategy,
+            target_aware=target_aware,
+            placement_strategy=placement_strategy,
             include_bias=include_bias,
             knot_locations=knot_locations,
-            selector=selector,
             adaptive=adaptive,
             min_output_dim=min_output_dim,
             max_output_dim=max_output_dim,
             task=task,
-            knot_strategy=knot_strategy,
-            knot_selector=knot_selector,
+            random_state=random_state,
         )
 
     def _feature_suffix(self) -> str:

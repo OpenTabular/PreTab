@@ -6,10 +6,10 @@ different ways -- the per-feature output size alone was named
 ``n_basis``. As of Phase 15 those count names are removed and every family takes
 a single ``output_dim`` (the number of non-bias output columns per feature).
 :data:`CANONICAL_PARAMS` records the single cross-family vocabulary new code and
-docs should use, and :class:`AliasResolverMixin` still lets a transformer keep
-accepting its remaining non-count legacy names (``knot_strategy`` /
-``knot_selector`` / ``use_decision_tree``) as *aliases* that resolve to the
-canonical name at ``fit`` time (with a :class:`FutureWarning`).
+docs should use, and :class:`AliasResolverMixin` provides the (currently unused)
+machinery for a transformer to accept a legacy constructor name as an *alias*
+that resolves to its canonical name at ``fit`` time (with a
+:class:`FutureWarning`).
 
 The mechanism follows scikit-learn's deprecation constraint: ``get_params`` and
 ``clone`` introspect ``__init__`` and re-instantiate with the exact same
@@ -58,16 +58,40 @@ def is_set(value) -> bool:
     return value is not UNSET
 
 
+#: Placement strategies valid when ``target_aware`` is True (target-aware selectors).
+TARGET_AWARE_STRATEGIES: tuple[str, ...] = ("cart", "lightgbm")
+
+#: Placement strategies valid when ``target_aware`` is False (unsupervised spacing).
+UNSUPERVISED_STRATEGIES: tuple[str, ...] = ("uniform", "quantile")
+
+
+def validate_placement(target_aware: bool, placement_strategy: str) -> None:
+    """Validate the ``target_aware`` / ``placement_strategy`` contract.
+
+    When ``target_aware`` is True the strategy must name a target-aware selector
+    (``"cart"`` or ``"lightgbm"``); when False it must name an unsupervised
+    spacing rule (``"uniform"`` or ``"quantile"``). Raises
+    :class:`~pretab.core.exceptions.InvalidParamError` (a ``ValueError``) otherwise.
+    """
+    if target_aware and placement_strategy not in TARGET_AWARE_STRATEGIES:
+        raise InvalidParamError(
+            "When target_aware=True, placement_strategy must be 'cart' or 'lightgbm'."
+        )
+    if not target_aware and placement_strategy not in UNSUPERVISED_STRATEGIES:
+        raise InvalidParamError(
+            "When target_aware=False, placement_strategy must be 'uniform' or 'quantile'."
+        )
+
+
 # §8.3 canonical vocabulary: the family-neutral name for each shared concept.
 CANONICAL_PARAMS: dict[str, str] = {
     "output_dim": "Number of non-bias output columns produced per input feature.",
     "min_output_dim": "Lower bound on the per-feature output dimension in adaptive mode.",
     "max_output_dim": "Upper bound on the per-feature output dimension in adaptive mode.",
     "adaptive": "Whether the per-feature output dimension may vary per feature.",
-    "strategy": "Placement strategy for basis units ('uniform' or 'quantile').",
+    "placement_strategy": "How basis units are placed ('cart'/'lightgbm' when target-aware, else 'uniform'/'quantile').",
     "degree": "Polynomial degree of the basis (where meaningful).",
-    "selector": "Target-aware selector used to place basis units.",
-    "use_target": "Whether to use the target to place basis units.",
+    "target_aware": "Whether the target is used to place basis units.",
     "task": "Supervised task used for target-aware placement.",
 }
 
@@ -78,7 +102,7 @@ class AliasResolverMixin:
     Subclasses declare a class-level ``_param_aliases`` mapping each legacy
     constructor argument to its canonical name, e.g.::
 
-        _param_aliases = {"knot_strategy": "strategy", "knot_selector": "selector"}
+        _param_aliases = {"legacy_name": "canonical_name"}
 
     Both the canonical parameter and every legacy alias are ordinary
     constructor parameters that default to :data:`UNSET` and are stored

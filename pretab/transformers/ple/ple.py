@@ -95,8 +95,9 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         Minimum number of bins per feature when ``adaptive=True``.
     max_output_dim : int or None, default=None
         Maximum number of bins per feature when ``adaptive=True``.
-    selector : {"cart", "lightgbm"}, default="cart"
-        Which target-aware location selector places the bin thresholds.
+    placement_strategy : {"cart", "lightgbm"}, default="cart"
+        Which target-aware location selector places the bin thresholds. PLE is
+        inherently target-aware, so only the supervised selectors apply.
         ``"cart"`` fits a single decision tree (always available); ``"lightgbm"``
         fits a gradient-boosted ensemble and requires the optional ``lightgbm``
         dependency (``pip install pretab[knots]``).
@@ -125,8 +126,8 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
 
     The ``max_depth`` / ``min_samples_split`` / ``min_samples_leaf`` parameters
     are retained for backward-compatible construction but no longer affect
-    threshold placement: the ``selector`` fits its own model with its own
-    settings. They are slated for reconciliation in a later cleanup.
+    threshold placement: the ``placement_strategy`` selector fits its own model
+    with its own settings. They are slated for reconciliation in a later cleanup.
 
     Examples
     --------
@@ -150,7 +151,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
-        selector: str = "cart",
+        placement_strategy: str = "cart",
     ):
         self.output_dim = output_dim
         self.task = task
@@ -162,7 +163,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
-        self.selector = selector
+        self.placement_strategy = placement_strategy
 
     def __sklearn_tags__(self):
         """Declare NaN-passthrough (median policy) and the required-target tag."""
@@ -392,13 +393,13 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         return self._resolve_output_bounds(n_bins, min_bins_req, max_bins_req, floor=1)
 
     def _build_selector(self):
-        """Construct the target-aware location selector named by ``self.selector``."""
-        if self.selector == "cart":
+        """Construct the target-aware location selector named by ``placement_strategy``."""
+        if self.placement_strategy == "cart":
             return CARTLocationSelector(random_state=self.random_state)
-        if self.selector == "lightgbm":
+        if self.placement_strategy == "lightgbm":
             return LightGBMLocationSelector(random_state=self.random_state)
         raise InvalidParamError(
-            f"Invalid selector. Choose 'cart' or 'lightgbm'. Got {self.selector!r}."
+            f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {self.placement_strategy!r}."
         )
 
     def _adjust_thresholds(

@@ -66,7 +66,7 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
       of the linear terms (intercept and slope) [1]_.
     - The transformer uses an eigendecomposition of the projected TPS kernel to define the basis [2]_.
     - The transformer is kernel-based rather than knot-based, so the knot-oriented options shared by the other
-      splines (``degree``, ``strategy``, ``selector``, ``task``) do not apply here.
+      splines (``degree``, ``target_aware``, ``placement_strategy``, ``task``) do not apply here.
 
     References
     ----------

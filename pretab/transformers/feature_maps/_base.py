@@ -7,8 +7,6 @@ names, and estimator tags -- is identical. ``BaseCenterExpansion`` holds that
 shared machinery so each concrete transformer only implements ``_expand_column``.
 """
 
-from typing import ClassVar
-
 import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
@@ -20,7 +18,7 @@ from ...core.exceptions import (
 )
 from ...core.knots import select_knots, spanning_knots
 from ...core.locations import resolve_locations
-from ...core.params import UNSET, is_set
+from ...core.params import UNSET, validate_placement
 from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
 
 
@@ -32,9 +30,10 @@ class BaseCenterExpansion(BasePreTabTransformer):
     ``gamma`` or ``scale``) in their own ``__init__``.
 
     Centers are placed either from a target-aware location selector (when
-    ``use_target`` is True, which then requires ``y``) or from ``quantile`` /
-    ``uniform`` spacing. The selector -- ``"cart"`` (default) or ``"lightgbm"`` --
-    fits a per-feature model and places centers at informative split points.
+    ``target_aware`` is True, which then requires ``y``) or from ``quantile`` /
+    ``uniform`` spacing (when ``target_aware`` is False). ``placement_strategy``
+    selects the mechanism: ``"cart"`` (default) or ``"lightgbm"`` when
+    target-aware, otherwise ``"uniform"`` or ``"quantile"``.
 
     Adaptive sizing (``adaptive=True``) only takes effect on the target-aware
     path: each feature's centers are clamped into
@@ -45,33 +44,25 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     centers_: list
 
-    _param_aliases: ClassVar[dict[str, str]] = {
-        "use_decision_tree": "use_target",
-    }
-
     def __init__(
         self,
         output_dim=UNSET,
-        use_target=UNSET,
+        target_aware: bool = True,
         task: str = "regression",
-        strategy="uniform",
-        use_decision_tree=UNSET,
+        placement_strategy: str = "cart",
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = None,
-        selector: str = "cart",
     ):
         self.output_dim = output_dim
-        self.use_target = use_target
+        self.target_aware = target_aware
         self.task = task
-        self.strategy = strategy
-        self.use_decision_tree = use_decision_tree
+        self.placement_strategy = placement_strategy
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
         self.random_state = random_state
-        self.selector = selector
 
     def _expand_column(self, x_col, centers):
         """Expand a single column ``x_col`` (shape ``(n, 1)``) against ``centers``.
@@ -81,17 +72,13 @@ class BaseCenterExpansion(BasePreTabTransformer):
         raise NotImplementedError
 
     def fit(self, X, y=None):
-        """Place per-feature centers from a decision tree or quantile/uniform spacing."""
-        if self.strategy not in ("uniform", "quantile"):
-            raise InvalidParamError(
-                f"Invalid strategy. Choose 'uniform' or 'quantile'. Got {self.strategy!r}."
-            )
+        """Place per-feature centers from a target-aware selector or quantile/uniform spacing."""
+        validate_placement(self.target_aware, self.placement_strategy)
         if self.task not in ("regression", "classification"):
             raise InvalidParamError(
                 f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}."
             )
         n_centers = self._resolve_param("output_dim", default=10)
-        use_target = self._resolve_param("use_target", default=True)
         min_req = self._resolve_param("min_output_dim", default=None)
         max_req = self._resolve_param("max_output_dim", default=None)
         X = self._validate(X, reset=True)
@@ -99,12 +86,12 @@ class BaseCenterExpansion(BasePreTabTransformer):
         if n_centers < 1:
             raise InvalidParamError(f"output_dim must be >= 1, got {n_centers}")
 
-        if use_target and y is None:
+        if self.target_aware and y is None:
             raise IncompatibleParamsError(
-                "Target variable 'y' must be provided when use_decision_tree=True."
+                "Target variable 'y' must be provided when target_aware=True."
             )
 
-        if use_target:
+        if self.target_aware:
             # Centers come from a target-aware location selector (CART by default,
             # optionally LightGBM): split points spaced out and ranked by impurity
             # / gain. Adaptive sizing clamps each feature into [min, max]; otherwise
@@ -123,7 +110,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
                 )
                 for i in range(X.shape[1])
             ]
-        elif self.strategy == "quantile":
+        elif self.placement_strategy == "quantile":
             centers_list = [
                 np.percentile(X[:, i], np.linspace(0, 100, n_centers))
                 for i in range(X.shape[1])
@@ -157,13 +144,13 @@ class BaseCenterExpansion(BasePreTabTransformer):
         return [int(np.asarray(centers).shape[0]) for centers in self.centers_]
 
     def _build_selector(self):
-        """Construct the target-aware location selector named by ``self.selector``."""
-        if self.selector == "cart":
+        """Construct the target-aware location selector named by ``placement_strategy``."""
+        if self.placement_strategy == "cart":
             return CARTLocationSelector(random_state=self.random_state)
-        if self.selector == "lightgbm":
+        if self.placement_strategy == "lightgbm":
             return LightGBMLocationSelector(random_state=self.random_state)
         raise InvalidParamError(
-            f"Invalid selector. Choose 'cart' or 'lightgbm'. Got {self.selector!r}."
+            f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {self.placement_strategy!r}."
         )
 
     def _adjust_centers(
@@ -192,13 +179,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         return combined
 
     def __sklearn_tags__(self):
-        """Require ``y`` only when centers are placed with a decision tree."""
+        """Require ``y`` only when centers are placed by a target-aware selector."""
         tags = super().__sklearn_tags__()
-        if is_set(self.use_decision_tree):
-            use_target = self.use_decision_tree
-        elif is_set(self.use_target):
-            use_target = self.use_target
-        else:
-            use_target = True
-        tags.target_tags.required = bool(use_target)
+        tags.target_tags.required = bool(self.target_aware)
         return tags

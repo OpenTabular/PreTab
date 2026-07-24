@@ -12,6 +12,7 @@ from .core.exceptions import (
     invalid_param_error,
 )
 from .core.logging import configure_logging, get_logger
+from .core.params import validate_placement
 from .pipeline import (
     get_categorical_transformer_steps,
     get_numerical_transformer_steps,
@@ -76,22 +77,23 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         fixed-width methods and when ``adaptive`` is False.
     task : str, default="regression"
         Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
-        place basis units / knots against ``y``. Only consulted when ``use_target`` is True.
-    use_target : bool, default=True
+        place basis units / knots against ``y``. Only consulted when ``target_aware`` is True.
+    target_aware : bool, default=True
         Whether target-aware methods (feature maps and splines) use ``y`` to place their basis
         units, e.g. decision-tree knot/center selection. Requires ``y`` to be passed to ``fit``;
-        set to False for a purely unsupervised, ``y``-free fit driven by ``strategy``.
-    strategy : str, default="uniform"
-        Placement strategy for basis units when ``use_target`` is False: ``"uniform"`` (evenly
-        spaced across the feature range) or ``"quantile"`` (spaced by the data quantiles).
-    selector : str, default="cart"
-        Target-aware location selector used to place basis units / knots when ``use_target`` is
-        True: ``"cart"`` (a single decision tree, always available) or ``"lightgbm"`` (a
-        gradient-boosted ensemble, requires the optional ``lightgbm`` dependency). Applies to the
-        feature maps, PLE, and the knot-based splines that support target-aware placement
-        (``"bspline"`` / ``"mspline"`` / ``"ispline"`` / ``"cubicspline"`` / ``"naturalspline"``);
-        ignored by methods that are not target-aware, i.e. the penalized ``"pspline"`` /
-        ``"tensorspline"`` (which assume equally-spaced knots) and the kernel-based ``"tprs"``.
+        set to False for a purely unsupervised, ``y``-free fit. Pairs with ``placement_strategy``:
+        when True the strategy must be ``"cart"`` or ``"lightgbm"``; when False it must be
+        ``"uniform"`` or ``"quantile"``.
+    placement_strategy : str, default="cart"
+        How basis units / knots are placed, interpreted according to ``target_aware``. When
+        ``target_aware`` is True: ``"cart"`` (a single decision tree, always available) or
+        ``"lightgbm"`` (a gradient-boosted ensemble, requires the optional ``lightgbm``
+        dependency). When ``target_aware`` is False: ``"uniform"`` (evenly spaced across the
+        feature range) or ``"quantile"`` (spaced by the data quantiles). Applies to the feature
+        maps, PLE, and the knot-based splines (``"bspline"`` / ``"mspline"`` / ``"ispline"`` /
+        ``"cubicspline"`` / ``"naturalspline"``); the always-target-aware ``"ple"`` only honors the
+        supervised strategies, while the penalized ``"pspline"`` / ``"tensorspline"`` (which assume
+        equally-spaced knots) and the kernel-based ``"tprs"`` only honor the unsupervised ones.
     degree : int, default=3
         Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
         (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.
@@ -195,7 +197,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     Radial-basis feature maps with target-aware center placement:
 
-    >>> pre = Preprocessor(numerical_method="rbf", use_target=True, task="regression",
+    >>> pre = Preprocessor(numerical_method="rbf", target_aware=True, task="regression",
     ...                    output_dim=8)
     >>> out = pre.fit_transform(df, y)
 
@@ -223,9 +225,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         min_output_dim=5,
         max_output_dim=10,
         task="regression",
-        use_target=True,
-        strategy="uniform",
-        selector="cart",
+        target_aware=True,
+        placement_strategy="cart",
         degree=3,
         scaling="minmax",
         cat_cutoff=0.03,
@@ -249,9 +250,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
         self.task = task
-        self.use_target = use_target
-        self.strategy = strategy
-        self.selector = selector
+        self.target_aware = target_aware
+        self.placement_strategy = placement_strategy
         self.degree = degree
         self.scaling = scaling
         self.cat_cutoff = cat_cutoff
@@ -337,6 +337,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             configure_logging(verbose)
         start_time = time.perf_counter()
 
+        validate_placement(self.target_aware, self.placement_strategy)
+
         if isinstance(X, dict):
             X = pd.DataFrame(X)
         elif isinstance(X, np.ndarray):
@@ -376,7 +378,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             steps = get_numerical_transformer_steps(
                 method=method,
                 task=self.task,
-                use_decision_tree=self.use_target,
+                target_aware=self.target_aware,
                 add_imputer=self.handle_missing != "error",
                 imputer_strategy="mean",
                 output_dim=self.output_dim,
@@ -385,8 +387,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 max_output_dim=self.max_output_dim if self.adaptive else None,
                 degree=self.degree,
                 scaling=self.scaling,
-                strategy=self.strategy,
-                selector=self.selector,
+                placement_strategy=self.placement_strategy,
                 handle_missing=self.handle_missing,
                 **seed_kwargs,
             )

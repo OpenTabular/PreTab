@@ -1,5 +1,3 @@
-from typing import ClassVar
-
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
@@ -61,36 +59,25 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         If True, prepend a constant intercept column per feature. The bias term is
         left unpenalized (a zero row/column is added to the penalty matrix).
 
-    strategy : {"uniform", "quantile"}, default="uniform"
+    placement_strategy : {"uniform", "quantile"}, default="uniform"
         Interior-knot placement rule. ``"uniform"`` spaces knots evenly across the
         range; ``"quantile"`` places them at evenly spaced data quantiles.
 
-    selector : BaseKnotSelector or None, default=None
-        Optional target-aware knot selector (for example ``CARTKnotSelector``).
-        When provided it places the interior knots from the target and requires
-        ``y`` during ``fit``. On the fixed path the width stays ``output_dim``;
-        with ``adaptive=True`` it may vary within
-        ``[min_output_dim, max_output_dim]``.
-
         .. note::
            P-splines are penalized (difference-penalty) splines that assume
-           **equally-spaced** knots, so target-aware placement is not
-           recommended and is *not* enabled by the :class:`~pretab.preprocessor.Preprocessor`
-           pipeline (it always builds this family with fixed, evenly-spaced knots).
-
-    task : {"regression", "classification"} or None, default=None
-        Task forwarded to a target-aware ``selector``.
+           **equally-spaced** knots, so this family is *unsupervised-only*:
+           target-aware placement does not apply and only ``"uniform"`` /
+           ``"quantile"`` spacing is accepted.
 
     adaptive : bool, default=False
-        If True (with a ``selector``), the per-feature output dimension may vary
-        within ``[min_output_dim, max_output_dim]`` instead of being fixed to
-        ``output_dim``.
+        Retained for API parity but a no-op for this unsupervised-only family: the
+        per-feature width is always fixed to ``output_dim``.
 
     min_output_dim : int or None, default=None
-        Lower bound on the per-feature output dimension in adaptive mode.
+        Unused for this unsupervised-only family (kept for API parity).
 
     max_output_dim : int or None, default=None
-        Upper bound on the per-feature output dimension in adaptive mode.
+        Unused for this unsupervised-only family (kept for API parity).
 
     Attributes
     ----------
@@ -138,10 +125,6 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
 
     _feature_suffix_value = "ps"
-    _param_aliases: ClassVar[dict[str, str]] = {
-        "knot_strategy": "strategy",
-        "knot_selector": "selector",
-    }
 
     def __init__(
         self,
@@ -149,33 +132,28 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         degree=3,
         diff_order=2,
         include_bias=False,
-        strategy=UNSET,
-        selector=UNSET,
-        task=None,
+        placement_strategy: str = "uniform",
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
-        knot_strategy=UNSET,
-        knot_selector=UNSET,
     ):
         self.output_dim = output_dim
         self.degree = degree
         self.diff_order = diff_order
         self.include_bias = include_bias
-        self.strategy = strategy
-        self.selector = selector
-        self.task = task
+        self.placement_strategy = placement_strategy
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
-        self.knot_strategy = knot_strategy
-        self.knot_selector = knot_selector
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=20)
-        strategy = self._resolve_param("strategy", default="uniform")
-        selector = self._resolve_param("selector", default=None)
+        if self.placement_strategy not in ("uniform", "quantile"):
+            raise InvalidParamError(
+                f"Invalid placement_strategy. Choose 'uniform' or 'quantile'. Got {self.placement_strategy!r}."
+            )
+        strategy = self.placement_strategy
 
         if output_dim < self.degree + 1:
             raise InvalidParamError(
@@ -188,13 +166,13 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         self.n_knots_ = []
 
         min_interior, max_interior = self._adaptive_interior_bounds(
-            output_dim, selector, floor=self.degree + 1, offset=self.degree + 1
+            output_dim, None, floor=self.degree + 1, offset=self.degree + 1
         )
 
         for i in range(X.shape[1]):
             x = X[:, i]
             knots = self._place_bspline_knots(
-                x, y, output_dim, self.degree, strategy, selector, self.task, min_interior, max_interior
+                x, y, output_dim, self.degree, strategy, None, None, min_interior, max_interior
             )
             n_basis = len(knots) - self.degree - 1
             D = np.eye(n_basis)

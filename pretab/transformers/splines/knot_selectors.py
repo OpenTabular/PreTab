@@ -242,3 +242,31 @@ class LightGBMKnotSelector(BaseKnotSelector):
         return self._selector.select(
             X, y, task=task, min_count=self.min_knots, max_count=self.max_knots
         )
+
+
+def build_knot_selector(
+    placement_strategy: str,
+    *,
+    degree: int,
+    spline_type: Literal["bspline", "mspline", "ispline"] = "bspline",
+    random_state: int | None = None,
+) -> BaseKnotSelector:
+    """Build a target-aware knot selector from a ``placement_strategy`` name.
+
+    ``placement_strategy`` must be ``"cart"`` (a single decision tree, always
+    available) or ``"lightgbm"`` (a gradient-boosted ensemble, requires the
+    optional ``lightgbm`` dependency). ``random_state`` is only forwarded when
+    set, so an unset value keeps each selector's own default seed.
+    """
+    kwargs: dict = {"degree": degree, "spline_type": spline_type}
+    if random_state is not None:
+        kwargs["random_state"] = random_state
+    if placement_strategy == "cart":
+        return CARTKnotSelector(**kwargs)
+    if placement_strategy == "lightgbm":
+        return LightGBMKnotSelector(**kwargs)
+    raise invalid_param_error(
+        "build_knot_selector", "placement_strategy", placement_strategy,
+        "must be 'cart' or 'lightgbm' when target_aware=True",
+        valid={"cart", "lightgbm"},
+    )

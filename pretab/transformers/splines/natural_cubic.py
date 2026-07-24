@@ -1,11 +1,10 @@
-from typing import ClassVar
-
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.exceptions import InvalidParamError
-from ...core.params import UNSET
+from ...core.params import UNSET, validate_placement
+from .knot_selectors import build_knot_selector
 from .mixins import SplineBasisMixin
 
 
@@ -44,22 +43,23 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
     include_bias : bool, default=False
         If True, includes a constant bias (intercept) column in the output.
 
-    strategy : {"uniform", "quantile"}, default="uniform"
-        Knot placement rule. ``"uniform"`` reproduces the historical evenly spaced
-        knots; ``"quantile"`` places them at evenly spaced data quantiles.
+    target_aware : bool, default=False
+        If True, knots are placed by a target-aware selector built from
+        ``placement_strategy`` (requires ``y`` during ``fit``). If False, knots use
+        the unsupervised ``placement_strategy`` spacing.
 
-    selector : BaseKnotSelector or None, default=None
-        Optional target-aware knot selector (for example ``CARTKnotSelector``).
-        When provided it places the knots from the target and requires ``y``
-        during ``fit``. On the fixed path the width stays ``output_dim``; with
-        ``adaptive=True`` it may vary within ``[min_output_dim, max_output_dim]``.
+    placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, default="uniform"
+        When ``target_aware=True``, the selector: ``"cart"`` or ``"lightgbm"``.
+        When ``target_aware=False``, the spacing: ``"uniform"`` reproduces the
+        historical evenly spaced knots, ``"quantile"`` places them at evenly spaced
+        data quantiles.
 
     task : {"regression", "classification"} or None, default=None
-        Task forwarded to a target-aware ``selector``.
+        Task forwarded to the target-aware selector when ``target_aware=True``.
 
     adaptive : bool, default=False
-        If True (with a ``selector``), the per-feature output dimension may vary
-        within ``[min_output_dim, max_output_dim]`` instead of being fixed to
+        If True (with ``target_aware=True``), the per-feature output dimension may
+        vary within ``[min_output_dim, max_output_dim]`` instead of being fixed to
         ``output_dim``.
 
     min_output_dim : int or None, default=None
@@ -67,6 +67,9 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
 
     max_output_dim : int or None, default=None
         Upper bound on the per-feature output dimension in adaptive mode.
+
+    random_state : int or None, default=None
+        Random state forwarded to the target-aware selector for reproducibility.
 
     Attributes
     ----------
@@ -114,36 +117,30 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
     """
 
     _feature_suffix_value = "ncs"
-    _param_aliases: ClassVar[dict[str, str]] = {
-        "knot_strategy": "strategy",
-        "knot_selector": "selector",
-    }
 
     def __init__(
         self,
         output_dim=UNSET,
         degree=3,
         include_bias=False,
-        strategy=UNSET,
-        selector=UNSET,
+        target_aware: bool = False,
+        placement_strategy: str = "uniform",
         task=None,
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
-        knot_strategy=UNSET,
-        knot_selector=UNSET,
+        random_state: int | None = None,
     ):
         self.output_dim = output_dim
         self.degree = degree
         self.include_bias = include_bias
-        self.strategy = strategy
-        self.selector = selector
+        self.target_aware = target_aware
+        self.placement_strategy = placement_strategy
         self.task = task
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
-        self.knot_strategy = knot_strategy
-        self.knot_selector = knot_selector
+        self.random_state = random_state
 
     def _basis(self, x, knots):
         x = np.asarray(x).reshape(-1, 1)
@@ -166,10 +163,9 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         return np.hstack(basis)
 
     def fit(self, X, y=None):
+        validate_placement(self.target_aware, self.placement_strategy)
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=5)
-        strategy = self._resolve_param("strategy", default="uniform")
-        selector = self._resolve_param("selector", default=None)
 
         if output_dim < 2:
             raise InvalidParamError(
@@ -177,6 +173,16 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
             )
 
         n_spanning = output_dim + 1
+
+        if self.target_aware:
+            selector = build_knot_selector(
+                self.placement_strategy, degree=self.degree, spline_type="bspline",
+                random_state=self.random_state,
+            )
+            strategy = "uniform"
+        else:
+            selector = None
+            strategy = self.placement_strategy
 
         min_interior, max_interior = self._adaptive_interior_bounds(
             output_dim, selector, floor=2, offset=1

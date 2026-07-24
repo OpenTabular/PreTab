@@ -1,5 +1,3 @@
-from typing import ClassVar
-
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
@@ -61,36 +59,26 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         If True, prepend a constant column to each marginal basis before the
         tensor product. The bias term is left unpenalized.
 
-    strategy : {"uniform", "quantile"}, default="uniform"
+    placement_strategy : {"uniform", "quantile"}, default="uniform"
         Interior-knot placement rule for each marginal dimension. ``"uniform"``
         spaces knots evenly; ``"quantile"`` uses data quantiles.
-
-    selector : BaseKnotSelector or None, default=None
-        Optional target-aware knot selector applied per marginal dimension. When
-        provided it requires ``y`` during ``fit``. On the fixed path each marginal
-        width stays ``output_dim``; with ``adaptive=True`` it may vary within
-        ``[min_output_dim, max_output_dim]``.
 
         .. note::
            The tensor-product spline is a penalized (difference-penalty) spline
            per marginal, exactly like :class:`~pretab.transformers.splines.pspline.PSplineTransformer`,
-           so it assumes **equally-spaced** knots. Target-aware placement is not
-           recommended and is *not* enabled by the :class:`~pretab.preprocessor.Preprocessor`
-           pipeline (it always builds this family with fixed, evenly-spaced knots).
-
-    task : {"regression", "classification"} or None, default=None
-        Task forwarded to a target-aware ``selector``.
+           so it assumes **equally-spaced** knots and is *unsupervised-only*:
+           target-aware placement does not apply and only ``"uniform"`` /
+           ``"quantile"`` spacing is accepted.
 
     adaptive : bool, default=False
-        If True (with a ``selector``), the per-marginal output dimension may vary
-        within ``[min_output_dim, max_output_dim]`` instead of being fixed to
-        ``output_dim``.
+        Retained for API parity but a no-op for this unsupervised-only family: the
+        per-marginal width is always fixed to ``output_dim``.
 
     min_output_dim : int or None, default=None
-        Lower bound on the per-marginal output dimension in adaptive mode.
+        Unused for this unsupervised-only family (kept for API parity).
 
     max_output_dim : int or None, default=None
-        Upper bound on the per-marginal output dimension in adaptive mode.
+        Unused for this unsupervised-only family (kept for API parity).
 
     Attributes
     ----------
@@ -148,38 +136,25 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     36
     """
 
-    _param_aliases: ClassVar[dict[str, str]] = {
-        "knot_strategy": "strategy",
-        "knot_selector": "selector",
-    }
-
     def __init__(
         self,
         output_dim=UNSET,
         degree=3,
         diff_order=2,
         include_bias=False,
-        strategy=UNSET,
-        selector=UNSET,
-        task=None,
+        placement_strategy: str = "uniform",
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
-        knot_strategy=UNSET,
-        knot_selector=UNSET,
     ):
         self.output_dim = output_dim
         self.degree = degree
         self.diff_order = diff_order
         self.include_bias = include_bias
-        self.strategy = strategy
-        self.selector = selector
-        self.task = task
+        self.placement_strategy = placement_strategy
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
-        self.knot_strategy = knot_strategy
-        self.knot_selector = knot_selector
 
     def _pad_knots(self, inner):
         return np.concatenate((np.repeat(inner[0], self.degree), inner, np.repeat(inner[-1], self.degree)))
@@ -202,8 +177,11 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=5)
-        strategy = self._resolve_param("strategy", default="uniform")
-        selector = self._resolve_param("selector", default=None)
+        if self.placement_strategy not in ("uniform", "quantile"):
+            raise InvalidParamError(
+                f"Invalid placement_strategy. Choose 'uniform' or 'quantile'. Got {self.placement_strategy!r}."
+            )
+        strategy = self.placement_strategy
 
         if output_dim < self.degree + 1:
             raise InvalidParamError(
@@ -218,12 +196,12 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         self.n_knots_ = []
 
         min_interior, max_interior = self._adaptive_interior_bounds(
-            output_dim, selector, floor=self.degree + 1, offset=self.degree + 1
+            output_dim, None, floor=self.degree + 1, offset=self.degree + 1
         )
 
         for d in range(self.dim_):
             knots = self._place_bspline_knots(
-                X[:, d], y, output_dim, self.degree, strategy, selector, self.task, min_interior, max_interior
+                X[:, d], y, output_dim, self.degree, strategy, None, None, min_interior, max_interior
             )
             basis = self._basis_matrix(X[:, d], knots)
             penalty = self._difference_penalty(len(knots) - self.degree - 1)

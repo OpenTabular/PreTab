@@ -19,14 +19,15 @@ class TanhExpansionTransformer(BaseCenterExpansion):
     scale : float, default=1.0
         Controls the sharpness of the tanh transitions. Smaller values make the activation sharper.
 
-    use_decision_tree : bool, default=True
-        If True, uses a decision tree to determine the tanh center locations based on the input `X` and target `y`.
+    target_aware : bool, default=True
+        Whether to place centers with a target-aware selector (requires `y`).
 
     task : {"regression", "classification"}, default="regression"
-        Type of prediction task. Required for decision tree-based center selection.
+        Task type for the target-aware selector used to place centers.
 
-    strategy : {"uniform", "quantile"}, default="uniform"
-        Strategy to determine center placement when `use_decision_tree=False`.
+    placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, default="cart"
+        Selector when `target_aware=True` (`"cart"` or `"lightgbm"`); spacing when
+        `target_aware=False` (`"uniform"` or `"quantile"`).
 
     Attributes
     ----------
@@ -46,15 +47,15 @@ class TanhExpansionTransformer(BaseCenterExpansion):
         \tanh\!\left(\frac{x - c}{s}\right),
 
     where :math:`c` is a center value and :math:`s` (``scale``) controls the
-    spread of the activation (on the default, non-decision-tree path; a decision
-    tree may place a data-driven number).
+    spread of the activation on the non-target-aware path; the target-aware
+    default may place a data-driven number.
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import TanhExpansionTransformer
     >>> X = np.array([[1.0], [2.0], [3.0]])
-    >>> transformer = TanhExpansionTransformer(output_dim=3, use_decision_tree=False)
+    >>> transformer = TanhExpansionTransformer(output_dim=3, target_aware=False, placement_strategy="uniform")
     >>> transformer.fit(X)
     TanhExpansionTransformer(...)
     >>> transformer.transform(X).shape
@@ -67,27 +68,23 @@ class TanhExpansionTransformer(BaseCenterExpansion):
         self,
         output_dim=UNSET,
         scale: float = 1.0,
-        use_target=UNSET,
+        target_aware: bool = True,
         task: str = "regression",
-        strategy="uniform",
-        use_decision_tree=UNSET,
+        placement_strategy: str = "cart",
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = None,
-        selector: str = "cart",
     ):
         super().__init__(
             output_dim=output_dim,
-            use_target=use_target,
+            target_aware=target_aware,
             task=task,
-            strategy=strategy,
-            use_decision_tree=use_decision_tree,
+            placement_strategy=placement_strategy,
             adaptive=adaptive,
             min_output_dim=min_output_dim,
             max_output_dim=max_output_dim,
             random_state=random_state,
-            selector=selector,
         )
         self.scale = scale
 
