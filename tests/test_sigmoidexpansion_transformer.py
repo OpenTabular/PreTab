@@ -75,3 +75,19 @@ def test_sigmoid_feature_mismatch(X_multi_feature, y_regression):
     transformer.fit(X_multi_feature[:, :2], y_regression)
     with pytest.raises(ValueError, match="is expecting"):
         transformer.transform(X_multi_feature)
+
+
+def test_sigmoid_no_overflow_on_large_inputs():
+    # Large-magnitude values used to trigger "overflow encountered in exp".
+    transformer = SigmoidExpansionTransformer(
+        output_dim=4, use_decision_tree=False, strategy="uniform"
+    )
+    transformer.fit(np.linspace(-1, 1, 10).reshape(-1, 1))
+    X_extreme = np.array([[-1000.0], [1000.0]])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any RuntimeWarning becomes an error
+        Xt = transformer.transform(X_extreme)
+    assert np.isfinite(Xt).all()
+    assert (Xt >= 0).all()
+    assert (Xt <= 1).all()
+
