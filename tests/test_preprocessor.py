@@ -108,6 +108,7 @@ EXPECTED_PARAMS = {
     "task",
     "use_target",
     "strategy",
+    "selector",
     "degree",
     "scaling",
     "cat_cutoff",
