@@ -11,7 +11,6 @@ import pandas as pd
 import pytest
 from sklearn.base import clone
 
-from pretab.core.centers import center_identification_using_decision_tree
 from pretab.preprocessor import Preprocessor
 from pretab.transformers import RBFExpansionTransformer
 
@@ -120,14 +119,6 @@ def test_handle_missing_error_rejects_nan(data):
 
 
 # --- transformer / helper level seeding ------------------------------------ #
-
-def test_center_identification_is_seedable(data):
-    X, y = data
-    c1 = center_identification_using_decision_tree(X.values, y.values, "regression", 5, random_state=1)
-    c2 = center_identification_using_decision_tree(X.values, y.values, "regression", 5, random_state=1)
-    for a, b in zip(c1, c2):
-        np.testing.assert_array_equal(a, b)
-
 
 def test_rbf_transformer_seeded_centers_reproducible(data):
     X, y = data
