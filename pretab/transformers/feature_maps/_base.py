@@ -83,7 +83,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
             raise InvalidParamError(
                 f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}."
             )
-        n_centers = self._resolve_param("output_dim", default=10)
+        n_centers = self._resolve_param("output_dim", default=6)
         min_req = self._resolve_param("min_output_dim", default=None)
         max_req = self._resolve_param("max_output_dim", default=None)
         X = self._validate(X, reset=True)

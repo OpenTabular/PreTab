@@ -37,7 +37,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
 
     Parameters
     ----------
-    output_dim : int, default=20
+    output_dim : int, default=6
         Maximum number of bins per feature, i.e. an upper bound on the number of
         output columns produced for each feature. This caps the number of leaf
         nodes (and therefore thresholds) the decision tree may produce. The
@@ -193,7 +193,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         self.n_bins_per_feature_ = []
         self.fill_values_ = []
 
-        n_bins = self._resolve_param("output_dim", default=20)
+        n_bins = self._resolve_param("output_dim", default=6)
         min_bins_req = self._resolve_param("min_output_dim", default=None)
         max_bins_req = self._resolve_param("max_output_dim", default=None)
         min_bins, max_bins = self._resolve_bin_bounds(n_bins, min_bins_req, max_bins_req)

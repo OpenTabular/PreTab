@@ -24,7 +24,7 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
 
     Parameters
     ----------
-    output_dim : int, default=10
+    output_dim : int, default=6
         Number of non-bias output columns (:math:`m`) extracted from the
         eigen-decomposition of the TPS kernel. Must be at least 1.
 
@@ -89,7 +89,7 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
 
     _feature_suffix_value = "tps"
 
-    def __init__(self, output_dim=10, include_bias=False):
+    def __init__(self, output_dim=6, include_bias=False):
         self.output_dim = output_dim
         self.include_bias = include_bias
 

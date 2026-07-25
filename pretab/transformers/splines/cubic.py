@@ -30,7 +30,7 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    output_dim : int, default=10
+    output_dim : int, default=6
         Number of non-bias output columns per feature (:math:`m`). Must be at
         least 3 (the three polynomial terms; ``output_dim == 3`` places no interior
         knots). The number of interior knots is ``output_dim - 3``.
@@ -155,7 +155,7 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     def fit(self, X, y=None):
         validate_placement(self.target_aware, self.placement_strategy)
         X = self._validate_allow_nan(X, reset=True)
-        output_dim = self._resolve_param("output_dim", default=10)
+        output_dim = self._resolve_param("output_dim", default=6)
 
         if output_dim < 3:
             raise InvalidParamError(f"output_dim must be >= 3 for the cubic spline basis, got {output_dim}")

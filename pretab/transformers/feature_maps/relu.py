@@ -13,7 +13,7 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
 
     Parameters
     ----------
-    output_dim : int, default=10
+    output_dim : int, default=6
         Number of ReLU centers (output columns) per feature.
 
     target_aware : bool, default=False

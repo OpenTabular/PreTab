@@ -49,7 +49,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     Parameters
     ----------
-    output_dim : int, default=5
+    output_dim : int, default=6
         Number of non-bias output columns per feature (``m``). The number of
         interior knots is derived as ``output_dim - degree - 1``. Must be at least
         ``degree + 1`` and at most 50. Ignored when ``knot_locations`` is provided.
@@ -246,7 +246,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
     def fit(self, X, y=None):
         """Determine per-feature knot vectors."""
         validate_placement(self.target_aware, self.placement_strategy)
-        n_basis = self._resolve_param("output_dim", default=5)
+        n_basis = self._resolve_param("output_dim", default=6)
         min_basis_req = self._resolve_param("min_output_dim", default=None)
         max_basis_req = self._resolve_param("max_output_dim", default=None)
         if n_basis < self.degree + 1:

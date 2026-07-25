@@ -44,7 +44,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     Parameters
     ----------
-    output_dim : int, default=5
+    output_dim : int, default=4
         Number of non-bias output columns **per marginal dimension** (:math:`m`).
         Must be at least ``degree + 1``. The interior knots per dimension is
         ``output_dim - degree - 1``.
@@ -176,7 +176,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
-        output_dim = self._resolve_param("output_dim", default=5)
+        output_dim = self._resolve_param("output_dim", default=4)
         if self.placement_strategy not in ("uniform", "quantile"):
             raise InvalidParamError(
                 f"Invalid placement_strategy. Choose 'uniform' or 'quantile'. Got {self.placement_strategy!r}."

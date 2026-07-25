@@ -32,7 +32,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
 
     Parameters
     ----------
-    output_dim : int, default=5
+    output_dim : int, default=6
         Number of non-bias output columns per feature (:math:`m`). Must be at least
         2. The number of spanning knots placed is ``output_dim + 1``.
 
@@ -165,7 +165,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
     def fit(self, X, y=None):
         validate_placement(self.target_aware, self.placement_strategy)
         X = self._validate_allow_nan(X, reset=True)
-        output_dim = self._resolve_param("output_dim", default=5)
+        output_dim = self._resolve_param("output_dim", default=6)
 
         if output_dim < 2:
             raise InvalidParamError(

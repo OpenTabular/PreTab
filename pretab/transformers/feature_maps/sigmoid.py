@@ -14,7 +14,7 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
 
     Parameters
     ----------
-    output_dim : int, default=10
+    output_dim : int, default=6
         Number of sigmoid centers (output columns) per feature.
 
     scale : float, default=1.0

@@ -44,7 +44,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    output_dim : int, default=20
+    output_dim : int, default=6
         Number of non-bias output columns per feature (:math:`m`). Must be at least
         ``degree + 1``. The number of interior knots is ``output_dim - degree - 1``.
 
@@ -148,7 +148,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
-        output_dim = self._resolve_param("output_dim", default=20)
+        output_dim = self._resolve_param("output_dim", default=6)
         if self.placement_strategy not in ("uniform", "quantile"):
             raise InvalidParamError(
                 f"Invalid placement_strategy. Choose 'uniform' or 'quantile'. Got {self.placement_strategy!r}."
