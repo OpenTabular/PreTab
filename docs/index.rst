@@ -24,6 +24,7 @@
    :hidden:
 
    user_guide/preprocessing
+   user_guide/configuration
 
 .. toctree::
    :caption: API Reference
