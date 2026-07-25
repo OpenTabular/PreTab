@@ -65,19 +65,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         columns produced per input feature (bins for PLE/binning, centers for the feature maps,
         basis functions for the splines). The B/M/I splines clamp it into their supported
         ``[5, 50]`` range. Used as the fixed per-feature width when ``adaptive`` is False.
-    adaptive : bool, default=False
-        Whether adaptive-capable methods size each feature's output dimension from the data
-        (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
-        Fixed-width methods (e.g. plain scalers) ignore this flag.
-    min_output_dim : int, default=5
-        Lower bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
-        fixed-width methods and when ``adaptive`` is False.
-    max_output_dim : int, default=10
-        Upper bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
-        fixed-width methods and when ``adaptive`` is False.
-    task : str, default="regression"
-        Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
-        place basis units / knots against ``y``. Only consulted when ``target_aware`` is True.
+    degree : int, default=3
+        Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
+        (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.
     target_aware : bool, default=True
         Whether target-aware methods (feature maps and splines) use ``y`` to place their basis
         units, e.g. decision-tree knot/center selection. Requires ``y`` to be passed to ``fit``;
@@ -94,9 +84,26 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         ``"cubicspline"`` / ``"naturalspline"``); the always-target-aware ``"ple"`` only honors the
         supervised strategies, while the penalized ``"pspline"`` / ``"tensorspline"`` (which assume
         equally-spaced knots) and the kernel-based ``"tprs"`` only honor the unsupervised ones.
-    degree : int, default=3
-        Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
-        (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.
+    task : str, default="regression"
+        Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
+        place basis units / knots against ``y``. Only consulted when ``target_aware`` is True.
+    adaptive : bool, default=False
+        Whether adaptive-capable methods size each feature's output dimension from the data
+        (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
+        Fixed-width methods (e.g. plain scalers) ignore this flag.
+    min_output_dim : int, default=5
+        Lower bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
+        fixed-width methods and when ``adaptive`` is False.
+    max_output_dim : int, default=10
+        Upper bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
+        fixed-width methods and when ``adaptive`` is False.
+    random_state : int or None, default=None
+        Global seed forwarded to every stochastic numerical method (PLE and feature-map
+        decision trees, the ``quantile`` transformer, and target-aware spline knot
+        selectors) to make ``fit`` reproducible. When ``None`` (the default) each transformer
+        keeps its own default seed, so the value is only propagated when explicitly set --
+        preserving prior behavior while giving a single knob to pin reproducibility. Forwarded
+        by ``get_params`` / ``clone`` so an embedding host (e.g. DeepTab) can pass it through.
     scaling : str, default="minmax"
         Optional scaler inserted *before* the numerical method: ``"minmax"`` (rescale to ``[-1, 1]``)
         or ``"standardization"`` (zero mean, unit variance). Skipped automatically when the chosen
@@ -108,13 +115,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     treat_all_integers_as_numerical : bool, default=False
         If True, every integer-typed column is treated as numerical regardless of cardinality,
         bypassing the ``cat_cutoff`` heuristic.
-    random_state : int or None, default=None
-        Global seed forwarded to every stochastic numerical method (PLE and feature-map
-        decision trees, the ``quantile`` transformer, and target-aware spline knot
-        selectors) to make ``fit`` reproducible. When ``None`` (the default) each transformer
-        keeps its own default seed, so the value is only propagated when explicitly set --
-        preserving prior behavior while giving a single knob to pin reproducibility. Forwarded
-        by ``get_params`` / ``clone`` so an embedding host (e.g. DeepTab) can pass it through.
     handle_missing : {"error", "median"}, default="median"
         Missing-value policy. ``"median"`` keeps the default mean ``SimpleImputer`` that runs
         before every numerical method (so NaNs are filled and, e.g., PLE uses its median
@@ -221,17 +221,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         categorical_method="int",
         feature_preprocessing=None,
         output_dim=7,
+        degree=3,
+        target_aware=True,
+        placement_strategy="cart",
+        task="regression",
         adaptive=False,
         min_output_dim=5,
         max_output_dim=10,
-        task="regression",
-        target_aware=True,
-        placement_strategy="cart",
-        degree=3,
+        random_state=None,
         scaling="minmax",
         cat_cutoff=0.03,
         treat_all_integers_as_numerical=False,
-        random_state=None,
         handle_missing="median",
         verbose=0,
     ):
@@ -246,17 +246,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.categorical_method = categorical_method
         self.feature_preprocessing = feature_preprocessing
         self.output_dim = output_dim
+        self.degree = degree
+        self.target_aware = target_aware
+        self.placement_strategy = placement_strategy
+        self.task = task
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
-        self.task = task
-        self.target_aware = target_aware
-        self.placement_strategy = placement_strategy
-        self.degree = degree
+        self.random_state = random_state
         self.scaling = scaling
         self.cat_cutoff = cat_cutoff
         self.treat_all_integers_as_numerical = treat_all_integers_as_numerical
-        self.random_state = random_state
         self.handle_missing = handle_missing
         self.verbose = verbose
 

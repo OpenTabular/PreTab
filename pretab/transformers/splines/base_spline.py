@@ -57,6 +57,14 @@ class BaseSplineTransformer(BasePreTabTransformer):
     degree : int, default=3
         Degree of the spline (3 is cubic, 2 quadratic, 1 linear).
 
+    include_bias : bool, default=False
+        Whether to prepend a constant intercept column per feature.
+
+    knot_locations : ndarray or None, default=None
+        Explicit internal knot locations applied to every feature. Takes priority
+        over ``target_aware`` placement and the automatic strategy, and overrides
+        ``output_dim``.
+
     target_aware : bool, default=False
         If True, knots are placed by a target-aware selector built from
         ``placement_strategy`` (requires ``y`` during fit). If False, knots are
@@ -67,13 +75,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
         When ``target_aware=False``, the spacing rule: ``"uniform"`` spaces knots
         evenly across the range, ``"quantile"`` places them at data quantiles.
 
-    include_bias : bool, default=False
-        Whether to prepend a constant intercept column per feature.
-
-    knot_locations : ndarray or None, default=None
-        Explicit internal knot locations applied to every feature. Takes priority
-        over ``target_aware`` placement and the automatic strategy, and overrides
-        ``output_dim``.
+    task : {"regression", "classification"} or None, default=None
+        Task passed to the target-aware selector when ``target_aware=True``.
 
     adaptive : bool, default=False
         If True, the per-feature output dimension may vary within
@@ -84,9 +87,6 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     max_output_dim : int or None, default=None
         Upper bound on the per-feature output dimension used in adaptive mode.
-
-    task : {"regression", "classification"} or None, default=None
-        Task passed to the target-aware selector when ``target_aware=True``.
 
     random_state : int or None, default=None
         Random state forwarded to the target-aware selector for reproducibility.
@@ -130,26 +130,26 @@ class BaseSplineTransformer(BasePreTabTransformer):
         self,
         output_dim=UNSET,
         degree: int = 3,
-        target_aware: bool = False,
-        placement_strategy: str = "quantile",
         include_bias: bool = False,
         knot_locations: np.ndarray | None = None,
+        target_aware: bool = False,
+        placement_strategy: str = "quantile",
+        task: Literal["regression", "classification"] | None = None,
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
-        task: Literal["regression", "classification"] | None = None,
         random_state: int | None = None,
     ):
         self.output_dim = output_dim
         self.degree = degree
-        self.target_aware = target_aware
-        self.placement_strategy = placement_strategy
         self.include_bias = include_bias
         self.knot_locations = knot_locations
+        self.target_aware = target_aware
+        self.placement_strategy = placement_strategy
+        self.task: Literal["regression", "classification"] | None = task
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
-        self.task: Literal["regression", "classification"] | None = task
         self.random_state = random_state
 
     _selector_spline_type: ClassVar[Literal["bspline", "mspline", "ispline"]] = "bspline"

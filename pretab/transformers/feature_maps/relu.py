@@ -19,13 +19,13 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
     target_aware : bool, default=False
         Whether to place centers with a target-aware selector (requires `y`).
 
-    task : {"regression", "classification"}, default="regression"
-        Task type for the target-aware selector used to place centers.
-
     placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, optional
         Selector when `target_aware=True` (`"cart"` or `"lightgbm"`); spacing when
         `target_aware=False` (`"uniform"` or `"quantile"`). If left unset, resolves
         to `"cart"` on the target-aware path and `"quantile"` otherwise.
+
+    task : {"regression", "classification"}, default="regression"
+        Task type for the target-aware selector used to place centers.
 
     adaptive : bool, default=False
         If True (with `target_aware=True`), the per-feature number of centers may
@@ -79,8 +79,8 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
         self,
         output_dim=UNSET,
         target_aware: bool = False,
-        task: str = "regression",
         placement_strategy=UNSET,
+        task: str = "regression",
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
@@ -89,8 +89,8 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
         super().__init__(
             output_dim=output_dim,
             target_aware=target_aware,
-            task=task,
             placement_strategy=placement_strategy,
+            task=task,
             adaptive=adaptive,
             min_output_dim=min_output_dim,
             max_output_dim=max_output_dim,

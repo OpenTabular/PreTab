@@ -43,15 +43,23 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         nodes (and therefore thresholds) the decision tree may produce. The
         actual number of output columns is data-dependent and may be smaller
         (see Notes).
+    placement_strategy : {"cart", "lightgbm"}, default="cart"
+        Which target-aware location selector places the bin thresholds. PLE is
+        inherently target-aware, so only the supervised selectors apply.
+        ``"cart"`` fits a single decision tree (always available); ``"lightgbm"``
+        fits a gradient-boosted ensemble and requires the optional ``lightgbm``
+        dependency (``pip install pretab[knots]``).
     task : {"regression", "classification"}, default="regression"
         Whether to fit a ``DecisionTreeRegressor`` or ``DecisionTreeClassifier``
         to locate the split thresholds.
-    max_depth : int or None, default=None
-        Maximum depth of the decision tree.
-    min_samples_split : int, default=2
-        Minimum number of samples required to split an internal node.
-    min_samples_leaf : int, default=1
-        Minimum number of samples required at a leaf node.
+    adaptive : bool, default=False
+        If True, allow the number of bins per feature to be data-driven, bounded
+        by ``min_output_dim`` and ``max_output_dim``. If False, every feature is
+        capped by ``output_dim``.
+    min_output_dim : int or None, default=None
+        Minimum number of bins per feature when ``adaptive=True``.
+    max_output_dim : int or None, default=None
+        Maximum number of bins per feature when ``adaptive=True``.
     random_state : int or None, default=51
         Random state for reproducible tree fitting.
     handle_missing : {"error", "median"}, default="median"
@@ -61,20 +69,12 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         - ``"median"``: drop NaN rows during ``fit`` and, at ``transform`` time,
           replace NaN with the median of that feature's thresholds (or ``0`` when
           the feature produced no thresholds).
-    adaptive : bool, default=False
-        If True, allow the number of bins per feature to be data-driven, bounded
-        by ``min_output_dim`` and ``max_output_dim``. If False, every feature is
-        capped by ``output_dim``.
-    min_output_dim : int or None, default=None
-        Minimum number of bins per feature when ``adaptive=True``.
-    max_output_dim : int or None, default=None
-        Maximum number of bins per feature when ``adaptive=True``.
-    placement_strategy : {"cart", "lightgbm"}, default="cart"
-        Which target-aware location selector places the bin thresholds. PLE is
-        inherently target-aware, so only the supervised selectors apply.
-        ``"cart"`` fits a single decision tree (always available); ``"lightgbm"``
-        fits a gradient-boosted ensemble and requires the optional ``lightgbm``
-        dependency (``pip install pretab[knots]``).
+    max_depth : int or None, default=None
+        Maximum depth of the decision tree.
+    min_samples_split : int, default=2
+        Minimum number of samples required to split an internal node.
+    min_samples_leaf : int, default=1
+        Minimum number of samples required at a leaf node.
 
     Attributes
     ----------
@@ -116,28 +116,28 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
     def __init__(
         self,
         output_dim=UNSET,
+        placement_strategy: str = "cart",
         task: Literal["regression", "classification"] = "regression",
-        max_depth: int | None = None,
-        min_samples_split: int = 2,
-        min_samples_leaf: int = 1,
-        random_state: int | None = 51,
-        handle_missing: Literal["error", "median"] = "median",
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
-        placement_strategy: str = "cart",
+        random_state: int | None = 51,
+        handle_missing: Literal["error", "median"] = "median",
+        max_depth: int | None = None,
+        min_samples_split: int = 2,
+        min_samples_leaf: int = 1,
     ):
         self.output_dim = output_dim
+        self.placement_strategy = placement_strategy
         self.task = task
-        self.max_depth = max_depth
-        self.min_samples_split = min_samples_split
-        self.min_samples_leaf = min_samples_leaf
-        self.random_state = random_state
-        self.handle_missing = handle_missing
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
-        self.placement_strategy = placement_strategy
+        self.random_state = random_state
+        self.handle_missing = handle_missing
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
 
     def __sklearn_tags__(self):
         """Declare NaN-passthrough (median policy) and the required-target tag."""

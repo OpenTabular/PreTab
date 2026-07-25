@@ -52,8 +52,8 @@ class BaseCenterExpansion(BasePreTabTransformer):
         self,
         output_dim=UNSET,
         target_aware: bool = False,
-        task: str = "regression",
         placement_strategy=UNSET,
+        task: str = "regression",
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
@@ -61,8 +61,8 @@ class BaseCenterExpansion(BasePreTabTransformer):
     ):
         self.output_dim = output_dim
         self.target_aware = target_aware
-        self.task = task
         self.placement_strategy = placement_strategy
+        self.task = task
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
