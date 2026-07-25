@@ -16,8 +16,6 @@ from ...core.exceptions import (
     InvalidParamError,
     PretabDataError,
 )
-from ...core.knots import select_knots, spanning_knots
-from ...core.locations import resolve_locations
 from ...core.params import UNSET, validate_placement
 from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
 
@@ -152,31 +150,6 @@ class BaseCenterExpansion(BasePreTabTransformer):
         raise InvalidParamError(
             f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {self.placement_strategy!r}."
         )
-
-    def _adjust_centers(
-        self, x: np.ndarray, centers: np.ndarray, min_centers: int, max_centers: int
-    ) -> np.ndarray:
-        """Clamp a data-driven set of centers into the ``[min, max]`` window."""
-        return resolve_locations(
-            centers,
-            min_count=min_centers,
-            max_count=max_centers,
-            supplement=lambda current, target: self._supplement_centers(x, current, target),
-        )
-
-    def _supplement_centers(
-        self, x: np.ndarray, centers: np.ndarray, target: int
-    ) -> np.ndarray:
-        """Add quantile / uniform candidates until ``target`` centers exist."""
-        if target <= len(centers):
-            return centers
-        candidates = [np.asarray(centers, dtype=float)]
-        candidates.append(spanning_knots(x, target, "quantile"))
-        candidates.append(spanning_knots(x, target, "uniform"))
-        combined = np.unique(np.concatenate(candidates))
-        if len(combined) > target:
-            combined = select_knots(combined, target)
-        return combined
 
     def __sklearn_tags__(self):
         """Require ``y`` only when centers are placed by a target-aware selector."""

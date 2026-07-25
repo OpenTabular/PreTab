@@ -3,8 +3,9 @@
 Feature maps (centers), PLE (thresholds) and the splines (knots) all take a raw
 set of candidate locations for one feature and *resolve* it to a count inside a
 ``[min_count, max_count]`` window: too many locations are trimmed, too few are
-supplemented. Historically each family re-implemented that same skeleton
-(``_adjust_centers`` / ``_adjust_thresholds`` / ``_adjust_internal_knots``).
+supplemented. The splines drive this through ``_adjust_internal_knots``; the
+feature-map and PLE families now place locations directly with the shared
+count-based selectors.
 
 :func:`resolve_locations` centralizes the skeleton -- sort, optional dedupe,
 trim-if-over, supplement-if-under -- while each family keeps its own

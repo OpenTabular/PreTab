@@ -20,34 +20,8 @@ from ...core.exceptions import (
     InvalidParamError,
     PretabDataError,
 )
-from ...core.locations import resolve_locations
 from ...core.params import UNSET, AliasResolverMixin
 from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
-
-
-def extract_thresholds_from_tree(tree) -> np.ndarray:
-    """Extract split thresholds directly from a fitted decision tree.
-
-    Reads the threshold values stored on the tree's internal (split) nodes.
-    Leaf nodes carry a sentinel feature index of ``-2`` and are ignored.
-
-    Parameters
-    ----------
-    tree : DecisionTreeRegressor or DecisionTreeClassifier
-        A fitted decision tree.
-
-    Returns
-    -------
-    thresholds : ndarray
-        Sorted, unique threshold values used by the split nodes.
-    """
-    tree_ = tree.tree_
-
-    # Split nodes have a valid feature index (>= 0); leaf nodes use -2.
-    split_mask = tree_.feature >= 0
-    thresholds = tree_.threshold[split_mask]
-
-    return np.unique(thresholds)
 
 
 class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator):
@@ -401,40 +375,3 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         raise InvalidParamError(
             f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {self.placement_strategy!r}."
         )
-
-    def _adjust_thresholds(
-        self, feature: np.ndarray, thresholds: np.ndarray, min_bins: int, max_bins: int
-    ) -> np.ndarray:
-        min_thresholds = max(0, min_bins - 1)
-        max_thresholds = max(0, max_bins - 1)
-        resolved = resolve_locations(
-            thresholds,
-            min_count=min_thresholds,
-            max_count=max_thresholds,
-            supplement=lambda current, target: self._supplement_thresholds(feature, current, target),
-            dedupe=False,
-        )
-        return np.sort(resolved)
-
-    def _supplement_thresholds(self, feature: np.ndarray, thresholds: np.ndarray, target_count: int) -> np.ndarray:
-        if target_count <= len(thresholds):
-            return thresholds
-
-        candidates = [thresholds]
-        if target_count > 0:
-            quantiles = np.linspace(0, 100, target_count + 2)[1:-1]
-            candidates.append(np.percentile(feature, quantiles))
-            candidates.append(np.linspace(feature.min(), feature.max(), target_count + 2)[1:-1])
-
-        combined = np.sort(np.unique(np.concatenate(candidates)))
-        if len(combined) < target_count:
-            combined = np.linspace(feature.min(), feature.max(), target_count + 2)[1:-1]
-
-        return self._select_thresholds(np.asarray(combined), target_count)
-
-    @staticmethod
-    def _select_thresholds(thresholds: np.ndarray, count: int) -> np.ndarray:
-        if len(thresholds) <= count:
-            return thresholds
-        idx = np.linspace(0, len(thresholds) - 1, count).round().astype(int)
-        return thresholds[idx]

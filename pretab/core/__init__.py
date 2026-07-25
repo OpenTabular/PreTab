@@ -7,7 +7,6 @@ user-facing transformers. It never defines user-facing transformers itself.
 
 from .adaptive import AdaptiveResolutionMixin
 from .base import BasePreTabTransformer
-from .centers import center_identification_using_decision_tree
 from .exceptions import (
     ConfigWarning,
     DataWarning,
@@ -64,7 +63,6 @@ __all__ = [
     "PretabNotFittedError",
     "PretabWarning",
     "basis_to_knots",
-    "center_identification_using_decision_tree",
     "generate_internal_knots",
     "get_logger",
     "insufficient_samples_error",
