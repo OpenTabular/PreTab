@@ -24,6 +24,13 @@ class RollingStatsTransformer(BasePreTabTransformer):
     ``n_samples - window_size + 1`` output rows. Each requested statistic adds one
     column per input feature.
 
+    This is a **standalone time-series utility**. It intentionally changes the
+    row count and assumes the rows are ordered in time, so it does not satisfy
+    the row-count-preserving contract that :class:`~sklearn.compose.ColumnTransformer`
+    (and therefore :class:`~pretab.preprocessor.Preprocessor`) require. Apply it
+    directly to an ordered array rather than routing it through the preprocessing
+    pipeline.
+
     Examples
     --------
     >>> import numpy as np

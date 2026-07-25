@@ -27,6 +27,12 @@ class CyclicalTimeTransformer(BasePreTabTransformer):
 
     Each input feature therefore expands into two output columns.
 
+    This is a **standalone time-series utility**. Although it preserves the row
+    count, it takes a required per-feature ``period`` and constrains inputs to
+    ``[0, period]``, so it is not wired into :class:`~pretab.preprocessor.Preprocessor`
+    (which applies one method uniformly across columns). Apply it directly to the
+    relevant cyclical column instead.
+
     Examples
     --------
     >>> import numpy as np
