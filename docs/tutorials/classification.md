@@ -92,7 +92,7 @@ pre = Preprocessor(
     numerical_method="rbf",
     categorical_method="one-hot",
     task="classification",
-    use_target=True,
+    target_aware=True,
     output_dim=10,
 )
 
@@ -118,7 +118,7 @@ to `0.872`, and the `ROC AUC` jumps from `0.569` to `0.927`, a much better separ
 the two classes.
 
 ```{note}
-`use_target=True` lets supervised expansions (like RBF and PLE) use `y` during `fit` to
+`target_aware=True` lets supervised expansions (like RBF and PLE) use `y` during `fit` to
 place their basis functions where they best separate the classes, so always pass `y` when
 fitting.
 ```

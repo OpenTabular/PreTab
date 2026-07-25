@@ -30,6 +30,20 @@ class RBFExpansionTransformer(BaseCenterExpansion):
         Selector when `target_aware=True` (`"cart"` or `"lightgbm"`); spacing when
         `target_aware=False` (`"uniform"` or `"quantile"`).
 
+    adaptive : bool, default=False
+        If True (with `target_aware=True`), the per-feature number of centers may
+        vary within `[min_output_dim, max_output_dim]` instead of being fixed to
+        `output_dim`. Has no effect on the `quantile` / `uniform` paths.
+
+    min_output_dim : int or None, default=None
+        Lower bound on the per-feature number of centers in adaptive mode.
+
+    max_output_dim : int or None, default=None
+        Upper bound on the per-feature number of centers in adaptive mode.
+
+    random_state : int or None, default=None
+        Random state forwarded to the target-aware selector for reproducibility.
+
     Attributes
     ----------
     centers_ : list of ndarray
