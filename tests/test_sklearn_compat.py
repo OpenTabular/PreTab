@@ -86,28 +86,24 @@ NEAR_CONFORMANT = [
         RBFExpansionTransformer(),
         {
             "check_parameters_default_constructible": SENTINEL,
-            "check_requires_y_none": REQUIRES_Y_NONE,
         },
     ),
     (
         ReLUExpansionTransformer(),
         {
             "check_parameters_default_constructible": SENTINEL,
-            "check_requires_y_none": REQUIRES_Y_NONE,
         },
     ),
     (
         SigmoidExpansionTransformer(),
         {
             "check_parameters_default_constructible": SENTINEL,
-            "check_requires_y_none": REQUIRES_Y_NONE,
         },
     ),
     (
         TanhExpansionTransformer(),
         {
             "check_parameters_default_constructible": SENTINEL,
-            "check_requires_y_none": REQUIRES_Y_NONE,
         },
     ),
 ]

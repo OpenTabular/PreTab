@@ -7,6 +7,8 @@ names, and estimator tags -- is identical. ``BaseCenterExpansion`` holds that
 shared machinery so each concrete transformer only implements ``_expand_column``.
 """
 
+from typing import cast
+
 import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
@@ -29,9 +31,13 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     Centers are placed either from a target-aware location selector (when
     ``target_aware`` is True, which then requires ``y``) or from ``quantile`` /
-    ``uniform`` spacing (when ``target_aware`` is False). ``placement_strategy``
-    selects the mechanism: ``"cart"`` (default) or ``"lightgbm"`` when
-    target-aware, otherwise ``"uniform"`` or ``"quantile"``.
+    ``uniform`` spacing (when ``target_aware`` is False, the default).
+    ``placement_strategy`` selects the mechanism: ``"cart"`` or ``"lightgbm"``
+    when target-aware, otherwise ``"uniform"`` or ``"quantile"``. When left unset
+    it resolves to ``"cart"`` on the target-aware path and ``"quantile"``
+    otherwise. Defaulting to unsupervised placement lets these expansions fit
+    without a target; pass ``target_aware=True`` (with ``y``) to place centers
+    where they best separate it. (PLE, by contrast, is inherently target-aware.)
 
     Adaptive sizing (``adaptive=True``) only takes effect on the target-aware
     path: each feature's centers are clamped into
@@ -45,9 +51,9 @@ class BaseCenterExpansion(BasePreTabTransformer):
     def __init__(
         self,
         output_dim=UNSET,
-        target_aware: bool = True,
+        target_aware: bool = False,
         task: str = "regression",
-        placement_strategy: str = "cart",
+        placement_strategy=UNSET,
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
@@ -71,7 +77,8 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Place per-feature centers from a target-aware selector or quantile/uniform spacing."""
-        validate_placement(self.target_aware, self.placement_strategy)
+        placement_strategy = self._resolve_placement_strategy()
+        validate_placement(self.target_aware, placement_strategy)
         if self.task not in ("regression", "classification"):
             raise InvalidParamError(
                 f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}."
@@ -94,7 +101,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
             # optionally LightGBM): split points spaced out and ranked by impurity
             # / gain. Adaptive sizing clamps each feature into [min, max]; otherwise
             # each feature keeps exactly ``output_dim`` centers.
-            selector = self._build_selector()
+            selector = self._build_selector(placement_strategy)
             if self.adaptive:
                 min_centers, max_centers = self._resolve_output_bounds(
                     n_centers, min_req, max_req, floor=1
@@ -108,7 +115,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
                 )
                 for i in range(X.shape[1])
             ]
-        elif self.placement_strategy == "quantile":
+        elif placement_strategy == "quantile":
             centers_list = [
                 np.percentile(X[:, i], np.linspace(0, 100, n_centers))
                 for i in range(X.shape[1])
@@ -141,14 +148,25 @@ class BaseCenterExpansion(BasePreTabTransformer):
         """Number of output columns contributed by each input feature."""
         return [int(np.asarray(centers).shape[0]) for centers in self.centers_]
 
-    def _build_selector(self):
+    def _resolve_placement_strategy(self) -> str:
+        """Resolve ``placement_strategy``, defaulting by ``target_aware`` when unset.
+
+        Leaving ``placement_strategy`` unset selects ``"cart"`` on the target-aware
+        path and ``"quantile"`` on the unsupervised path, so ``target_aware`` alone
+        always yields a valid pairing.
+        """
+        if self.placement_strategy is not UNSET:
+            return cast(str, self.placement_strategy)
+        return "cart" if self.target_aware else "quantile"
+
+    def _build_selector(self, placement_strategy):
         """Construct the target-aware location selector named by ``placement_strategy``."""
-        if self.placement_strategy == "cart":
+        if placement_strategy == "cart":
             return CARTLocationSelector(random_state=self.random_state)
-        if self.placement_strategy == "lightgbm":
+        if placement_strategy == "lightgbm":
             return LightGBMLocationSelector(random_state=self.random_state)
         raise InvalidParamError(
-            f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {self.placement_strategy!r}."
+            f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {placement_strategy!r}."
         )
 
     def __sklearn_tags__(self):
