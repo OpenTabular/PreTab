@@ -70,6 +70,8 @@ class FourierFeatureTransformer(BasePreTabTransformer):
 
     _allow_nan = False
     _feature_suffix_value = "fourier"
+    _representation_family = "fourier"
+    _representation_component_kind = "frequency"
 
     def __init__(
         self,

@@ -126,6 +126,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
     (50, 9)
     """
 
+    _representation_component_kind = "basis"
+    _representation_supervision = "optional"
+    _representation_local_support = True
+
     def __init__(
         self,
         output_dim=UNSET,

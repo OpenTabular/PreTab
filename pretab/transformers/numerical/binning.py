@@ -5,13 +5,16 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.parameters import UNSET, AliasResolverMixin
+from ...core.representation import RepresentationSpecMixin
 from ...exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 
 _VALID_ENCODINGS = ("ordinal", "onehot", "soft")
 _VALID_STRATEGIES = ("uniform", "quantile")
 
 
-class NumericBinningTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
+class NumericBinningTransformer(
+    RepresentationSpecMixin, AliasResolverMixin, TransformerMixin, BaseEstimator
+):
     """Stateful binning transformer for numerical features.
 
     The bin edges are learned once in :meth:`fit` and reused at
@@ -74,6 +77,9 @@ class NumericBinningTransformer(AliasResolverMixin, TransformerMixin, BaseEstima
     """
 
     _param_aliases: ClassVar[dict[str, str]] = {}
+    _representation_family = "binning"
+    _representation_component_kind = "interval"
+    _representation_local_support = True
 
     def __init__(self, output_dim=UNSET, encode="ordinal", placement_strategy="uniform"):
         # An int yields learned bins; an array-like is used as fixed bin edges.

@@ -74,6 +74,7 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
     """
 
     _feature_suffix_value = "relu"
+    _representation_family = "relu"
 
     def __init__(
         self,

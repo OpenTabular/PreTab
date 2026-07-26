@@ -10,10 +10,16 @@ collects per-feature preprocessing / dimension / category metadata, and
 import numpy as np
 
 from ..core.logging import get_logger
+from ..core.representation import FeatureLineage
 
 logger = get_logger(__name__)
 
-__all__ = ["build_feature_info", "build_transformer_summary", "get_output_slices"]
+__all__ = [
+    "build_feature_info",
+    "build_feature_lineage",
+    "build_transformer_summary",
+    "get_output_slices",
+]
 
 
 def get_output_slices(column_transformer, X):
@@ -170,3 +176,101 @@ def build_transformer_summary(numerical_info, categorical_info, embedding_info):
         cats_s = "-" if cats is None else str(cats)
         lines.append(f"{feat:<{feat_w}}  {kind:<{kind_w}}  {pipe:<{pipe_w}}  {dim_s:>4}  {cats_s:>5}")
     return lines
+
+
+# Mapping from pipeline step name to (family, component) for representation-bearing
+# scikit-learn steps that do not expose ``get_representation_spec``.
+_STEP_FAMILY = {
+    "standardization": ("standardization", "raw"),
+    "scaler": ("standardization", "raw"),
+    "minmax": ("minmax", "raw"),
+    "robust": ("robust", "raw"),
+    "quantile": ("quantile", "raw"),
+    "polynomial": ("polynomial", "basis"),
+    "boxcox": ("box_cox", "raw"),
+    "yeojohnson": ("yeo_johnson", "raw"),
+    "onehot": ("onehot", "category"),
+    "pretrained": ("language_embedding", "embedding"),
+}
+
+
+def _resolve_block_representation(pipeline, columns):
+    """Return ``(family, component, uses_target, is_interaction)`` for a block.
+
+    The representation-bearing step is the last pipeline step exposing a
+    ``get_representation_spec`` (a PreTab transformer) or a known scikit-learn
+    step name; helper steps such as imputers and float casts are skipped.
+    """
+    steps = pipeline.steps if hasattr(pipeline, "steps") else [("_", pipeline)]
+    for step_name, transformer in reversed(steps):
+        if hasattr(transformer, "get_representation_spec"):
+            spec = transformer.get_representation_spec(input_features=list(columns))
+            return spec.family, spec.component_kind, spec.uses_target, spec.is_interaction
+        if step_name in _STEP_FAMILY:
+            family, component = _STEP_FAMILY[step_name]
+            return family, component, False, False
+    return "passthrough", "raw", False, False
+
+
+def _passthrough_source(columns, offset, feature_names_in):
+    """Resolve the source feature name for a passthrough / remainder column."""
+    column = columns[offset] if offset < len(columns) else columns[-1]
+    if isinstance(column, (int, np.integer)) and feature_names_in is not None:
+        return str(feature_names_in[column])
+    return str(column)
+
+
+def build_feature_lineage(column_transformer):
+    """Return per-output-column :class:`FeatureLineage` records.
+
+    Each record maps one output column of the fitted ColumnTransformer back to
+    its source feature(s), representation family, and component, covering 100%
+    of the transformed columns in ``get_feature_names_out`` order.
+    """
+    output_names = [str(name) for name in column_transformer.get_feature_names_out()]
+    output_indices = column_transformer.output_indices_
+    feature_names_in = getattr(column_transformer, "feature_names_in_", None)
+    records = []
+    for name, transformer, columns in column_transformer.transformers_:
+        span = output_indices.get(name)
+        if span is None:
+            continue
+        width = span.stop - span.start
+        if width == 0:
+            continue
+        if transformer == "passthrough" or name == "remainder":
+            for offset in range(width):
+                index = span.start + offset
+                records.append(
+                    FeatureLineage(
+                        output_feature=output_names[index],
+                        output_index=index,
+                        source_features=(_passthrough_source(columns, offset, feature_names_in),),
+                        family="passthrough",
+                        component="raw",
+                        component_index=offset,
+                        uses_target=False,
+                        is_interaction=False,
+                    )
+                )
+            continue
+        family, component, uses_target, is_interaction = _resolve_block_representation(
+            transformer, columns
+        )
+        source_features = tuple(str(column) for column in columns)
+        for offset in range(width):
+            index = span.start + offset
+            records.append(
+                FeatureLineage(
+                    output_feature=output_names[index],
+                    output_index=index,
+                    source_features=source_features,
+                    family=family,
+                    component=component,
+                    component_index=offset,
+                    uses_target=uses_target,
+                    is_interaction=is_interaction,
+                )
+            )
+    records.sort(key=lambda record: record.output_index)
+    return records

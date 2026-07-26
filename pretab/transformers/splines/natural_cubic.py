@@ -117,6 +117,9 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
     """
 
     _feature_suffix_value = "ncs"
+    _representation_family = "naturalspline"
+    _representation_supervision = "optional"
+    _representation_local_support = True
 
     def __init__(
         self,

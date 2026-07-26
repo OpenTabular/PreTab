@@ -2,8 +2,10 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.representation import RepresentationSpecMixin
 
-class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
+
+class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
     """Encode categorical features as continuous integer values.
 
     Each unique category within a feature is assigned an integer based on its
@@ -29,6 +31,9 @@ class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
     >>> transformer.fit_transform(X).shape
     (3, 2)
     """
+
+    _representation_family = "ordinal"
+    _representation_component_kind = "category"
 
     def fit(self, X, y=None):
         """Learn the mapping from categories to integers for each feature.

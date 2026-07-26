@@ -14,6 +14,7 @@ from sklearn.utils.validation import check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.parameters import UNSET, AliasResolverMixin
+from ...core.representation import RepresentationSpecMixin
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -22,7 +23,9 @@ from ...exceptions import (
 from ...placement.adapters import PLEPlacementAdapter
 
 
-class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator):
+class PLETransformer(
+    RepresentationSpecMixin, AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator
+):
     """Piecewise Linear Encoding (PLE) transformer for numerical features.
 
     Each feature is discretized by a target-aware location selector (``"cart"``
@@ -105,6 +108,10 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
     """
 
     _param_aliases: ClassVar[dict[str, str]] = {}
+    _representation_family = "piecewise_linear"
+    _representation_component_kind = "interval"
+    _representation_supervision = "supervised"
+    _representation_local_support = True
 
     def __init__(
         self,

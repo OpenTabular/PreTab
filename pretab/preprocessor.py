@@ -9,6 +9,7 @@ from .compose.factory import build_column_transformer
 from .compose.feature_detection import detect_column_types, to_dataframe
 from .compose.inspection import (
     build_feature_info,
+    build_feature_lineage,
     build_transformer_summary,
     get_output_slices,
 )
@@ -432,6 +433,22 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         check_is_fitted(self)
         return self.column_transformer_.get_feature_names_out(input_features)
+
+    def get_feature_lineage(self):
+        """Return per-output-column provenance for the fitted preprocessor.
+
+        Each :class:`~pretab.core.representation.FeatureLineage` record maps one
+        output column back to its source feature(s), representation family, and
+        component, covering 100% of the columns produced by
+        :meth:`get_feature_names_out` (and in the same order).
+
+        Returns
+        -------
+        lineage : list of FeatureLineage
+            One record per output column of the transformed array.
+        """
+        check_is_fitted(self)
+        return build_feature_lineage(self.column_transformer_)
 
     @property
     def total_output_dim_(self) -> int:

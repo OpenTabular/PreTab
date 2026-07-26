@@ -78,6 +78,8 @@ class RBFExpansionTransformer(BaseCenterExpansion):
     """
 
     _feature_suffix_value = "rbf"
+    _representation_family = "rbf"
+    _representation_local_support = True
 
     def __init__(
         self,

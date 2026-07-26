@@ -35,6 +35,8 @@ class BSplineTransformer(BaseSplineTransformer):
     (50, 9)
     """
 
+    _representation_family = "bspline"
+
     def __init__(
         self,
         output_dim=UNSET,

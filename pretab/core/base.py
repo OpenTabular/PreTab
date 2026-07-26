@@ -12,12 +12,15 @@ from sklearn.utils.validation import check_is_fitted
 
 from .adaptive import AdaptiveResolutionMixin
 from .parameters import AliasResolverMixin
+from .representation import RepresentationSpecMixin
 from .validation import validate_2d_allow_nan
 
 __all__ = ["BasePreTabTransformer"]
 
 
-class BasePreTabTransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator):
+class BasePreTabTransformer(
+    RepresentationSpecMixin, AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator
+):
     """Base class carrying the shared scikit-learn contract for PreTab transformers.
 
     Subclasses set ``_allow_nan`` / ``_requires_y`` / ``_feature_suffix_value`` as

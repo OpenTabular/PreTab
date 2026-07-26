@@ -113,6 +113,9 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
     """
 
     _feature_suffix_value = "cs"
+    _representation_family = "cubicspline"
+    _representation_supervision = "optional"
+    _representation_local_support = True
 
     def __init__(
         self,

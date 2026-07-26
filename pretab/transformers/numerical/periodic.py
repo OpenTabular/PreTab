@@ -59,11 +59,17 @@ class PeriodicEncodingTransformer(BasePreTabTransformer):
 
     _allow_nan = False
     _feature_suffix_value = "cyclic"
+    _representation_family = "periodic"
+    _representation_component_kind = "frequency"
 
     def __init__(self, period: int, harmonics: int = 1, include_original: bool = False):
         self.period = period
         self.harmonics = harmonics
         self.include_original = include_original
+
+    def _representation_periodic(self):
+        """Report periodicity with the configured period length."""
+        return True, float(self.period)
 
     def fit(self, X, y=None):
         X = self._validate(X, reset=True)

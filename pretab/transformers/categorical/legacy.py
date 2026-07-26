@@ -4,8 +4,10 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.representation import RepresentationSpecMixin
 
-class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
+
+class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
     """Convert ordinal-encoded features into a one-hot encoded representation.
 
     This is useful when features have already been ordinal-encoded and a one-hot
@@ -39,6 +41,9 @@ class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
     >>> transformer.fit_transform(X).shape
     (3, 5)
     """
+
+    _representation_family = "onehot"
+    _representation_component_kind = "category"
 
     def __init__(self):
         warnings.warn(

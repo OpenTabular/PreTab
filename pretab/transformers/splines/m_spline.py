@@ -37,6 +37,8 @@ class MSplineTransformer(BaseSplineTransformer):
     (50, 8)
     """
 
+    _representation_family = "mspline"
+
     def __init__(
         self,
         output_dim=UNSET,

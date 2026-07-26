@@ -78,6 +78,7 @@ class TanhExpansionTransformer(BaseCenterExpansion):
     """
 
     _feature_suffix_value = "tanh"
+    _representation_family = "tanh"
 
     def __init__(
         self,

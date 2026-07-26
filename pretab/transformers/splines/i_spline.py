@@ -39,6 +39,8 @@ class ISplineTransformer(BaseSplineTransformer):
     (50, 8)
     """
 
+    _representation_family = "ispline"
+
     def __init__(
         self,
         output_dim=UNSET,

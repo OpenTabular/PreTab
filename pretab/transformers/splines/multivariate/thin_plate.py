@@ -96,6 +96,8 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
     """
 
     _feature_suffix_value = "tps"
+    _representation_family = "thinplate"
+    _representation_scope = "multivariate"
 
     def __init__(
         self,

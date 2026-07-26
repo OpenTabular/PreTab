@@ -78,6 +78,7 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
     """
 
     _feature_suffix_value = "sigmoid"
+    _representation_family = "sigmoid"
 
     def __init__(
         self,

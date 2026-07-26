@@ -47,6 +47,8 @@ class RandomFourierFeaturesTransformer(BasePreTabTransformer):
 
     _allow_nan = False
     _feature_suffix_value = "rff"
+    _representation_family = "random_fourier"
+    _representation_scope = "multivariate"
 
     def __init__(self, n_components: int = 100, gamma: float = 1.0, random_state: int | None = None):
         self.n_components = n_components
@@ -120,6 +122,8 @@ class NystroemFeaturesTransformer(BasePreTabTransformer):
 
     _allow_nan = False
     _feature_suffix_value = "nystroem"
+    _representation_family = "nystroem"
+    _representation_scope = "multivariate"
 
     def __init__(
         self,

@@ -125,6 +125,8 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     """
 
     _feature_suffix_value = "ps"
+    _representation_family = "pspline"
+    _representation_local_support = True
 
     def __init__(
         self,

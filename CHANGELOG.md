@@ -20,6 +20,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Feat
 
+- **representation**: add typed `RepresentationSpec` and per-output-column `FeatureLineage` (exported from `pretab`); every transformer family exposes `get_representation_spec()` and `Preprocessor.get_feature_lineage()` maps each output column to its source feature(s), representation family, component, and target-usage flag
 - **transformers**: add `FourierFeatureTransformer` (deterministic sine/cosine feature map with `harmonic` / `log_spaced` / `random` frequencies), selectable as the `"fourier"` numerical method
 - **transformers**: add `RandomFourierFeaturesTransformer` and `NystroemFeaturesTransformer` — standalone multivariate kernel-approximation feature maps (`"rff"` / `"nystroem"`)
 - **binning**: make `NumericBinningTransformer` a stateful, multi-feature encoder with learned `bin_edges_` and `encode` (`ordinal` / `onehot` / `soft`) plus `placement_strategy` (`uniform` / `quantile`) options

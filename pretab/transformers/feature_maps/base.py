@@ -46,6 +46,9 @@ class BaseCenterExpansion(BasePreTabTransformer):
     centers, reproducing the non-adaptive behavior.
     """
 
+    _representation_component_kind = "center"
+    _representation_supervision = "optional"
+
     centers_: list
 
     def __init__(

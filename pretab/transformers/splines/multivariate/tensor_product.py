@@ -136,6 +136,10 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     36
     """
 
+    _representation_family = "tensorspline"
+    _representation_scope = "multivariate"
+    _representation_local_support = True
+
     def __init__(
         self,
         output_dim=UNSET,
