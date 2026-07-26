@@ -20,6 +20,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Feat
 
+- **supervised**: add a leakage-safe supervised contract — `requires_y` / `is_supervised` / fitted `uses_target_` on every transformer, a `LeakageWarning` when a target-aware transformer is fit on `(X, y)` outside a Pipeline / cross-validation context, a `CrossFittedTransformer` wrapper that produces out-of-fold training features (recording `cross_fitted` / `n_folds` in the spec), and a `RepresentationSearchCV` skeleton (all exported from `pretab`)
 - **representation**: add typed `RepresentationSpec` and per-output-column `FeatureLineage` (exported from `pretab`); every transformer family exposes `get_representation_spec()` and `Preprocessor.get_feature_lineage()` maps each output column to its source feature(s), representation family, component, and target-usage flag
 - **transformers**: add `FourierFeatureTransformer` (deterministic sine/cosine feature map with `harmonic` / `log_spaced` / `random` frequencies), selectable as the `"fourier"` numerical method
 - **transformers**: add `RandomFourierFeaturesTransformer` and `NystroemFeaturesTransformer` — standalone multivariate kernel-approximation feature maps (`"rff"` / `"nystroem"`)

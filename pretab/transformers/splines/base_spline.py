@@ -28,6 +28,7 @@ from ...core.knots import (
     uniform_knots,
 )
 from ...core.parameters import UNSET, validate_placement
+from ...core.supervised import warn_target_leakage
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -251,6 +252,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Determine per-feature knot vectors."""
+        warn_target_leakage(self, y)
         validate_placement(self.target_aware, self.placement_strategy)
         n_basis = self._resolve_param("output_dim", default=6)
         min_basis_req = self._resolve_param("min_output_dim", default=None)

@@ -14,6 +14,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
 from ...core.parameters import UNSET, validate_placement
+from ...core.supervised import warn_target_leakage
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -80,6 +81,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Place per-feature centers from a target-aware selector or quantile/uniform spacing."""
+        warn_target_leakage(self, y)
         placement_strategy = self._resolve_placement_strategy()
         validate_placement(self.target_aware, placement_strategy)
         if self.task not in ("regression", "classification"):

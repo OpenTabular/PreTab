@@ -20,6 +20,7 @@ __all__ = [
     "IncompatibleParamsError",
     "InsufficientSamplesError",
     "InvalidParamError",
+    "LeakageWarning",
     "OptionalDependencyError",
     "PretabConfigError",
     "PretabDataError",
@@ -42,6 +43,11 @@ class DataWarning(PretabWarning):
 
 class ConfigWarning(PretabWarning):
     """Configuration fallback or deprecation notice."""
+
+
+class LeakageWarning(PretabWarning):
+    """Potential target leakage: a supervised transformer fit outside a
+    cross-fitting / Pipeline / cross-validation context."""
 
 
 # --- Error hierarchy ---

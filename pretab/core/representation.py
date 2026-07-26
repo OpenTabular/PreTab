@@ -68,6 +68,11 @@ class RepresentationSpec:
         feature (or per landmark row for multivariate bases).
     dtype : str
         Output dtype of the transformed array.
+    cross_fitted : bool
+        Whether the representation was produced with out-of-fold cross-fitting
+        (see :class:`~pretab.core.supervised.CrossFittedTransformer`).
+    n_folds : int or None
+        Number of cross-fitting folds when ``cross_fitted`` is True.
     """
 
     family: str
@@ -87,6 +92,8 @@ class RepresentationSpec:
     location_kind: str | None
     locations: tuple[tuple[float, ...], ...] | None
     dtype: str = "float64"
+    cross_fitted: bool = False
+    n_folds: int | None = None
 
     def to_dict(self) -> dict:
         """Return a JSON-serializable dictionary representation."""
@@ -110,12 +117,15 @@ class RepresentationSpec:
                 None if self.locations is None else [list(group) for group in self.locations]
             ),
             "dtype": self.dtype,
+            "cross_fitted": self.cross_fitted,
+            "n_folds": self.n_folds,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "RepresentationSpec":
         """Reconstruct a ``RepresentationSpec`` from :meth:`to_dict` output."""
         locations = data.get("locations")
+        n_folds = data.get("n_folds")
         return cls(
             family=data["family"],
             component_kind=data["component_kind"],
@@ -138,6 +148,8 @@ class RepresentationSpec:
                 else tuple(tuple(float(v) for v in group) for group in locations)
             ),
             dtype=data.get("dtype", "float64"),
+            cross_fitted=bool(data.get("cross_fitted", False)),
+            n_folds=None if n_folds is None else int(n_folds),
         )
 
 
@@ -223,11 +235,42 @@ class RepresentationSpecMixin:
         ("landmarks_", "landmarks"),
     )
 
+    @property
+    def requires_y(self) -> bool:
+        """Whether this transformer mandates ``y`` at fit time.
+
+        ``True`` for inherently supervised representations (e.g. PLE); ``False``
+        for unsupervised and optionally target-aware families.
+        """
+        return self._representation_supervision == "supervised"
+
+    @property
+    def is_supervised(self) -> bool:
+        """Whether this transformer consumes ``y`` given its configuration.
+
+        ``True`` when the target is mandatory (:attr:`requires_y`) or when an
+        optionally target-aware family has ``target_aware=True``.
+        """
+        return self.requires_y or bool(getattr(self, "target_aware", False))
+
+    @property
+    def uses_target_(self) -> bool:
+        """Fitted flag: whether the last ``fit`` consumed the target ``y``.
+
+        Available only after ``fit``. Because target-aware placement requires
+        ``y`` at fit time (a supervised fit without ``y`` raises), a fitted
+        supervised transformer always reports ``True``.
+        """
+        check_is_fitted(self, "n_features_in_")
+        return self.is_supervised
+
     def _representation_uses_target(self) -> bool:
         """Return whether the fitted transformer consumed the target."""
-        if self._representation_supervision == "supervised":
-            return True
-        return bool(getattr(self, "target_aware", False))
+        return self.is_supervised
+
+    def _representation_cross_fitting(self) -> tuple[bool, int | None]:
+        """Return ``(cross_fitted, n_folds)`` for the representation."""
+        return False, None
 
     def _representation_degree(self) -> int | None:
         """Return the polynomial / spline degree, if the transformer has one."""
@@ -269,6 +312,7 @@ class RepresentationSpecMixin:
         output_features = tuple(str(name) for name in self.get_feature_names_out(list(inputs)))
         location_kind, locations = self._representation_locations()
         periodic, period = self._representation_periodic()
+        cross_fitted, n_folds = self._representation_cross_fitting()
         scope = self._representation_scope
         return RepresentationSpec(
             family=self._representation_family,
@@ -288,4 +332,6 @@ class RepresentationSpecMixin:
             location_kind=location_kind,
             locations=locations,
             dtype="float64",
+            cross_fitted=cross_fitted,
+            n_folds=n_folds,
         )

@@ -161,6 +161,16 @@ class TransformerSpec:
         """Whether the method always needs ``y`` for placement."""
         return self.target_usage == "required"
 
+    @property
+    def requires_y(self) -> bool:
+        """Alias of :attr:`requires_target` matching the transformer contract."""
+        return self.requires_target
+
+    @property
+    def is_supervised(self) -> bool:
+        """Whether the method can consume ``y`` (optional or required)."""
+        return self.target_aware_capable
+
 
 def _spec(name, cls, allowed_args=(), **kwargs):
     """Construct a :class:`TransformerSpec`, normalising ``allowed_args``."""

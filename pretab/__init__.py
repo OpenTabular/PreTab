@@ -1,13 +1,18 @@
 from ._version import __version__
+from .compose.search import RepresentationSearchCV
 from .core.logging import configure_logging, set_verbosity
 from .core.representation import FeatureLineage, RepresentationSpec
-from .exceptions import PretabWarning
+from .core.supervised import CrossFittedTransformer
+from .exceptions import LeakageWarning, PretabWarning
 from .preprocessor import Preprocessor
 
 __all__ = [
+    "CrossFittedTransformer",
     "FeatureLineage",
+    "LeakageWarning",
     "Preprocessor",
     "PretabWarning",
+    "RepresentationSearchCV",
     "RepresentationSpec",
     "__version__",
     "configure_logging",

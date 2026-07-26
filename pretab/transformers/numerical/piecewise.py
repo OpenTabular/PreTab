@@ -15,6 +15,7 @@ from sklearn.utils.validation import check_array, check_is_fitted
 from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.parameters import UNSET, AliasResolverMixin
 from ...core.representation import RepresentationSpecMixin
+from ...core.supervised import warn_target_leakage
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -160,6 +161,7 @@ class PLETransformer(
         self : PLETransformer
             The fitted transformer.
         """
+        warn_target_leakage(self, y)
         if y is None:
             raise IncompatibleParamsError(
                 "PLETransformer is always target-aware and requires y at fit time; got y=None."

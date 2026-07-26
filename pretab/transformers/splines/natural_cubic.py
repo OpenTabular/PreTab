@@ -3,6 +3,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.parameters import UNSET, validate_placement
+from ...core.supervised import warn_target_leakage
 from ...exceptions import InvalidParamError
 from ...placement.adapters import SplinePlacementAdapter
 from .mixins import SplineBasisMixin
@@ -166,6 +167,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         return np.hstack(basis)
 
     def fit(self, X, y=None):
+        warn_target_leakage(self, y)
         validate_placement(self.target_aware, self.placement_strategy)
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=6)
