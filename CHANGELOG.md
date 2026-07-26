@@ -11,7 +11,86 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ## Unreleased
 
-### Changes
+> **Note:** `0.1.0` is an internal development marker for the pre-1.0 restructure
+> line and **will not be published**. The next released version is **1.0.0** (a
+> deliberate major release due to the package restructure and breaking API
+> changes; `major_version_zero` will be flipped to `false` at that point). The
+> entries below are curated from the conventional commits since `v0.0.2` and are
+> the reconciliation source for the 1.0.0 roadmap.
+
+### Feat
+
+- update default output_dim
+- unsupervised feature-map default
+- wire custombin output_dim
+- unify knot / bins API
+- **pipeline**: make cubic and natural splines target-aware
+- **pipeline**: use selector and adaptive setting to splines
+- **pipeline**: accept preprocessing method name variations
+- **preprocessor**: expose total_output_dim_, output_dims_ attribute
+- **preprocessor**: add random_state, handle_missing parameters
+- **sklearn-compat**: enforce n_features consistency, fix mixin order/tags
+- **exceptions**: route all raises through typed exceptions
+- **logging**: add verbose level, route warnings
+- **adaptive**: unify adaptive/fixed output size across expansion families via AdaptiveResolutionMixin
+- **preprocessor**: rename constructor params to the canonical vocabulary and add adaptive parameter
+- **pipeline**: thread output_dim through registry and Preprocessor
+- **ple,binning**: rename count knob to output_dim and set total_output_dim_
+- **feature_maps**: rename count knob to output_dim
+- **splines**: invert output_dim to knots per family and expose n_knots_
+- **core**: make output_dim the canonical width param and add total_output_dim_
+- add include_bias and feature_index parity to thin-plate spline
+- add strategy/selector/task/include_bias parity to knot splines
+- add selector-aware spanning-knot placement to spline mixin
+- add spanning_knots primitive for full-range spline knots
+- accept n_basis alias in custom binning transformer
+- accept n_basis and use_target aliases in feature maps and ple
+- accept n_basis alias across spline transformers
+- add core params AliasResolverMixin and canonical vocabulary
+- add pretab.pipeline package with declarative registry
+- add transformers/encoders package
+- add core knot-placement primitives
+- add core center identification and BaseCenterExpansion
+- add core foundation with base, validation, logging, exceptions
+- export Preprocessor at package root
+- add bspline, mspline, ispline transformers with shared spline base
+- add target-aware knot selectors
+
+### Fix
+
+- **embeddings**: encode each text column separately
+- **categorical**: ignore unknown categories in one-hot
+- **onehot**: handle out-of-range codes
+- **feature_maps**: use a numerically stable sigmoid to avoid overflow
+- **pipeline**: make optional keyword arguments explicitly optional
+- **transformers**: generate default feature names when none are given
+- **transformers**: report the actual number of input features
+- **embeddings**: resolve language model in fit
+
+### Refactor
+
+- consistent param order
+- remove dead selection helpers
+- **ple**: use location selectors for thresholds
+- add shared resolve_locations helper
+- **feature_maps**: move strategy/task validation from __init__ to fit
+- **transformers**: drop utils, move BaseCenterExpansion to feature_maps
+- **preprocessor**: make it a compliant sklearn estimator
+- canonicalize pipeline kwargs to avoid deprecation warnings
+- point preprocessor at pretab.pipeline
+- turn pretab.utils into pipeline shims
+- export encoders and repoint internal imports
+- turn transformers/utils encoders into shims
+- add sklearn compliance to one-hot transformer
+- put lag and rolling-stats transformers on core.base
+- put cyclic transformer on core.base
+- delegate spline knot math to core.knots
+- reduce feature-map transformers to kernel hooks
+- retarget spline transformers onto core base
+- vectorize ple encoding and remove eval
+- source package version dynamically from metadata
+
+### Build & Tooling
 
 - Migrated packaging from setuptools to Poetry (`pyproject.toml`, `poetry.lock`); removed `setup.py`, `requirements.txt`, and `MANIFEST.in`
 - Dynamic versioning: the version is now sourced from `pyproject.toml` via `importlib.metadata`; removed the hardcoded `__version__.py`

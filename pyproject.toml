@@ -1,6 +1,6 @@
 [project]
 name = "pretab"
-version = "0.0.1"
+version = "0.1.0"
 description = "A scikit-learn compatible preprocessing library for tabular data with rich encoders, splines, and neural basis expansions."
 authors = [
   { name = "Anton Thielmann" },
