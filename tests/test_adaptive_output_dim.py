@@ -9,10 +9,8 @@ columns a single input feature expands to:
 * **Adaptive mode** (``adaptive=True``) -- width must be data-driven inside
   ``[min_output_dim, max_output_dim]`` for the adaptive-capable families.
 
-They also cover the categorical ``custombin`` path: the ``Preprocessor`` now
-forwards ``output_dim`` to it, so a numeric-categorical column bins end to end,
-while string categoricals raise a clear ``PretabDataError`` (``custombin`` is
-numeric-only).
+``custombin`` is numeric-only: it is selectable as a numerical method (and
+forwards ``output_dim``), while selecting it as a categorical method is rejected.
 """
 
 from typing import cast
@@ -21,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab.exceptions import PretabDataError
+from pretab.exceptions import InvalidParamError
 from pretab.preprocessor import Preprocessor
 from pretab.transformers.splines.b_spline import BSplineTransformer
 from pretab.transformers.splines.i_spline import ISplineTransformer
@@ -318,21 +316,12 @@ def test_fixed_only_spline_ignores_adaptive(data, method):
 
 
 # --------------------------------------------------------------------------- #
-# Categorical custombin: numeric-only, wired through the Preprocessor.
+# Categorical custombin: numeric-only, no longer selectable on the categorical side.
 # --------------------------------------------------------------------------- #
-def test_categorical_custombin_via_preprocessor():
-    """A numeric, low-cardinality column routes to custombin and bins end to end."""
+def test_categorical_custombin_no_longer_selectable():
+    """custombin is numeric-only: selecting it as a categorical method is rejected."""
     # Integer codes with few unique values -> detected as categorical (ratio < cat_cutoff).
     Xcat = pd.DataFrame({"g": np.array([0, 1, 2, 3, 4, 5] * 50)})
     pre = Preprocessor(numerical_method="none", categorical_method="custombin", output_dim=4)
-    out = pre.fit_transform(Xcat, return_array=True)
-    # custombin always emits a single ordinal column.
-    assert out.shape == (Xcat.shape[0], 1)
-
-
-def test_categorical_custombin_rejects_string_input():
-    """custombin is numeric-only: string categoricals raise a clear error."""
-    Xcat = pd.DataFrame({"g": np.array(["a", "b", "c"] * 100)})
-    pre = Preprocessor(numerical_method="none", categorical_method="custombin", output_dim=4)
-    with pytest.raises(PretabDataError):
+    with pytest.raises(InvalidParamError):
         pre.fit_transform(Xcat)

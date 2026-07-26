@@ -190,10 +190,10 @@ def test_ple_nan_input_is_value_error(xy):
         PLETransformer(output_dim=5).fit(X_nan, y)
 
 
-def test_thinplate_multivariate_is_data_error():
-    X = np.random.RandomState(1).rand(30, 2)
-    with pytest.raises(PretabDataError, match="univariate"):
-        ThinPlateSplineTransformer(output_dim=3).fit(X)
+def test_thinplate_insufficient_samples_is_data_error():
+    X = np.random.RandomState(1).rand(6, 2)
+    with pytest.raises(InsufficientSamplesError, match="needs at least"):
+        ThinPlateSplineTransformer(n_components=10).fit(X)
 
 
 # --------------------------------------------------------------------------- #

@@ -123,7 +123,9 @@ DEFERRED = [
         ThinPlateSplineTransformer(),
         id="ThinPlateSplineTransformer",
         marks=pytest.mark.xfail(
-            reason="Univariate-only (single input feature); incompatible with the multi-feature transformer checks.",
+            reason="Landmark low-rank basis needs at least n_components + d + 1 "
+            "samples; the generic small-sample estimator checks fall below that "
+            "threshold and fail at fit.",
             strict=True,
         ),
     ),
@@ -131,8 +133,9 @@ DEFERRED = [
         NumericBinningTransformer(),
         id="NumericBinningTransformer",
         marks=pytest.mark.xfail(
-            reason="Single-column ordinal binner; expects (n_samples, 1) input, "
-            "incompatible with generic multi-feature checks.",
+            reason="Requires an explicit `output_dim` bin count (not default-"
+            "constructible into a fittable state), so the generic estimator "
+            "checks fail at fit.",
             strict=True,
         ),
     ),

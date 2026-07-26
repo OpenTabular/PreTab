@@ -133,9 +133,9 @@ def test_optional_dependency_methods_fail_cleanly(name, spec):
 
 def test_registry_covers_numerical_and_categorical_names():
     assert numerical_method_names() | categorical_method_names() == set(TRANSFORMER_REGISTRY)
-    # ``custombin`` and ``none`` are the only dual-kind methods.
+    # ``none`` (passthrough) is the only remaining dual-kind method.
     dual = numerical_method_names() & categorical_method_names()
-    assert dual == {"custombin", "none"}
+    assert dual == {"none"}
 
 
 # --------------------------------------------------------------------------- #

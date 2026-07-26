@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from pretab.exceptions import InsufficientSamplesError, PretabDataError
+from pretab.exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 from pretab.transformers import NumericBinningTransformer
 
 
@@ -13,10 +13,11 @@ def test_custom_bin_transformer_basic_functionality(bins):
     transformer = NumericBinningTransformer(output_dim=bins)
     transformer.fit(X)
 
-    # Ensure fitted attribute exists
+    # Ensure fitted attributes exist
     assert hasattr(transformer, "n_features_in_")
     assert transformer.n_features_in_ == 1
     assert transformer.total_output_dim_ == 1
+    assert len(transformer.bin_edges_) == 1
 
     # Transform
     Xt = transformer.transform(X)
@@ -50,30 +51,119 @@ def test_custom_bin_transformer_input_types(bins, input_type):
     assert Xt.shape == (4, 1)
 
 
+def test_custom_bin_transformer_is_stateful():
+    """Edges are learned at fit time and reused on shifted transform data."""
+    X_train = np.linspace(0.0, 1.0, 20).reshape(-1, 1)
+    transformer = NumericBinningTransformer(output_dim=4).fit(X_train)
+    learned = transformer.bin_edges_[0].copy()
+
+    # Values outside the fitted range are clamped into the outer bins, and the
+    # learned edges do not change when transforming different data.
+    X_test = np.array([[-5.0], [0.25], [0.75], [5.0]])
+    Xt = transformer.transform(X_test)
+    np.testing.assert_array_equal(transformer.bin_edges_[0], learned)
+    assert Xt[0, 0] == 0  # below the fitted minimum -> first bin
+    assert Xt[-1, 0] == transformer.n_bins_[0] - 1  # above the maximum -> last bin
+
+
+def test_custom_bin_transformer_quantile_placement():
+    """Quantile placement puts edges on the empirical distribution."""
+    rng = np.random.default_rng(0)
+    X = rng.exponential(1.0, size=200).reshape(-1, 1)
+    uniform = NumericBinningTransformer(output_dim=4, placement_strategy="uniform").fit(X)
+    quantile = NumericBinningTransformer(output_dim=4, placement_strategy="quantile").fit(X)
+
+    # The two strategies must produce different edges for skewed data.
+    assert not np.allclose(uniform.bin_edges_[0], quantile.bin_edges_[0])
+
+    # Quantile bins are all occupied for a well-spread sample.
+    counts = np.bincount(quantile.transform(X).ravel(), minlength=4)
+    assert counts.min() > 0
+
+
+def test_custom_bin_transformer_onehot_encoding():
+    X = np.linspace(0.0, 1.0, 20).reshape(-1, 1)
+    transformer = NumericBinningTransformer(output_dim=4, encode="onehot").fit(X)
+    assert transformer.total_output_dim_ == 4
+
+    Xt = transformer.transform(X)
+    assert Xt.shape == (20, 4)
+    # Exactly one active bin per row.
+    np.testing.assert_array_equal(Xt.sum(axis=1), np.ones(20))
+    assert set(np.unique(Xt)) <= {0.0, 1.0}
+
+
+def test_custom_bin_transformer_soft_encoding():
+    X = np.linspace(0.0, 1.0, 20).reshape(-1, 1)
+    transformer = NumericBinningTransformer(output_dim=5, encode="soft").fit(X)
+    assert transformer.total_output_dim_ == 5
+
+    Xt = transformer.transform(X)
+    assert Xt.shape == (20, 5)
+    # Weights are non-negative and sum to 1 for every row.
+    assert Xt.min() >= 0.0
+    np.testing.assert_allclose(Xt.sum(axis=1), np.ones(20))
+
+
+def test_custom_bin_transformer_multifeature():
+    X = np.column_stack([np.linspace(0.0, 1.0, 30), np.linspace(-5.0, 5.0, 30)])
+    transformer = NumericBinningTransformer(output_dim=3, encode="onehot").fit(X)
+    assert transformer.n_features_in_ == 2
+    assert transformer.n_bins_ == [3, 3]
+    assert transformer.total_output_dim_ == 6
+    assert transformer.transform(X).shape == (30, 6)
+
+
+def test_custom_bin_transformer_invalid_encode():
+    X = np.linspace(0.0, 1.0, 10).reshape(-1, 1)
+    with pytest.raises(InvalidParamError):
+        NumericBinningTransformer(output_dim=3, encode="bogus").fit(X)
+
+
+def test_custom_bin_transformer_invalid_placement():
+    X = np.linspace(0.0, 1.0, 10).reshape(-1, 1)
+    with pytest.raises(InvalidParamError):
+        NumericBinningTransformer(output_dim=3, placement_strategy="cart").fit(X)
+
+
+def test_custom_bin_transformer_missing_output_dim():
+    X = np.linspace(0.0, 1.0, 10).reshape(-1, 1)
+    with pytest.raises(InvalidParamError):
+        NumericBinningTransformer().fit(X)
+
+
 def test_custom_bin_transformer_invalid_input():
     transformer = NumericBinningTransformer(output_dim=3)
+    transformer.fit(np.linspace(0.0, 1.0, 10).reshape(-1, 1))
     with pytest.raises(PretabDataError):
         transformer.transform("invalid_input")
 
 
-def test_custom_bin_transformer_raises_on_invalid_shape():
+def test_custom_bin_transformer_raises_on_insufficient_samples():
     transformer = NumericBinningTransformer(output_dim=3)
-    X = np.array([[0.1]])  # This will become scalar after squeeze()
+    X = np.array([[0.1]])  # Not enough observations to bin.
 
     with pytest.raises(ValueError, match=r"Input must have more than 2 observations."):
-        transformer.transform(X)
+        transformer.fit(X)
 
 
-def test_custom_bin_transformer_invalid_bins_type():
+def test_custom_bin_transformer_insufficient_samples_via_fit_transform():
     with pytest.raises(InsufficientSamplesError):
         NumericBinningTransformer(output_dim="not_valid").fit_transform(np.array([[0.1]]))
 
 
-def test_custom_bin_transformer_feature_names_out():
+def test_custom_bin_transformer_feature_names_out_ordinal():
     transformer = NumericBinningTransformer(output_dim=3)
-    transformer.fit(np.array([[0.2]]))
+    transformer.fit(np.linspace(0.0, 1.0, 10).reshape(-1, 1))
     names = transformer.get_feature_names_out(["feature1"])
-    assert names == ["feature1"]
+    assert list(names) == ["feature1"]
+
+
+def test_custom_bin_transformer_feature_names_out_onehot():
+    transformer = NumericBinningTransformer(output_dim=3, encode="onehot")
+    transformer.fit(np.linspace(0.0, 1.0, 10).reshape(-1, 1))
+    names = transformer.get_feature_names_out(["feature1"])
+    assert list(names) == ["feature1_bin0", "feature1_bin1", "feature1_bin2"]
 
 
 def test_custom_bin_transformer_feature_names_out_raises():

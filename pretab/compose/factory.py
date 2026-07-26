@@ -15,7 +15,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
-from ..core.parameters import UNSET
 from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
 from ..transformers.encoders.floats import ToFloatTransformer
 from .config import PreprocessorConfig
@@ -178,7 +177,6 @@ def get_categorical_transformer_steps(
     imputer_strategy: str = "most_frequent",
     imputer_kwargs: dict | None = None,
     add_missing_indicator: bool = False,
-    output_dim=UNSET,
     **kwargs,
 ):
     """Return the ordered ``(name, transformer)`` steps for a categorical ``method``."""
@@ -214,11 +212,6 @@ def get_categorical_transformer_steps(
         steps.append(("pretrained", cls()))
     elif method == "none":
         steps.append(("none", cls()))
-    elif method == "custombin":
-        bin_kwargs = dict(kwargs)
-        if output_dim is not UNSET:
-            bin_kwargs.setdefault("output_dim", output_dim)
-        steps.append(("custombin", cls(**bin_kwargs)))
     elif method == "onehot_from_ordinal":
         steps.append(("onehot_from_ordinal", cls()))
 
@@ -273,7 +266,6 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             add_imputer=add_imputer,
             imputer_strategy=config.categorical_imputation or "most_frequent",
             add_missing_indicator=config.add_missing_indicator,
-            output_dim=config.output_dim,
         )
     return Pipeline(steps)
 

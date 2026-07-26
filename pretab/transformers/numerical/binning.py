@@ -1,77 +1,141 @@
 from typing import ClassVar
 
 import numpy as np
-import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_is_fitted
 
 from ...core.parameters import UNSET, AliasResolverMixin
 from ...exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 
+_VALID_ENCODINGS = ("ordinal", "onehot", "soft")
+_VALID_STRATEGIES = ("uniform", "quantile")
+
 
 class NumericBinningTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
-    """
-    Custom binning transformer for one-dimensional numerical features.
+    """Stateful binning transformer for numerical features.
 
-    This transformer bins continuous values into discrete intervals, using either a fixed number of equal-width bins
-    or a user-provided array of bin edges. It is compatible with scikit-learn pipelines.
+    The bin edges are learned once in :meth:`fit` and reused at
+    :meth:`transform` time, so the discretization never leaks information from
+    the data being transformed. Edges are placed with equal width
+    (``placement_strategy="uniform"``) or on empirical quantiles
+    (``placement_strategy="quantile"``); an explicit array of edges can also be
+    passed through ``output_dim``. Each feature is binned independently.
 
     Parameters
     ----------
     output_dim : int or array-like
-        If int, defines the number of equal-width bins. If array-like, defines
-        the bin edges to use directly. Note that ``output_dim`` here is the
-        number of *bins*, not the number of output columns: this transformer
-        always emits a single ordinal column of integer bin indices. The bin
-        count only becomes an output width after a subsequent one-hot encoding.
+        If an int, the number of bins to place from the fitted data range /
+        quantiles. If array-like, the bin edges to use directly
+        (``placement_strategy`` is then ignored). ``output_dim`` is the number of
+        *bins*, not the number of output columns: with ``encode="ordinal"`` each
+        feature emits a single column, whereas ``encode="onehot"`` /
+        ``encode="soft"`` emit one column per bin.
+    encode : {"ordinal", "onehot", "soft"}, default="ordinal"
+        How to represent the bin assignment:
+
+        * ``"ordinal"`` -- a single integer column of bin indices per feature.
+        * ``"onehot"`` -- a 0/1 indicator column per bin.
+        * ``"soft"`` -- triangular membership to the two nearest bin centers;
+          the per-row weights are non-negative and sum to 1 across the bins.
+    placement_strategy : {"uniform", "quantile"}, default="uniform"
+        How to place the learned bin edges when ``output_dim`` is an int:
+        equal-width (``"uniform"``) or equal-frequency (``"quantile"``). Ignored
+        when ``output_dim`` is an explicit array of edges.
 
     Attributes
     ----------
     n_features_in_ : int
-        The number of input features seen during ``fit`` (expected to be 1).
-
+        The number of input features seen during :meth:`fit`.
+    bin_edges_ : list of ndarray
+        The sorted, de-duplicated bin edges learned per feature.
+    n_bins_ : list of int
+        The number of bins per feature (``len(edges) - 1``).
     total_output_dim_ : int
-        Total number of output columns (fitted). Always ``1`` because the output
-        is a single ordinal column.
+        Total number of output columns. Equal to ``n_features_in_`` for
+        ``encode="ordinal"``; otherwise the sum of ``n_bins_``.
 
     Notes
     -----
-    This transformer operates on a single feature of shape ``(n_samples, 1)``. When
-    ``output_dim`` is an integer, equal-width bin edges are computed from the data
-    range; when it is an array-like, the provided edges are used directly. The
-    output contains integer bin indices in a single column, so its width is ``1``
-    regardless of ``output_dim`` -- this is a documented exception to the
-    exact-width contract that the fixed-basis families follow.
-
-    The input must be numeric: binning is performed with :func:`pandas.cut`, so
-    string / categorical data cannot be processed and raises a
+    The input must be numeric: string / categorical data raises a
     :class:`~pretab.exceptions.PretabDataError`. Encode such columns with a
-    categorical method (e.g. ``"int"`` or ``"one-hot"``) before binning.
+    categorical method (e.g. ``"int"`` or ``"one-hot"``) before binning. Values
+    seen at transform time that fall outside the fitted range are clamped into
+    the outer bins.
 
     Examples
     --------
     >>> import numpy as np
     >>> from pretab.transformers import NumericBinningTransformer
     >>> X = np.linspace(0, 1, 10).reshape(-1, 1)
-    >>> transformer = NumericBinningTransformer(output_dim=4)
-    >>> transformer.fit_transform(X).shape
+    >>> NumericBinningTransformer(output_dim=4).fit_transform(X).shape
     (10, 1)
+    >>> NumericBinningTransformer(output_dim=4, encode="onehot").fit_transform(X).shape
+    (10, 4)
     """
 
     _param_aliases: ClassVar[dict[str, str]] = {}
 
-    def __init__(self, output_dim=UNSET):
-        # An int yields equal-width bins; an array-like is used as bin edges.
+    def __init__(self, output_dim=UNSET, encode="ordinal", placement_strategy="uniform"):
+        # An int yields learned bins; an array-like is used as fixed bin edges.
         self.output_dim = output_dim
+        self.encode = encode
+        self.placement_strategy = placement_strategy
+
+    def _check_array(self, X, *, reset):
+        """Validate ``X`` is a 2D numeric array and (re)set the feature count."""
+        X = np.asarray(X)
+        if X.ndim != 2:
+            raise PretabDataError("Input must be a 2D array of shape (n_samples, n_features).")
+        if not np.issubdtype(X.dtype, np.number):
+            try:
+                X = X.astype(np.float64)
+            except (ValueError, TypeError) as exc:
+                raise PretabDataError(
+                    "NumericBinningTransformer requires numeric input: it bins continuous "
+                    "values into intervals and cannot process string/categorical data. "
+                    "Encode string columns with a categorical method (e.g. 'int' or "
+                    "'one-hot') before binning."
+                ) from exc
+        else:
+            X = X.astype(np.float64, copy=False)
+        if reset:
+            self.n_features_in_ = X.shape[1]
+        elif X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"Input has {X.shape[1]} features, but NumericBinningTransformer "
+                f"was fitted with {self.n_features_in_}."
+            )
+        return X
+
+    def _resolve_edges(self, column, bins_spec):
+        """Return the sorted, de-duplicated bin edges for a single feature."""
+        if isinstance(bins_spec, (int, np.integer)):
+            n_bins = int(bins_spec)
+            if n_bins < 1:
+                raise InvalidParamError("output_dim must be a positive integer bin count.")
+            lo = float(np.min(column))
+            hi = float(np.max(column))
+            if self.placement_strategy == "uniform":
+                edges = np.linspace(lo, hi, n_bins + 1)
+            else:  # quantile
+                edges = np.quantile(column, np.linspace(0.0, 1.0, n_bins + 1))
+        else:
+            edges = np.asarray(bins_spec, dtype=np.float64).ravel()
+            if edges.size < 2:
+                raise InvalidParamError("Explicit bin edges must contain at least two values.")
+        edges = np.unique(edges)  # sorted + de-duplicated
+        if edges.size < 2:
+            # Constant feature (or fully-tied quantiles): fall back to one bin.
+            edges = np.array([edges[0], edges[0] + 1.0])
+        return edges
 
     def fit(self, X, y=None):
-        """
-        Fit the transformer on the data.
+        """Learn the per-feature bin edges.
 
         Parameters
         ----------
-        X : array-like of shape (n_samples, 1)
+        X : array-like of shape (n_samples, n_features)
             Input data.
-
         y : Ignored
             Not used, present here for API consistency by convention.
 
@@ -80,64 +144,78 @@ class NumericBinningTransformer(AliasResolverMixin, TransformerMixin, BaseEstima
         self : object
             Fitted transformer.
         """
-        # Fit doesn't need to do anything as we are directly using provided bins
-        X = np.asarray(X)
-        self.n_features_in_ = X.shape[1] if X.ndim > 1 else 1
-        self.total_output_dim_ = 1
-        return self
-
-    def transform(self, X):
-        """
-        Transform the data using the specified binning strategy.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, 1)
-            Input data to transform.
-
-        Returns
-        -------
-        X_binned : ndarray of shape (n_samples, 1)
-            Binned data with integer bin indices.
-        """
-
-        X = np.asarray(X)  # Ensures squeeze works and consistent input
-        if X.ndim != 2 or X.shape[1] != 1:
-            raise PretabDataError("Input must be a 2D array with shape (n_samples, 1).")
-
+        X = self._check_array(X, reset=True)
         if X.shape[0] <= 2:
             raise InsufficientSamplesError("Input must have more than 2 observations.")
-
-        if not np.issubdtype(X.dtype, np.number):
-            try:
-                X = X.astype(np.float64)
-            except (ValueError, TypeError) as exc:
-                raise PretabDataError(
-                    "NumericBinningTransformer requires numeric input: it bins continuous "
-                    "values with pandas.cut and cannot process string/categorical "
-                    "data. Encode string columns with a categorical method (e.g. "
-                    "'int' or 'one-hot') before binning."
-                ) from exc
+        if self.encode not in _VALID_ENCODINGS:
+            raise InvalidParamError(f"encode must be one of {_VALID_ENCODINGS}; got {self.encode!r}.")
+        if self.placement_strategy not in _VALID_STRATEGIES:
+            raise InvalidParamError(
+                f"placement_strategy must be one of {_VALID_STRATEGIES}; got {self.placement_strategy!r}."
+            )
 
         bins_spec = self._resolve_param("output_dim", default=UNSET)
         if bins_spec is UNSET:
             raise InvalidParamError("NumericBinningTransformer requires 'output_dim'.")
 
-        if isinstance(bins_spec, int):
-            # Calculate equal width bins based on the range of the data and number of bins
-            _, bins = pd.cut(X.squeeze(), bins=bins_spec, retbins=True)
-        else:
-            # Use predefined bins
-            bins = bins_spec
+        self.bin_edges_ = [self._resolve_edges(X[:, j], bins_spec) for j in range(X.shape[1])]
+        self.n_bins_ = [edges.size - 1 for edges in self.bin_edges_]
+        self.total_output_dim_ = self.n_features_in_ if self.encode == "ordinal" else int(sum(self.n_bins_))
+        return self
 
-        # Apply the bins to the data
-        binned_data = pd.cut(  # type: ignore
-            X.squeeze(),
-            bins=np.sort(np.unique(bins)),  # type: ignore
-            labels=False,
-            include_lowest=True,
-        )
-        return np.expand_dims(np.array(binned_data), 1)
+    @staticmethod
+    def _bin_indices(column, edges):
+        """Assign each value to a bin using ``(a, b]`` intervals with a closed left edge."""
+        idx = np.searchsorted(edges, column, side="left") - 1
+        return np.clip(idx, 0, edges.size - 2).astype(int)
+
+    @staticmethod
+    def _soft_membership(column, edges):
+        """Return triangular membership weights to the two nearest bin centers."""
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        n_bins = centers.size
+        col = np.clip(column, centers[0], centers[-1])
+        weights = np.zeros((col.size, n_bins), dtype=np.float64)
+        if n_bins == 1:
+            weights[:, 0] = 1.0
+            return weights
+        right = np.clip(np.searchsorted(centers, col, side="left"), 1, n_bins - 1)
+        left = right - 1
+        span = centers[right] - centers[left]
+        frac = np.where(span > 0, (col - centers[left]) / span, 0.0)
+        rows = np.arange(col.size)
+        weights[rows, left] = 1.0 - frac
+        weights[rows, right] += frac
+        return weights
+
+    def transform(self, X):
+        """Bin the data using the edges learned during :meth:`fit`.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Input data to transform.
+
+        Returns
+        -------
+        X_binned : ndarray of shape (n_samples, total_output_dim_)
+            The encoded bin assignments.
+        """
+        check_is_fitted(self, "bin_edges_")
+        X = self._check_array(X, reset=False)
+        blocks = []
+        for j in range(X.shape[1]):
+            edges = self.bin_edges_[j]
+            n_bins = self.n_bins_[j]
+            if self.encode == "ordinal":
+                blocks.append(self._bin_indices(X[:, j], edges).reshape(-1, 1))
+            elif self.encode == "onehot":
+                onehot = np.zeros((X.shape[0], n_bins), dtype=np.float64)
+                onehot[np.arange(X.shape[0]), self._bin_indices(X[:, j], edges)] = 1.0
+                blocks.append(onehot)
+            else:  # soft
+                blocks.append(self._soft_membership(X[:, j], edges))
+        return np.hstack(blocks)
 
     def get_feature_names_out(self, input_features=None):
         """Return the names of the transformed features.
@@ -149,9 +227,16 @@ class NumericBinningTransformer(AliasResolverMixin, TransformerMixin, BaseEstima
 
         Returns
         -------
-        input_features : ndarray of shape (n_features,)
-            The names of the output features after transformation.
+        feature_names : list of str
+            One name per input feature for ``encode="ordinal"``; otherwise one
+            ``"{feature}_bin{k}"`` name per bin.
         """
         if input_features is None:
             raise InvalidParamError("input_features must be specified")
-        return input_features
+        if self.encode == "ordinal":
+            return list(input_features)
+        check_is_fitted(self, "n_bins_")
+        names = []
+        for feature, n_bins in zip(input_features, self.n_bins_, strict=False):
+            names.extend(f"{feature}_bin{k}" for k in range(n_bins))
+        return names

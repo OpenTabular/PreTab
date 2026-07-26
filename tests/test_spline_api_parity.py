@@ -110,8 +110,8 @@ def test_tensor_include_bias_widens_interaction(X_uniform):
 
 def test_thinplate_include_bias_adds_one_column():
     X = np.linspace(0, 1, 40).reshape(-1, 1)
-    no_bias = ThinPlateSplineTransformer(output_dim=6).fit_transform(X)
-    with_bias = ThinPlateSplineTransformer(output_dim=6, include_bias=True).fit_transform(X)
+    no_bias = ThinPlateSplineTransformer(n_components=6, random_state=0).fit_transform(X)
+    with_bias = ThinPlateSplineTransformer(n_components=6, include_bias=True, random_state=0).fit_transform(X)
     assert with_bias.shape[1] == no_bias.shape[1] + 1
     assert np.allclose(with_bias[:, 0], 1.0)
 
@@ -123,7 +123,7 @@ def test_thinplate_include_bias_adds_one_column():
         (NaturalCubicSplineTransformer, {"degree", "target_aware", "placement_strategy", "task"}),
         (PSplineTransformer, {"placement_strategy", "include_bias"}),
         (TensorProductSplineTransformer, {"placement_strategy", "include_bias"}),
-        (ThinPlateSplineTransformer, {"include_bias"}),
+        (ThinPlateSplineTransformer, {"n_components", "landmark_strategy", "rank_strategy", "include_bias"}),
     ],
 )
 def test_new_params_exposed_in_get_params(cls, expected):
@@ -141,7 +141,7 @@ def test_tensor_penalty_matrix_signature_parity():
 
 def test_thinplate_penalty_matrix_accepts_feature_index():
     X = np.linspace(0, 1, 40).reshape(-1, 1)
-    transformer = ThinPlateSplineTransformer(output_dim=6, include_bias=True).fit(X)
+    transformer = ThinPlateSplineTransformer(n_components=6, include_bias=True, random_state=0).fit(X)
     P = transformer.get_penalty_matrix(feature_index=0)
     assert P.shape == (7, 7)
     assert np.allclose(P[0, :], 0.0) and np.allclose(P[:, 0], 0.0)

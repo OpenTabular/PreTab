@@ -11,7 +11,7 @@ generated feature names, and the input-range guard.
 import numpy as np
 import pytest
 
-from pretab.exceptions import PretabDataError
+from pretab.exceptions import InvalidParamError, PretabDataError
 from pretab.transformers import PeriodicEncodingTransformer
 
 
@@ -42,3 +42,33 @@ def test_cyclic_feature_names():
     X = np.array([[0], [6], [12], [18]])
     transformer = PeriodicEncodingTransformer(period=24).fit(X)
     np.testing.assert_array_equal(transformer.get_feature_names_out(["hour"]), ["hour_cyclic0", "hour_cyclic1"])
+
+
+def test_cyclic_harmonics_expand_columns():
+    X = np.array([[0], [6], [12], [18]])
+    transformer = PeriodicEncodingTransformer(period=24, harmonics=3).fit(X)
+    out = transformer.transform(X)
+    # 3 harmonic pairs -> 6 columns; layout is (sin_h, cos_h) in ascending order.
+    assert out.shape == (4, 6)
+    assert transformer.total_output_dim_ == 6
+    for h in range(1, 4):
+        angle = 2 * np.pi * h * X.ravel() / 24
+        np.testing.assert_allclose(out[:, 2 * (h - 1)], np.sin(angle), atol=1e-12)
+        np.testing.assert_allclose(out[:, 2 * (h - 1) + 1], np.cos(angle), atol=1e-12)
+
+
+def test_cyclic_include_original_prepends_raw_value():
+    X = np.array([[0], [6], [12], [18]])
+    transformer = PeriodicEncodingTransformer(period=24, harmonics=2, include_original=True).fit(X)
+    out = transformer.transform(X)
+    # 1 original + 2 harmonic pairs = 5 columns per feature.
+    assert out.shape == (4, 5)
+    assert transformer.total_output_dim_ == 5
+    np.testing.assert_allclose(out[:, 0], X.ravel(), atol=1e-12)
+
+
+def test_cyclic_rejects_non_positive_harmonics():
+    X = np.array([[0], [6], [12], [18]])
+    with pytest.raises(InvalidParamError):
+        PeriodicEncodingTransformer(period=24, harmonics=0).fit(X)
+

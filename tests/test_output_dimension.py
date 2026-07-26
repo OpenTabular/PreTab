@@ -82,10 +82,10 @@ def test_feature_map_width_is_n_features_times_output_dim(cls, X):
 
 
 def test_thinplate_width_is_output_dim():
-    # Thin-plate regression splines are univariate.
+    # Thin-plate regression splines emit exactly ``n_components`` columns.
     rng = np.random.RandomState(0)
     X = rng.uniform(-3, 3, size=(120, 1))
-    transformer = ThinPlateSplineTransformer(output_dim=OUTPUT_DIM).fit(X)
+    transformer = ThinPlateSplineTransformer(n_components=OUTPUT_DIM, random_state=0).fit(X)
     Xt = transformer.transform(X)
     assert Xt.shape[1] == OUTPUT_DIM
     assert transformer.total_output_dim_ == Xt.shape[1]

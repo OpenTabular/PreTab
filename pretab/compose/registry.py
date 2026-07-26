@@ -97,7 +97,7 @@ class TransformerSpec:
         Preprocessor keyword arguments down to what the class understands.
     feature_kind : frozenset of str
         The feature kinds the method applies to (``"numerical"`` and/or
-        ``"categorical"``). ``custombin`` and ``none`` apply to both.
+        ``"categorical"``). Only ``none`` (passthrough) applies to both.
     arity : {"univariate", "multivariate"}
         Whether the method transforms one column at a time (``"univariate"``) or
         jointly models several columns (``"multivariate"`` -- the tensor-product
@@ -191,8 +191,13 @@ _SPECS: tuple[TransformerSpec, ...] = (
         placement_strategies=_TARGET_AWARE_STRATEGIES,
         supports_adaptive_resolution=True,
     ),
-    # --- numerical / categorical: binning (no placement) ---
-    _spec("custombin", NumericBinningTransformer, ("output_dim",), feature_kind=frozenset({NUMERICAL, CATEGORICAL})),
+    # --- numerical: binning (unsupervised uniform / quantile edge placement) ---
+    _spec(
+        "custombin",
+        NumericBinningTransformer,
+        ("output_dim", "encode"),
+        placement_strategies=_UNSUPERVISED_STRATEGIES,
+    ),
     # --- numerical: feature maps (optional target-aware, adaptive) ---
     _spec(
         "rbf",
@@ -250,7 +255,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
     _spec(
         "tprs",
         ThinPlateSplineTransformer,
-        ("output_dim",),
+        ("n_components", "landmark_strategy", "rank_strategy", "random_state"),
         arity="multivariate",
         preprocessor_compatible=False,
     ),
@@ -411,8 +416,6 @@ CATEGORICAL_ALIASES = {
     "embeddings": "pretrained",
     "language": "pretrained",
     "llm": "pretrained",
-    "bin": "custombin",
-    "binning": "custombin",
     "passthrough": "none",
     "identity": "none",
     "raw": "none",

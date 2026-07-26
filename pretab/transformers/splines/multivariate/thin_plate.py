@@ -2,71 +2,80 @@ import numpy as np
 from scipy.linalg import eigh
 from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.cluster import KMeans
+from sklearn.utils import check_random_state
 from sklearn.utils.validation import check_is_fitted
 
-from ....exceptions import InvalidParamError, PretabDataError
+from ....exceptions import InsufficientSamplesError, InvalidParamError
 from ..mixins import SplineBasisMixin
+
+_LANDMARK_STRATEGIES = ("kmeans", "subsample")
+_RANK_STRATEGIES = ("eigen", "nystroem")
 
 
 class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
-    r"""
-    Thin Plate Spline Transformer for smooth univariate basis expansion.
+    r"""Multivariate low-rank thin-plate regression spline basis.
 
-    This transformer constructs a smooth, nonparametric basis using eigen-decomposed
-    thin plate spline (TPS) kernels. It supports only univariate input and is useful
-    for modeling smooth nonlinear functions in regression tasks. The basis functions
-    are the leading eigenvectors of the projected TPS kernel matrix.
-
-    Let :math:`m := \mathtt{output\_dim}` be the number of non-bias output columns.
-    The transformer keeps the top :math:`m` eigenvectors, so the output width equals
-    ``output_dim`` directly (this family is knot-free; there is no knot inversion).
-    ``include_bias=True`` adds one further intercept column.
+    Builds a smooth thin-plate spline (TPS) feature map that jointly models all
+    input features. A set of ``n_components + d + 1`` landmark points is chosen
+    from the data (``d`` is the number of input features), the null-space
+    (linear-polynomial) part is projected out of the landmark TPS kernel, and the
+    leading eigenvectors of the projected kernel form a rank-``n_components``
+    basis. This landmark construction follows the low-rank thin-plate regression
+    spline of Wood (2003) and keeps the cost governed by ``n_components`` rather
+    than the sample size.
 
     Parameters
     ----------
-    output_dim : int, default=6
-        Number of non-bias output columns (:math:`m`) extracted from the
-        eigen-decomposition of the TPS kernel. Must be at least 1.
-
+    n_components : int, default=10
+        Number of (non-bias) basis functions to emit -- the rank of the
+        approximation and the output width. Must be at least 1. Fitting requires
+        at least ``n_components + d + 1`` samples.
+    landmark_strategy : {"kmeans", "subsample"}, default="kmeans"
+        How the landmark points are chosen from the data. ``"kmeans"`` uses
+        k-means cluster centers (space-filling); ``"subsample"`` draws a random
+        subset of the observed rows.
+    rank_strategy : {"eigen", "nystroem"}, default="eigen"
+        How the reduced basis is extracted from the projected landmark kernel.
+        ``"eigen"`` keeps the leading (raw) eigenvectors; ``"nystroem"`` whitens
+        them by the inverse square-root of the eigenvalues to decorrelate the
+        features. Both emit exactly ``n_components`` columns.
     include_bias : bool, default=False
         If True, prepend a constant intercept column to the output. The bias term
-        is left unpenalized (a zero row/column is added to the penalty matrix).
+        is left unpenalized (a zero leading row/column is added to the penalty).
+    random_state : int, RandomState instance or None, default=None
+        Seeds the landmark selection (k-means initialization or subsampling).
 
     Attributes
     ----------
-    x_ : ndarray of shape (n_samples, 1)
-        Training input used to compute the TPS kernel and projection matrix.
-
-    Z_ : ndarray of shape (n_samples, 2)
-        Matrix containing intercept and linear term (used for null space projection).
-
-    eigvals_ : ndarray of shape (output_dim,)
-        Top eigenvalues from the projected kernel matrix.
-
-    basis_ : ndarray of shape (n_samples, output_dim)
-        Orthogonal basis functions corresponding to the top eigenvectors.
-
-    penalty_ : ndarray of shape (output_dim, output_dim)
-        Diagonal penalty matrix containing eigenvalues (used for smoothing regularization).
-
+    landmarks_ : ndarray of shape (n_landmarks, n_features_in_)
+        The landmark points used to build the TPS kernel.
+    components_ : ndarray of shape (n_landmarks, n_components)
+        The linear map from a data-to-landmark kernel row to the reduced basis.
+    eigvals_ : ndarray of shape (n_components,)
+        The retained eigenvalues of the projected landmark kernel.
+    penalty_ : ndarray
+        Diagonal smoothing penalty of ``eigvals_`` (with an unpenalized leading
+        row/column when ``include_bias=True``).
+    d_ : int
+        Number of input features (also ``n_features_in_``).
     n_basis_ : list of int
-        Number of output columns for the single feature, including the optional bias.
-
+        Single-element list with the output width (``n_components`` plus the
+        optional bias).
     n_features_in_ : int
-        Number of input features seen during ``fit`` (always 1).
-
+        Number of input features seen during ``fit``.
     total_output_dim_ : int
-        Total number of output columns (fitted); equals
-        ``output_dim (+1 if include_bias)``.
+        Total number of output columns (fitted); equals ``n_components``
+        (``+1`` when ``include_bias``).
 
     Notes
     -----
-    - Input must be univariate. Multivariate input will raise a ValueError.
-    - Basis functions are derived from a kernel matrix projected onto the orthogonal complement of the null space
-      of the linear terms (intercept and slope) [1]_.
-    - The transformer uses an eigendecomposition of the projected TPS kernel to define the basis [2]_.
-    - The transformer is kernel-based rather than knot-based, so the knot-oriented options shared by the other
-      splines (``degree``, ``target_aware``, ``placement_strategy``, ``task``) do not apply here.
+    - Unlike the knot-based spline families, the thin-plate basis is kernel-based:
+      the knot-oriented options (``degree``, ``target_aware``,
+      ``placement_strategy``, ``task``) do not apply.
+    - The radial kernel depends on the input dimension: :math:`r^3` for ``d=1``,
+      :math:`r^2\log r` for ``d=2``, and the biharmonic kernel :math:`r` for
+      ``d>=3``.
 
     References
     ----------
@@ -78,82 +87,110 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
     --------
     >>> import numpy as np
     >>> from pretab.transformers import ThinPlateSplineTransformer
-    >>> X = np.linspace(0, 1, 30).reshape(-1, 1)
-    >>> transformer = ThinPlateSplineTransformer(output_dim=6)
-    >>> Xt = transformer.fit_transform(X)
-    >>> Xt.shape
-    (30, 6)
+    >>> X = np.random.default_rng(0).uniform(size=(60, 2))
+    >>> transformer = ThinPlateSplineTransformer(n_components=6, random_state=0)
+    >>> transformer.fit_transform(X).shape
+    (60, 6)
     >>> transformer.total_output_dim_
     6
     """
 
     _feature_suffix_value = "tps"
 
-    def __init__(self, output_dim=6, include_bias=False):
-        self.output_dim = output_dim
+    def __init__(
+        self,
+        n_components=10,
+        landmark_strategy="kmeans",
+        rank_strategy="eigen",
+        include_bias=False,
+        random_state=None,
+    ):
+        self.n_components = n_components
+        self.landmark_strategy = landmark_strategy
+        self.rank_strategy = rank_strategy
         self.include_bias = include_bias
+        self.random_state = random_state
 
-    def _tps_kernel(self, r):
+    @staticmethod
+    def _tps_kernel(r, d):
+        """Return the thin-plate radial kernel for input dimension ``d``."""
         with np.errstate(divide="ignore", invalid="ignore"):
-            log_r = np.where(r == 0, 0, np.log(r))
-            K = r**2 * log_r
-            K[r == 0] = 0
-        return K
+            if d == 1:
+                return r**3
+            if d == 2:
+                return np.where(r > 0, r**2 * np.log(np.where(r > 0, r, 1.0)), 0.0)
+            # d >= 3: biharmonic (linear) radial kernel.
+            return r
+
+    def _select_landmarks(self, X, n_landmarks, rng):
+        """Choose ``n_landmarks`` landmark points from ``X``."""
+        n = X.shape[0]
+        if n_landmarks >= n:
+            return X
+        if self.landmark_strategy == "kmeans":
+            return KMeans(n_clusters=n_landmarks, random_state=rng, n_init=10).fit(X).cluster_centers_
+        idx = rng.choice(n, size=n_landmarks, replace=False)
+        return X[idx]
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
 
-        if X.shape[1] > 1:
-            raise PretabDataError("ThinPlateSplineTransformer supports only univariate input.")
+        if not isinstance(self.n_components, (int, np.integer)) or self.n_components < 1:
+            raise InvalidParamError(f"n_components must be a positive integer; got {self.n_components!r}.")
+        if self.landmark_strategy not in _LANDMARK_STRATEGIES:
+            raise InvalidParamError(
+                f"landmark_strategy must be one of {_LANDMARK_STRATEGIES}; got {self.landmark_strategy!r}."
+            )
+        if self.rank_strategy not in _RANK_STRATEGIES:
+            raise InvalidParamError(f"rank_strategy must be one of {_RANK_STRATEGIES}; got {self.rank_strategy!r}.")
 
-        if self.output_dim < 1:
-            raise InvalidParamError(f"output_dim must be >= 1, got {self.output_dim}")
+        n, d = X.shape
+        n_landmarks = self.n_components + d + 1
+        if n < n_landmarks:
+            raise InsufficientSamplesError(
+                f"ThinPlateSplineTransformer with n_components={self.n_components} on {d} feature(s) "
+                f"needs at least {n_landmarks} samples; got {n}."
+            )
 
-        x = X.reshape(-1, 1)
-        self.x_ = x
-        n = x.shape[0]
+        rng = check_random_state(self.random_state)
+        C = np.asarray(self._select_landmarks(X, n_landmarks, rng), dtype=float)
+        length = C.shape[0]
+        self.landmarks_ = C
 
-        Z = np.hstack([np.ones_like(x), x])
-        self.Z_ = Z
+        # Project out the linear-polynomial null space on the landmarks.
+        T = np.hstack([np.ones((length, 1)), C])
+        P = np.eye(length) - T @ np.linalg.pinv(T.T @ T) @ T.T
 
-        r = cdist(x, x, metric="euclidean")
-        K = self._tps_kernel(r)
+        K = self._tps_kernel(cdist(C, C), d)
+        K_proj = P @ K @ P
+        K_proj = 0.5 * (K_proj + K_proj.T)  # symmetrize against round-off
 
-        ZTZ_inv = np.linalg.pinv(Z.T @ Z)
-        P = np.eye(n) - Z @ ZTZ_inv @ Z.T
-        KP = P @ K @ P
+        eigvals, eigvecs = eigh(K_proj)
+        order = np.argsort(np.abs(eigvals))[::-1][: self.n_components]
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+        self.eigvals_ = eigvals
 
-        eigvals, eigvecs = eigh(KP)
-        idx = np.argsort(eigvals)[::-1]
-        eigvals = eigvals[idx]
-        eigvecs = eigvecs[:, idx]
+        if self.rank_strategy == "nystroem":
+            scale = 1.0 / np.sqrt(np.clip(np.abs(eigvals), 1e-12, None))
+        else:  # eigen
+            scale = np.full(self.n_components, np.sqrt(length))
+        # ``components_`` maps a raw data->landmark kernel row into the basis.
+        self.components_ = P @ (eigvecs * scale)
 
-        self.eigvals_ = eigvals[: self.output_dim]
-        self.basis_ = eigvecs[:, : self.output_dim] * np.sqrt(n)
-        penalty = np.diag(self.eigvals_)
+        penalty = np.diag(eigvals)
         if self.include_bias:
             penalty = np.pad(penalty, ((1, 0), (1, 0)))
         self.penalty_ = penalty
-        self.n_basis_ = [self.basis_.shape[1] + (1 if self.include_bias else 0)]
-
+        self.d_ = d
+        self.n_basis_ = [self.n_components + (1 if self.include_bias else 0)]
         return self
 
     def transform(self, X):
-        check_is_fitted(self, "basis_")
+        check_is_fitted(self, "components_")
         X = self._validate_allow_nan(X, reset=False)
-        if X.shape[1] > 1:
-            raise PretabDataError("ThinPlateSplineTransformer supports only univariate input.")
-
-        x_new = X.reshape(-1, 1)
-        r_new = cdist(x_new, self.x_, metric="euclidean")
-        K_new = self._tps_kernel(r_new)
-
-        Z = self.Z_
-        ZTZ_inv = np.linalg.pinv(Z.T @ Z)
-        P_new = np.eye(Z.shape[0]) - Z @ ZTZ_inv @ Z.T
-        K_new_proj = K_new @ P_new
-
-        out = K_new_proj @ self.basis_
+        K_new = self._tps_kernel(cdist(X, self.landmarks_), self.d_)
+        out = K_new @ self.components_
         if self.include_bias:
             out = np.hstack([np.ones((out.shape[0], 1)), out])
         return out
@@ -165,13 +202,13 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
         ----------
         feature_index : int, default=0
             Accepted for signature parity with the other spline transformers;
-            ignored because the thin-plate transformer is univariate.
+            ignored because the thin-plate basis is a single joint expansion.
 
         Returns
         -------
-        penalty_ : ndarray of shape (output_dim, output_dim)
-            Diagonal penalty matrix of eigenvalues used for regularization (with
-            an unpenalized leading row/column when ``include_bias=True``).
+        penalty_ : ndarray
+            Diagonal penalty of the retained eigenvalues (with an unpenalized
+            leading row/column when ``include_bias=True``).
         """
         check_is_fitted(self, "penalty_")
         return self.penalty_

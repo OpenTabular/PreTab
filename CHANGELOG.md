@@ -20,6 +20,8 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Feat
 
+- **binning**: make `NumericBinningTransformer` a stateful, multi-feature encoder with learned `bin_edges_` and `encode` (`ordinal` / `onehot` / `soft`) plus `placement_strategy` (`uniform` / `quantile`) options
+- **transformers**: add `harmonics` and `include_original` options to `PeriodicEncodingTransformer` for multi-harmonic periodic encodings
 - update default output_dim
 - unsupervised feature-map default
 - wire custombin output_dim
@@ -70,6 +72,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Refactor
 
+- **splines**: reformulate `ThinPlateSplineTransformer` as a multivariate low-rank thin-plate regression spline (landmark selection + eigen/Nyström basis via `n_components` / `landmark_strategy` / `rank_strategy`, replacing the univariate `output_dim` form)
 - **transformers**: rename `CustomBinTransformer` → `NumericBinningTransformer`, `CyclicalTimeTransformer` → `PeriodicEncodingTransformer`, and `CubicSplineTransformer` → `CubicRegressionSplineTransformer` (intention-revealing public names)
 - **transformers**: remove `LagFeatureTransformer` and `RollingStatsTransformer` (row-count-changing time-series utilities outside the tabular scope)
 - **splines**: restrict `PSplineTransformer` to `placement_strategy="uniform"` (penalized splines require equally-spaced knots)

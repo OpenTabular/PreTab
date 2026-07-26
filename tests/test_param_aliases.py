@@ -60,6 +60,7 @@ REMOVED_COUNT_CASES = [
     (ISplineTransformer, "n_basis"),
     (ISplineTransformer, "n_basis_functions"),
     (ThinPlateSplineTransformer, "n_basis"),
+    (ThinPlateSplineTransformer, "output_dim"),
     (RBFExpansionTransformer, "n_centers"),
     (RBFExpansionTransformer, "n_basis"),
     (ReLUExpansionTransformer, "n_centers"),
@@ -91,7 +92,6 @@ OUTPUT_DIM_CLASSES = [
     (BSplineTransformer, 8),
     (MSplineTransformer, 8),
     (ISplineTransformer, 8),
-    (ThinPlateSplineTransformer, 6),
 ]
 
 
