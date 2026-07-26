@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..core.parameters import UNSET
-from ..exceptions import ConfigWarning, invalid_param_error
+from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
 from ..transformers.encoders.floats import ToFloatTransformer
 from .config import PreprocessorConfig
 from .registry import (
@@ -105,8 +105,9 @@ def _placement_kwargs(spec: TransformerSpec, kwargs):
 def get_numerical_transformer_steps(
     method: str,
     add_imputer: bool = True,
-    imputer_strategy: str = "mean",
+    imputer_strategy: str = "median",
     imputer_kwargs: dict | None = None,
+    add_missing_indicator: bool = False,
     scaling: str | None = None,
     **kwargs,
 ):
@@ -116,7 +117,9 @@ def get_numerical_transformer_steps(
 
     if add_imputer:
         imputer_kwargs = imputer_kwargs or {}
-        steps.append(("imputer", SimpleImputer(strategy=imputer_strategy, **imputer_kwargs)))
+        steps.append(
+            ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
+        )
 
     # Optional scaling step, added only when it is not already the chosen method.
     scalers = {
@@ -174,6 +177,7 @@ def get_categorical_transformer_steps(
     add_imputer: bool = True,
     imputer_strategy: str = "most_frequent",
     imputer_kwargs: dict | None = None,
+    add_missing_indicator: bool = False,
     output_dim=UNSET,
     **kwargs,
 ):
@@ -183,7 +187,9 @@ def get_categorical_transformer_steps(
 
     if add_imputer:
         imputer_kwargs = imputer_kwargs or {}
-        steps.append(("imputer", SimpleImputer(strategy=imputer_strategy, **imputer_kwargs)))
+        steps.append(
+            ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
+        )
 
     if method not in CATEGORICAL_METHODS:
         raise invalid_param_error(
@@ -225,14 +231,32 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
     ``method`` is the resolved method name; ``is_numerical`` selects the numerical
     or categorical construction path. All width / placement / seeding knobs are
     taken from ``config``.
+
+    Raises
+    ------
+    IncompatibleParamsError
+        If ``method`` is always target-aware (``target_usage="required"``) but the
+        run is configured with ``target_aware=False``; such a combination cannot be
+        satisfied and is rejected instead of silently ignored.
     """
+    known = method in NUMERICAL_METHODS if is_numerical else method in CATEGORICAL_METHODS
+    if known:
+        spec = get_spec(method)
+        if spec.requires_target and not config.target_aware:
+            raise IncompatibleParamsError(
+                f"method {method!r} is always target-aware and requires target_aware=True "
+                f"with placement_strategy in {{'cart', 'lightgbm'}}; got target_aware=False."
+            )
+
     if is_numerical:
+        add_imputer = config.numerical_imputation is not None
         steps = get_numerical_transformer_steps(
             method=method,
             task=config.task,
             target_aware=config.target_aware,
-            add_imputer=config.handle_missing != "error",
-            imputer_strategy="mean",
+            add_imputer=add_imputer,
+            imputer_strategy=config.numerical_imputation or "median",
+            add_missing_indicator=config.add_missing_indicator,
             output_dim=config.output_dim,
             adaptive=config.adaptive,
             min_output_dim=config.min_output_dim if config.adaptive else None,
@@ -240,11 +264,17 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             degree=config.degree,
             scaling=config.scaling,
             placement_strategy=config.placement_strategy,
-            handle_missing=config.handle_missing,
             **config.seed_kwargs,
         )
     else:
-        steps = get_categorical_transformer_steps(method, output_dim=config.output_dim)
+        add_imputer = config.categorical_imputation is not None
+        steps = get_categorical_transformer_steps(
+            method,
+            add_imputer=add_imputer,
+            imputer_strategy=config.categorical_imputation or "most_frequent",
+            add_missing_indicator=config.add_missing_indicator,
+            output_dim=config.output_dim,
+        )
     return Pipeline(steps)
 
 

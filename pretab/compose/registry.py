@@ -185,7 +185,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
     _spec(
         "ple",
         PLETransformer,
-        ("output_dim", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state", "handle_missing"),
+        ("output_dim", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
         target_usage="required",
         placement_strategies=_TARGET_AWARE_STRATEGIES,
         supports_adaptive_resolution=True,

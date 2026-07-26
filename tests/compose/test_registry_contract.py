@@ -201,9 +201,8 @@ def test_required_target_methods_raise_without_y_via_preprocessor(name, spec):
     _skip_if_dependency_missing(spec)
     X = pd.DataFrame({"f0": np.linspace(0.0, 1.0, 60)})
     pre = Preprocessor(numerical_method=name, target_aware=True, placement_strategy="cart")
-    # A required-target method must fail loudly when fit without a target. The
-    # precise exception type is tightened in Phase 4; here we only require that
-    # it does not silently succeed (sklearn's fit_transform surfaces the missing
-    # ``y`` as a ``TypeError`` rather than the transformer's own PretabError).
-    with pytest.raises((PretabError, TypeError)):
+    # A required-target method must fail loudly with a typed PretabError when fit
+    # without a target (Phase 4 tightened this from the raw TypeError that
+    # sklearn's fit_transform used to surface).
+    with pytest.raises(PretabError):
         pre.fit(X)

@@ -6,7 +6,6 @@ LightGBM). The encoding is fully vectorized, so there is no ``eval`` of generate
 strings and no regular-expression parsing of split conditions.
 """
 
-import warnings
 from typing import ClassVar, Literal
 
 import numpy as np
@@ -16,8 +15,7 @@ from sklearn.utils.validation import check_array, check_is_fitted
 from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.parameters import UNSET, AliasResolverMixin
 from ...exceptions import (
-    DataWarning,
-    EmptyDataError,
+    IncompatibleParamsError,
     InvalidParamError,
     PretabDataError,
 )
@@ -62,13 +60,6 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         Maximum number of bins per feature when ``adaptive=True``.
     random_state : int or None, default=51
         Random state for reproducible tree fitting.
-    handle_missing : {"error", "median"}, default="median"
-        How to handle NaN values.
-
-        - ``"error"``: raise an error when a NaN is encountered.
-        - ``"median"``: drop NaN rows during ``fit`` and, at ``transform`` time,
-          replace NaN with the median of that feature's thresholds (or ``0`` when
-          the feature produced no thresholds).
     max_depth : int or None, default=None
         Maximum depth of the decision tree.
     min_samples_split : int, default=2
@@ -87,8 +78,6 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
     total_output_dim_ : int
         Total number of output columns across all features (fitted); equals
         ``sum(n_bins_per_feature_)``.
-    fill_values_ : list of float
-        Per-feature fill value used to replace NaN during ``transform``.
 
     Notes
     -----
@@ -97,6 +86,10 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
     expand into fewer columns than a feature with many splits. ``output_dim`` is
     an upper bound (bin cap), not an exact width; this is a documented exception
     to the exact-width contract that the fixed-basis families follow.
+
+    PLE requires finite input: NaN values raise an error. Missing-value handling
+    is the responsibility of an upstream imputation step (for example the
+    ``Preprocessor`` imputation parameters), not of this transformer.
 
     The ``max_depth`` / ``min_samples_split`` / ``min_samples_leaf`` parameters
     are retained for backward-compatible construction but no longer affect
@@ -122,7 +115,6 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = 51,
-        handle_missing: Literal["error", "median"] = "median",
         max_depth: int | None = None,
         min_samples_split: int = 2,
         min_samples_leaf: int = 1,
@@ -134,64 +126,52 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
         self.random_state = random_state
-        self.handle_missing = handle_missing
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
 
     def __sklearn_tags__(self):
-        """Declare NaN-passthrough (median policy) and the required-target tag."""
+        """Declare the required-target tag; PLE requires finite input."""
         tags = super().__sklearn_tags__()
-        tags.input_tags.allow_nan = self.handle_missing == "median"
+        tags.input_tags.allow_nan = False
         tags.target_tags.required = True
         return tags
 
-    def fit(self, X, y):
+    def fit(self, X, y=None):
         """Fit the transformer by learning per-feature bin thresholds.
 
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
-            Training data.
+            Training data. Must be finite; NaN values raise an error.
         y : array-like of shape (n_samples,)
-            Target values used to grow the per-feature decision trees.
+            Target values used to grow the per-feature decision trees. PLE is
+            always target-aware, so ``y`` is required.
 
         Returns
         -------
         self : PLETransformer
             The fitted transformer.
         """
-        finite_policy: Literal["allow-nan"] | bool = "allow-nan" if self.handle_missing == "median" else True
+        if y is None:
+            raise IncompatibleParamsError(
+                "PLETransformer is always target-aware and requires y at fit time; got y=None."
+            )
+
         X = check_array(
             X,
             dtype=np.float64,
             ensure_2d=True,
-            ensure_all_finite=finite_policy,
+            ensure_all_finite=True,
         )
         y = np.asarray(y).ravel()
 
         if len(X) != len(y):
             raise PretabDataError(f"X and y must have same length. Got {len(X)} and {len(y)}")
 
-        if self.handle_missing == "median":
-            valid_mask = ~(np.isnan(X).any(axis=1) | np.isnan(y))
-            if not valid_mask.all():
-                n_removed = int((~valid_mask).sum())
-                warnings.warn(
-                    f"Removed {n_removed} samples with NaN values during fit",
-                    DataWarning,
-                    stacklevel=2,
-                )
-                X = X[valid_mask]
-                y = y[valid_mask]
-
-        if len(X) == 0:
-            raise EmptyDataError("All samples contain NaN values")
-
         self.n_features_in_ = X.shape[1]
         self.thresholds_ = []
         self.n_bins_per_feature_ = []
-        self.fill_values_ = []
 
         n_bins = self._resolve_param("output_dim", default=6)
         min_bins_req = self._resolve_param("min_output_dim", default=None)
@@ -226,11 +206,6 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
             self.thresholds_.append(thresholds)
             self.n_bins_per_feature_.append(len(thresholds) + 1)
 
-            if len(thresholds) > 0:
-                self.fill_values_.append(float(np.median(thresholds)))
-            else:
-                self.fill_values_.append(0.0)
-
         self.total_output_dim_ = int(sum(self.n_bins_per_feature_))
 
         return self
@@ -250,12 +225,11 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         """
         check_is_fitted(self, ["thresholds_", "n_features_in_"])
 
-        finite_policy: Literal["allow-nan"] | bool = "allow-nan" if self.handle_missing == "median" else True
         X = check_array(
             X,
             dtype=np.float64,
             ensure_2d=True,
-            ensure_all_finite=finite_policy,
+            ensure_all_finite=True,
         )
 
         if X.shape[1] != self.n_features_in_:
@@ -269,12 +243,6 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         for col in range(X.shape[1]):
             feature = X[:, col].copy()
             thresholds = self.thresholds_[col]
-
-            nan_mask = np.isnan(feature)
-            if nan_mask.any():
-                if self.handle_missing == "error":
-                    raise PretabDataError(f"Feature {col} contains NaN values")
-                feature[nan_mask] = self.fill_values_[col]
 
             ple_encoded = self._apply_piecewise_linear_vectorized(feature, thresholds)
             all_transformed.append(ple_encoded)

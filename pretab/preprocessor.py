@@ -111,12 +111,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     treat_all_integers_as_numerical : bool, default=False
         If True, every integer-typed column is treated as numerical regardless of cardinality,
         bypassing the ``cat_cutoff`` heuristic.
-    handle_missing : {"error", "median"}, default="median"
-        Missing-value policy. ``"median"`` keeps the default mean ``SimpleImputer`` that runs
-        before every numerical method (so NaNs are filled and, e.g., PLE uses its median
-        handling). ``"error"`` drops that imputer so missing values are *not* silently filled
-        and reach the transformers, which then raise on NaN. Forwarded to the NaN-aware
-        methods (currently PLE) via the numerical pipeline.
+    numerical_imputation : str or None, default="median"
+        Strategy for the ``SimpleImputer`` that runs *before* every numerical method. Accepts
+        any ``sklearn`` strategy (``"median"``, ``"mean"``, ``"most_frequent"``, ``"constant"``).
+        ``None`` disables imputation, so NaNs reach the numerical transformers unchanged and the
+        finite-input methods (all numerical methods, including PLE) raise on missing values.
+    categorical_imputation : str or None, default="most_frequent"
+        Strategy for the ``SimpleImputer`` that runs *before* every categorical method. ``None``
+        disables imputation for categorical columns.
+    add_missing_indicator : bool, default=False
+        If True, append a binary missing-value indicator column for each imputed feature (via the
+        imputer's ``add_indicator``; a standalone ``MissingIndicator`` is used when imputation is
+        disabled). Applies to both numerical and categorical pipelines.
     verbose : int, default=0
         Verbosity level controlling ``fit``-time logging, applied through the shared
         ``"pretab"`` logger so a single setting on this entry point governs the whole
@@ -228,7 +234,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         scaling="minmax",
         cat_cutoff=0.03,
         treat_all_integers_as_numerical=False,
-        handle_missing="median",
+        numerical_imputation="median",
+        categorical_imputation="most_frequent",
+        add_missing_indicator=False,
         verbose=0,
     ):
         """
@@ -253,7 +261,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.scaling = scaling
         self.cat_cutoff = cat_cutoff
         self.treat_all_integers_as_numerical = treat_all_integers_as_numerical
-        self.handle_missing = handle_missing
+        self.numerical_imputation = numerical_imputation
+        self.categorical_imputation = categorical_imputation
+        self.add_missing_indicator = add_missing_indicator
         self.verbose = verbose
 
     def fit(self, X, y=None, embeddings=None):
@@ -296,7 +306,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             scaling=self.scaling,
             cat_cutoff=self.cat_cutoff,
             treat_all_integers_as_numerical=self.treat_all_integers_as_numerical,
-            handle_missing=self.handle_missing,
+            numerical_imputation=self.numerical_imputation,
+            categorical_imputation=self.categorical_imputation,
+            add_missing_indicator=self.add_missing_indicator,
             verbose=self.verbose,
         )
 

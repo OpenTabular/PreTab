@@ -15,8 +15,7 @@ import pandas as pd
 import pytest
 
 from pretab import Preprocessor, PretabWarning, configure_logging, set_verbosity
-from pretab.exceptions import ConfigWarning, DataWarning
-from pretab.transformers import PLETransformer
+from pretab.exceptions import ConfigWarning
 
 
 @pytest.fixture
@@ -194,12 +193,3 @@ def test_config_warning_is_a_pretab_warning(sample_data):
     X, y = sample_data
     with pytest.warns(PretabWarning):
         Preprocessor(numerical_method="bspline", output_dim=100).fit(X, y)
-
-
-def test_ple_nan_removal_warns_data_warning():
-    rng = np.random.RandomState(3)
-    X = rng.rand(30, 1)
-    y = rng.rand(30)
-    X[0, 0] = np.nan
-    with pytest.warns(DataWarning):
-        PLETransformer(output_dim=5, handle_missing="median").fit(X, y)

@@ -1,9 +1,11 @@
-"""Phase 18: ``random_state`` + ``handle_missing`` host control on the Preprocessor.
+"""``random_state`` + missing-value host control on the Preprocessor.
 
-Verifies that both knobs are exposed on the :class:`Preprocessor`, propagate to
-the underlying numerical methods, keep prior behavior when unset, and make
-stochastic fits reproducible -- so a standalone user or an embedding host
-(DeepTab) can pin a global seed and choose a missing-value policy.
+Verifies that the reproducibility seed and the imputation knobs
+(``numerical_imputation`` / ``categorical_imputation`` / ``add_missing_indicator``)
+are exposed on the :class:`Preprocessor`, drive the per-column pipelines, keep
+prior behavior when unset, and make stochastic fits reproducible -- so a
+standalone user or an embedding host (DeepTab) can pin a global seed and choose a
+missing-value policy.
 """
 
 import numpy as np
@@ -43,18 +45,23 @@ def _numerical_transformer(pre, feature):
 def test_new_params_defaults_and_get_params():
     pre = Preprocessor()
     assert pre.random_state is None
-    assert pre.handle_missing == "median"
+    assert pre.numerical_imputation == "median"
+    assert pre.categorical_imputation == "most_frequent"
+    assert pre.add_missing_indicator is False
     params = pre.get_params()
     assert params["random_state"] is None
-    assert params["handle_missing"] == "median"
+    assert params["numerical_imputation"] == "median"
+    assert params["categorical_imputation"] == "most_frequent"
+    assert params["add_missing_indicator"] is False
 
 
 def test_clone_preserves_new_params():
-    pre = Preprocessor(random_state=99, handle_missing="error")
+    pre = Preprocessor(random_state=99, numerical_imputation="mean", add_missing_indicator=True)
     cloned = clone(pre)
     assert isinstance(cloned, Preprocessor)
     assert cloned.random_state == 99
-    assert cloned.handle_missing == "error"
+    assert cloned.numerical_imputation == "mean"
+    assert cloned.add_missing_indicator is True
 
 
 # --- random_state forwarding ----------------------------------------------- #
@@ -87,34 +94,41 @@ def test_fixed_random_state_makes_fit_reproducible(data, method):
     np.testing.assert_array_equal(o1, o2)
 
 
-# --- handle_missing policy ------------------------------------------------- #
+# --- missing-value / imputation policy ------------------------------------- #
 
 
-def test_handle_missing_forwarded_to_ple(data):
-    X, y = data
-    pre = Preprocessor(numerical_method="ple", handle_missing="error").fit(X, y)
-    assert _numerical_transformer(pre, "a").handle_missing == "error"
-
-
-def test_handle_missing_median_imputes_nan(data):
+def test_numerical_imputation_median_fills_nan(data):
     X, y = data
     X = X.copy()
     X.iloc[0, 0] = np.nan
-    # Default "median" keeps the mean imputer, so NaN is filled before PLE.
-    pre = Preprocessor(numerical_method="ple", handle_missing="median").fit(X, y)
+    # Default "median" imputes before PLE, so NaN is filled and the fit succeeds.
+    pre = Preprocessor(numerical_method="ple").fit(X, y)
     out = pre.transform(X, return_array=True)
     assert isinstance(out, np.ndarray)
     assert np.isfinite(out).all()
 
 
-def test_handle_missing_error_rejects_nan(data):
+def test_numerical_imputation_none_lets_nan_reach_transformer(data):
     X, y = data
     X = X.copy()
     X.iloc[0, 0] = np.nan
-    # "error" drops the imputer, so NaN reaches PLE which raises.
-    pre = Preprocessor(numerical_method="ple", handle_missing="error")
+    # Disabling imputation lets NaN reach PLE, which requires finite input.
+    pre = Preprocessor(numerical_method="ple", numerical_imputation=None)
     with pytest.raises(ValueError):
         pre.fit(X, y)
+
+
+def test_add_missing_indicator_appends_columns(data):
+    X, y = data
+    X = X.copy()
+    X.iloc[0, 0] = np.nan
+    base = Preprocessor(numerical_method="standardization").fit(X, y).transform(X, return_array=True)
+    with_ind = (
+        Preprocessor(numerical_method="standardization", add_missing_indicator=True)
+        .fit(X, y)
+        .transform(X, return_array=True)
+    )
+    assert with_ind.shape[1] > base.shape[1]
 
 
 # --- transformer / helper level seeding ------------------------------------ #

@@ -28,7 +28,8 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 - **pipeline**: use selector and adaptive setting to splines
 - **pipeline**: accept preprocessing method name variations
 - **preprocessor**: expose total_output_dim_, output_dims_ attribute
-- **preprocessor**: add random_state, handle_missing parameters
+- **preprocessor**: add random_state parameter
+- **preprocessor**: add numerical_imputation / categorical_imputation / add_missing_indicator parameters (replacing handle_missing)
 - **sklearn-compat**: enforce n_features consistency, fix mixin order/tags
 - **exceptions**: route all raises through typed exceptions
 - **logging**: add verbose level, route warnings

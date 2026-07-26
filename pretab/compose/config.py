@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..core.parameters import validate_placement
+from ..exceptions import IncompatibleParamsError
 from .registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
@@ -61,7 +62,9 @@ class PreprocessorConfig:
     scaling: str | None
     cat_cutoff: float | int
     treat_all_integers_as_numerical: bool
-    handle_missing: str
+    numerical_imputation: str | None
+    categorical_imputation: str | None
+    add_missing_indicator: bool
     verbose: int
 
     @classmethod
@@ -83,7 +86,9 @@ class PreprocessorConfig:
         scaling,
         cat_cutoff,
         treat_all_integers_as_numerical,
-        handle_missing,
+        numerical_imputation,
+        categorical_imputation,
+        add_missing_indicator,
         verbose,
     ) -> PreprocessorConfig:
         """Normalize and validate raw Preprocessor parameters into a config.
@@ -93,8 +98,17 @@ class PreprocessorConfig:
         InvalidParamError
             If the ``target_aware`` / ``placement_strategy`` combination is
             invalid (via :func:`~pretab.core.parameters.validate_placement`).
+        IncompatibleParamsError
+            If ``add_missing_indicator`` is requested while both imputation
+            strategies are disabled, since the indicator is produced by the
+            imputation step.
         """
         validate_placement(target_aware, placement_strategy)
+        if add_missing_indicator and numerical_imputation is None and categorical_imputation is None:
+            raise IncompatibleParamsError(
+                "add_missing_indicator=True requires numerical_imputation or categorical_imputation "
+                "to be set; the missing-value indicator is produced by the imputation step."
+            )
         return cls(
             numerical_method=_normalize_method(numerical_method, NUMERICAL_METHODS, NUMERICAL_ALIASES),
             categorical_method=_normalize_method(categorical_method, CATEGORICAL_METHODS, CATEGORICAL_ALIASES),
@@ -111,7 +125,9 @@ class PreprocessorConfig:
             scaling=scaling,
             cat_cutoff=cat_cutoff,
             treat_all_integers_as_numerical=treat_all_integers_as_numerical,
-            handle_missing=handle_missing,
+            numerical_imputation=numerical_imputation,
+            categorical_imputation=categorical_imputation,
+            add_missing_indicator=add_missing_indicator,
             verbose=verbose,
         )
 

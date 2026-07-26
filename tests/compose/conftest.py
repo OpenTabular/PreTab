@@ -26,7 +26,9 @@ _CONFIG_DEFAULTS = {
     "scaling": None,
     "cat_cutoff": 0.03,
     "treat_all_integers_as_numerical": False,
-    "handle_missing": "median",
+    "numerical_imputation": "median",
+    "categorical_imputation": "most_frequent",
+    "add_missing_indicator": False,
     "verbose": 0,
 }
 

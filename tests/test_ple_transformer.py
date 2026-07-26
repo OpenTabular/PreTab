@@ -104,27 +104,24 @@ def test_ple_is_reproducible():
     np.testing.assert_array_equal(a, b)
 
 
-def test_ple_handles_nan_with_median():
+def test_ple_raises_on_nan_at_fit():
     rng = np.random.RandomState(1)
     X = rng.rand(30, 1)
     y = rng.rand(30)
 
-    transformer = PLETransformer(output_dim=5, handle_missing="median")
-    transformer.fit(X, y)
-
     X_missing = X.copy()
     X_missing[0, 0] = np.nan
-    Xt = transformer.transform(X_missing)
+    transformer = PLETransformer(output_dim=5)
+    with pytest.raises(ValueError, match="NaN"):
+        transformer.fit(X_missing, y)
 
-    assert np.isfinite(Xt).all()
 
-
-def test_ple_raises_on_nan_when_configured():
+def test_ple_raises_on_nan_at_transform():
     rng = np.random.RandomState(2)
     X = rng.rand(30, 1)
     y = rng.rand(30)
 
-    transformer = PLETransformer(output_dim=5, handle_missing="error")
+    transformer = PLETransformer(output_dim=5)
     transformer.fit(X, y)
 
     X_missing = X.copy()

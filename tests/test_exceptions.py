@@ -185,12 +185,11 @@ def test_ple_length_mismatch_is_data_error(xy):
     assert isinstance(exc.value, ValueError)
 
 
-def test_ple_all_nan_is_empty_data_error(xy):
+def test_ple_nan_input_is_value_error(xy):
     X, y = xy
     X_nan = np.full_like(X, np.nan)
-    with pytest.raises(EmptyDataError) as exc:
+    with pytest.raises(ValueError, match="NaN"):
         PLETransformer(output_dim=5).fit(X_nan, y)
-    assert isinstance(exc.value, PretabDataError)
 
 
 def test_thinplate_multivariate_is_data_error():

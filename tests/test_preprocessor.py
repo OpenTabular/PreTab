@@ -114,7 +114,9 @@ EXPECTED_PARAMS = {
     "cat_cutoff",
     "treat_all_integers_as_numerical",
     "random_state",
-    "handle_missing",
+    "numerical_imputation",
+    "categorical_imputation",
+    "add_missing_indicator",
     "verbose",
 }
 
