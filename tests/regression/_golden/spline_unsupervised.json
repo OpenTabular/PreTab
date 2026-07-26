@@ -1,0 +1,37 @@
+{
+  "shape": [
+    200,
+    29
+  ],
+  "feature_names": [
+    "num_num_linear__num_linear_ncs0",
+    "num_num_linear__num_linear_ncs1",
+    "num_num_linear__num_linear_ncs2",
+    "num_num_linear__num_linear_ncs3",
+    "num_num_linear__num_linear_ncs4",
+    "num_num_linear__num_linear_ncs5",
+    "num_num_linear__num_linear_ncs6",
+    "num_num_normal__num_normal_ncs0",
+    "num_num_normal__num_normal_ncs1",
+    "num_num_normal__num_normal_ncs2",
+    "num_num_normal__num_normal_ncs3",
+    "num_num_normal__num_normal_ncs4",
+    "num_num_normal__num_normal_ncs5",
+    "num_num_normal__num_normal_ncs6",
+    "num_num_skewed__num_skewed_ncs0",
+    "num_num_skewed__num_skewed_ncs1",
+    "num_num_skewed__num_skewed_ncs2",
+    "num_num_skewed__num_skewed_ncs3",
+    "num_num_skewed__num_skewed_ncs4",
+    "num_num_skewed__num_skewed_ncs5",
+    "num_num_skewed__num_skewed_ncs6",
+    "cat_cat_str__cat_str_alpha",
+    "cat_cat_str__cat_str_beta",
+    "cat_cat_str__cat_str_gamma",
+    "cat_cat_int__cat_int_0",
+    "cat_cat_int__cat_int_1",
+    "cat_cat_int__cat_int_2",
+    "cat_cat_int__cat_int_3",
+    "cat_cat_int__cat_int_4"
+  ]
+}
