@@ -7,10 +7,7 @@ from pretab.core.selectors import (
     LightGBMLocationSelector,
 )
 from pretab.exceptions import IncompatibleParamsError
-from pretab.transformers.splines.knot_selectors import (
-    CARTKnotSelector,
-    LightGBMKnotSelector,
-)
+from pretab.placement.adapters import SplinePlacementAdapter
 
 
 @pytest.fixture
@@ -81,7 +78,7 @@ def test_cart_handles_nan_rows(data):
 
 def test_cart_matches_knot_adapter(data):
     X, y = data
-    adapter = CARTKnotSelector(max_basis_functions=12, degree=3)
+    adapter = SplinePlacementAdapter(placement_strategy="cart", max_basis_functions=12, degree=3)
     from_adapter = adapter.get_knot_locations(X, y, task="regression")
     from_selector = CARTLocationSelector().select(
         X, y, task="regression", min_count=adapter.min_knots, max_count=adapter.max_knots
@@ -111,9 +108,9 @@ def test_lightgbm_reproducible(data):
 def test_lightgbm_matches_knot_adapter(data):
     pytest.importorskip("lightgbm")
     X, y = data
-    adapter = LightGBMKnotSelector(n_estimators=30, max_basis_functions=12)
+    adapter = SplinePlacementAdapter(placement_strategy="lightgbm", max_basis_functions=12, degree=3)
     from_adapter = adapter.get_knot_locations(X, y, task="regression")
-    from_selector = LightGBMLocationSelector(n_estimators=30).select(
+    from_selector = LightGBMLocationSelector().select(
         X, y, task="regression", min_count=adapter.min_knots, max_count=adapter.max_knots
     )
     np.testing.assert_array_equal(from_adapter, from_selector)

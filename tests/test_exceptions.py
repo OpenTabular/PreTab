@@ -32,6 +32,7 @@ from pretab.exceptions import (
     insufficient_samples_error,
     invalid_param_error,
 )
+from pretab.placement.adapters import SplinePlacementAdapter
 from pretab.transformers import (
     BSplineTransformer,
     LagFeatureTransformer,
@@ -39,7 +40,6 @@ from pretab.transformers import (
     RollingStatsTransformer,
     ThinPlateSplineTransformer,
 )
-from pretab.transformers.splines.knot_selectors import CARTKnotSelector
 
 
 @pytest.fixture
@@ -207,7 +207,7 @@ def test_thinplate_multivariate_is_data_error():
 def test_cart_selector_requires_y(xy):
     X, _ = xy
     with pytest.raises(IncompatibleParamsError, match="requires y"):
-        CARTKnotSelector().get_knot_locations(X, y=None)
+        SplinePlacementAdapter(placement_strategy="cart", degree=3).get_knot_locations(X, y=None)
 
 
 # --------------------------------------------------------------------------- #

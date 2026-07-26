@@ -4,7 +4,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from ...core.parameters import UNSET, validate_placement
 from ...exceptions import InvalidParamError
-from .knot_selectors import build_knot_selector
+from ...placement.adapters import SplinePlacementAdapter
 from .mixins import SplineBasisMixin
 
 
@@ -163,8 +163,8 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         n_interior = output_dim - 3
 
         if self.target_aware:
-            selector = build_knot_selector(
-                self.placement_strategy,
+            selector = SplinePlacementAdapter(
+                placement_strategy=self.placement_strategy,
                 degree=self.degree,
                 spline_type="bspline",
                 random_state=self.random_state,

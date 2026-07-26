@@ -33,7 +33,7 @@ from ...exceptions import (
     InvalidParamError,
     PretabDataError,
 )
-from .knot_selectors import BaseKnotSelector, build_knot_selector
+from ...placement.adapters import SplinePlacementAdapter
 
 
 class BaseSplineTransformer(BasePreTabTransformer):
@@ -209,7 +209,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         y_valid: np.ndarray | None,
         n_basis: int,
         strategy: str,
-        selector: BaseKnotSelector | None,
+        selector: SplinePlacementAdapter | None,
         min_basis_req: int | None,
         max_basis_req: int | None,
     ) -> np.ndarray:
@@ -264,8 +264,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
         # selector built from placement_strategy, then the automatic (unsupervised)
         # spacing named by placement_strategy.
         if self.target_aware and self.knot_locations is None:
-            selector = build_knot_selector(
-                self.placement_strategy,
+            selector = SplinePlacementAdapter(
+                placement_strategy=self.placement_strategy,
                 degree=self.degree,
                 spline_type=self._selector_spline_type,
                 random_state=self.random_state,

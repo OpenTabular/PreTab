@@ -14,12 +14,12 @@ from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
 from ...core.parameters import UNSET, validate_placement
-from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
     PretabDataError,
 )
+from ...placement.adapters import RBFPlacementAdapter
 
 
 class BaseCenterExpansion(BasePreTabTransformer):
@@ -92,32 +92,23 @@ class BaseCenterExpansion(BasePreTabTransformer):
         if self.target_aware and y is None:
             raise IncompatibleParamsError("Target variable 'y' must be provided when target_aware=True.")
 
-        if self.target_aware:
-            # Centers come from a target-aware location selector (CART by default,
-            # optionally LightGBM): split points spaced out and ranked by impurity
-            # / gain. Adaptive sizing clamps each feature into [min, max]; otherwise
-            # each feature keeps exactly ``output_dim`` centers.
-            selector = self._build_selector(placement_strategy)
-            if self.adaptive:
-                min_centers, max_centers = self._resolve_output_bounds(n_centers, min_req, max_req, floor=1)
-            else:
-                min_centers = max_centers = n_centers
-            centers_list = [
-                selector.select(
-                    X[:, i],
-                    y,
-                    task=self.task,
-                    min_count=min_centers,
-                    max_count=max_centers,
-                )
-                for i in range(X.shape[1])
-            ]
-        elif placement_strategy == "quantile":
-            centers_list = [np.percentile(X[:, i], np.linspace(0, 100, n_centers)) for i in range(X.shape[1])]
-        else:  # uniform
-            centers_list = [np.linspace(X[:, i].min(), X[:, i].max(), n_centers) for i in range(X.shape[1])]
-
-        self.centers_ = centers_list
+        # Centers come from the placement subsystem: a target-aware selector
+        # (CART / LightGBM) when ``target_aware``, otherwise quantile / uniform
+        # spacing across the range with the endpoints included. Adaptive sizing
+        # only takes effect on the target-aware path, clamping each feature into
+        # [min, max]; otherwise each feature keeps exactly ``output_dim`` centers.
+        adapter = RBFPlacementAdapter(
+            target_aware=self.target_aware,
+            placement_strategy=placement_strategy,
+            task=self.task,
+            random_state=self.random_state,
+        )
+        if self.target_aware and self.adaptive:
+            min_centers, max_centers = self._resolve_output_bounds(n_centers, min_req, max_req, floor=1)
+        else:
+            min_centers = max_centers = n_centers
+        y_place = y if self.target_aware else None
+        self.centers_ = [adapter.get_centers(X[:, i], y_place, min_centers, max_centers) for i in range(X.shape[1])]
         return self
 
     def transform(self, X):
@@ -149,14 +140,6 @@ class BaseCenterExpansion(BasePreTabTransformer):
         if self.placement_strategy is not UNSET:
             return cast(str, self.placement_strategy)
         return "cart" if self.target_aware else "quantile"
-
-    def _build_selector(self, placement_strategy):
-        """Construct the target-aware location selector named by ``placement_strategy``."""
-        if placement_strategy == "cart":
-            return CARTLocationSelector(random_state=self.random_state)
-        if placement_strategy == "lightgbm":
-            return LightGBMLocationSelector(random_state=self.random_state)
-        raise InvalidParamError(f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {placement_strategy!r}.")
 
     def __sklearn_tags__(self):
         """Require ``y`` only when centers are placed by a target-aware selector."""

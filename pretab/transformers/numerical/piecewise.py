@@ -15,13 +15,13 @@ from sklearn.utils.validation import check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.parameters import UNSET, AliasResolverMixin
-from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
 from ...exceptions import (
     DataWarning,
     EmptyDataError,
     InvalidParamError,
     PretabDataError,
 )
+from ...placement.adapters import PLEPlacementAdapter
 
 
 class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator):
@@ -201,26 +201,27 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         if self.task not in ("regression", "classification"):
             raise InvalidParamError(f"Unsupported task: {self.task}. Use 'regression' or 'classification'.")
 
-        # Thresholds come from a target-aware location selector (CART by default,
-        # optionally LightGBM): split points spaced out and ranked by impurity /
-        # gain, then trimmed / topped up to fit the bin-count window. Each feature
-        # produces ``len(thresholds) + 1`` bins, so we ask for one fewer location
-        # than bins: the non-adaptive window pins the count to exactly
-        # ``output_dim`` bins, adaptive clamps it into ``[min, max]``.
-        selector = self._build_selector()
+        if self.placement_strategy not in ("cart", "lightgbm"):
+            raise InvalidParamError(
+                f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {self.placement_strategy!r}."
+            )
+
+        # Thresholds come from the placement subsystem's target-aware adapter
+        # (CART by default, optionally LightGBM): split points spaced out and
+        # ranked by impurity / gain, then trimmed / topped up to fit the bin-count
+        # window. Each feature produces ``len(thresholds) + 1`` bins, so we ask for
+        # one fewer location than bins: the non-adaptive window pins the count to
+        # exactly ``output_dim`` bins, adaptive clamps it into ``[min, max]``.
+        adapter = PLEPlacementAdapter(
+            placement_strategy=self.placement_strategy,
+            task=self.task,
+            random_state=self.random_state,
+        )
         min_thresholds = max(0, min_bins - 1)
         max_thresholds = max(0, max_bins - 1)
 
         for i in range(X.shape[1]):
-            thresholds = np.sort(
-                selector.select(
-                    X[:, i],
-                    y,
-                    task=self.task,
-                    min_count=min_thresholds,
-                    max_count=max_thresholds,
-                )
-            )
+            thresholds = adapter.get_thresholds(X[:, i], y, min_thresholds, max_thresholds)
 
             self.thresholds_.append(thresholds)
             self.n_bins_per_feature_.append(len(thresholds) + 1)
@@ -366,13 +367,3 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
 
     def _resolve_bin_bounds(self, n_bins: int, min_bins_req, max_bins_req) -> tuple[int, int]:
         return self._resolve_output_bounds(n_bins, min_bins_req, max_bins_req, floor=1)
-
-    def _build_selector(self):
-        """Construct the target-aware location selector named by ``placement_strategy``."""
-        if self.placement_strategy == "cart":
-            return CARTLocationSelector(random_state=self.random_state)
-        if self.placement_strategy == "lightgbm":
-            return LightGBMLocationSelector(random_state=self.random_state)
-        raise InvalidParamError(
-            f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {self.placement_strategy!r}."
-        )
