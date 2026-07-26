@@ -12,11 +12,11 @@ import pytest
 
 from pretab.transformers import (
     BSplineTransformer,
-    CubicSplineTransformer,
-    CustomBinTransformer,
+    CubicRegressionSplineTransformer,
     ISplineTransformer,
     MSplineTransformer,
     NaturalCubicSplineTransformer,
+    NumericBinningTransformer,
     PLETransformer,
     PSplineTransformer,
     RBFExpansionTransformer,
@@ -45,8 +45,8 @@ def Xy():
 # (transformer, removed constructor name) - passing any legacy count spelling
 # must raise TypeError at construction (hard removal, no FutureWarning window).
 REMOVED_COUNT_CASES = [
-    (CubicSplineTransformer, "n_basis"),
-    (CubicSplineTransformer, "n_knots"),
+    (CubicRegressionSplineTransformer, "n_basis"),
+    (CubicRegressionSplineTransformer, "n_knots"),
     (NaturalCubicSplineTransformer, "n_basis"),
     (NaturalCubicSplineTransformer, "n_knots"),
     (PSplineTransformer, "n_basis"),
@@ -71,8 +71,8 @@ REMOVED_COUNT_CASES = [
     (PLETransformer, "max_basis"),
     (PLETransformer, "min_bins"),
     (PLETransformer, "max_bins"),
-    (CustomBinTransformer, "n_basis"),
-    (CustomBinTransformer, "bins"),
+    (NumericBinningTransformer, "n_basis"),
+    (NumericBinningTransformer, "bins"),
 ]
 
 
@@ -84,7 +84,7 @@ def test_removed_count_name_raises_typeerror(cls, removed):
 
 # Every family accepts the canonical output_dim knob.
 OUTPUT_DIM_CLASSES = [
-    (CubicSplineTransformer, 8),
+    (CubicRegressionSplineTransformer, 8),
     (NaturalCubicSplineTransformer, 6),
     (PSplineTransformer, 8),
     (TensorProductSplineTransformer, 5),

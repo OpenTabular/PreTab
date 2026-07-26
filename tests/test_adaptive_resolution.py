@@ -15,7 +15,7 @@ from pretab import Preprocessor
 from pretab.core.adaptive import AdaptiveResolutionMixin
 from pretab.transformers import (
     BSplineTransformer,
-    CubicSplineTransformer,
+    CubicRegressionSplineTransformer,
     NaturalCubicSplineTransformer,
     PLETransformer,
     RBFExpansionTransformer,
@@ -119,7 +119,7 @@ def test_feature_map_adaptive_is_noop_on_quantile_path(Cls, data):
 # Legacy splines (target-aware placement path)                                #
 # --------------------------------------------------------------------------- #
 LEGACY_SPLINES = [
-    (CubicSplineTransformer, 8),
+    (CubicRegressionSplineTransformer, 8),
     (NaturalCubicSplineTransformer, 6),
 ]
 

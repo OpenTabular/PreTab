@@ -1,6 +1,6 @@
 from .b_spline import BSplineTransformer
 from .base_spline import BaseSplineTransformer
-from .cubic_regression import CubicSplineTransformer
+from .cubic_regression import CubicRegressionSplineTransformer
 from .i_spline import ISplineTransformer
 from .m_spline import MSplineTransformer
 from .multivariate.tensor_product import TensorProductSplineTransformer
@@ -11,7 +11,7 @@ from .p_spline import PSplineTransformer
 __all__ = [
     "BSplineTransformer",
     "BaseSplineTransformer",
-    "CubicSplineTransformer",
+    "CubicRegressionSplineTransformer",
     "ISplineTransformer",
     "MSplineTransformer",
     "NaturalCubicSplineTransformer",

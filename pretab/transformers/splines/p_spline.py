@@ -59,15 +59,15 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         If True, prepend a constant intercept column per feature. The bias term is
         left unpenalized (a zero row/column is added to the penalty matrix).
 
-    placement_strategy : {"uniform", "quantile"}, default="uniform"
-        Interior-knot placement rule. ``"uniform"`` spaces knots evenly across the
-        range; ``"quantile"`` places them at evenly spaced data quantiles.
+    placement_strategy : {"uniform"}, default="uniform"
+        Interior-knot placement rule. Only ``"uniform"`` (evenly spaced knots
+        across the range) is supported.
 
         .. note::
            P-splines are penalized (difference-penalty) splines that assume
-           **equally-spaced** knots, so this family is *unsupervised-only*:
-           target-aware placement does not apply and only ``"uniform"`` /
-           ``"quantile"`` spacing is accepted.
+           **equally-spaced** knots, so this family is *unsupervised-only* and
+           requires uniform spacing: target-aware and quantile placement do not
+           apply and only ``"uniform"`` spacing is accepted.
 
     adaptive : bool, default=False
         Retained for API parity but a no-op for this unsupervised-only family: the
@@ -149,9 +149,10 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=6)
-        if self.placement_strategy not in ("uniform", "quantile"):
+        if self.placement_strategy != "uniform":
             raise InvalidParamError(
-                f"Invalid placement_strategy. Choose 'uniform' or 'quantile'. Got {self.placement_strategy!r}."
+                f"Invalid placement_strategy. P-splines require equally-spaced knots, "
+                f"so only 'uniform' is supported. Got {self.placement_strategy!r}."
             )
         strategy = self.placement_strategy
 

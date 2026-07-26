@@ -13,12 +13,13 @@ import pytest
 
 from pretab import Preprocessor
 from pretab.compose.registry import (
+    NUMERICAL_METHODS,
     TRANSFORMER_REGISTRY,
     TransformerSpec,
     categorical_method_names,
     numerical_method_names,
 )
-from pretab.exceptions import OptionalDependencyError, PretabError
+from pretab.exceptions import InvalidParamError, OptionalDependencyError, PretabError
 
 _VALID_KINDS = {"numerical", "categorical"}
 _VALID_ARITY = {"univariate", "multivariate"}
@@ -206,3 +207,26 @@ def test_required_target_methods_raise_without_y_via_preprocessor(name, spec):
     # sklearn's fit_transform used to surface).
     with pytest.raises(PretabError):
         pre.fit(X)
+
+
+# --------------------------------------------------------------------------- #
+# Multivariate methods are standalone-only (D6): not selectable per column
+# through the Preprocessor whitelist.
+# --------------------------------------------------------------------------- #
+_MULTIVARIATE_NUMERICAL = [(name, spec) for name, spec in _SPEC_ITEMS if spec.is_numerical and spec.is_multivariate]
+
+
+@pytest.mark.parametrize(
+    "name, spec", _MULTIVARIATE_NUMERICAL, ids=[name for name, _ in _MULTIVARIATE_NUMERICAL]
+)
+def test_multivariate_methods_not_preprocessor_selectable(name, spec):
+    # The multivariate tensor-product / thin-plate splines are standalone-only and
+    # deliberately excluded from the per-column Preprocessor whitelist; selecting
+    # one must fail loudly rather than silently misbehave.
+    assert spec.preprocessor_compatible is False
+    assert name not in NUMERICAL_METHODS
+    X = pd.DataFrame({"f0": np.linspace(0.0, 1.0, 60), "f1": np.linspace(1.0, 2.0, 60)})
+    y = np.linspace(0.0, 1.0, 60)
+    pre = Preprocessor(numerical_method=name)
+    with pytest.raises(InvalidParamError):
+        pre.fit(X, y)

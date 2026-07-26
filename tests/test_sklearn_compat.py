@@ -23,20 +23,18 @@ from sklearn.utils.estimator_checks import check_estimator
 from pretab.transformers import (
     BSplineTransformer,
     ContinuousOrdinalTransformer,
-    CubicSplineTransformer,
-    CustomBinTransformer,
-    CyclicalTimeTransformer,
+    CubicRegressionSplineTransformer,
     ISplineTransformer,
-    LagFeatureTransformer,
     MSplineTransformer,
     NaturalCubicSplineTransformer,
     NoTransformer,
+    NumericBinningTransformer,
     OneHotFromOrdinalTransformer,
+    PeriodicEncodingTransformer,
     PLETransformer,
     PSplineTransformer,
     RBFExpansionTransformer,
     ReLUExpansionTransformer,
-    RollingStatsTransformer,
     SigmoidExpansionTransformer,
     TanhExpansionTransformer,
     TensorProductSplineTransformer,
@@ -63,7 +61,7 @@ NEAR_CONFORMANT = [
     (BSplineTransformer(), _SPLINE_EXPECTED),
     (MSplineTransformer(), _SPLINE_EXPECTED),
     (ISplineTransformer(), _SPLINE_EXPECTED),
-    (CubicSplineTransformer(), _SPLINE_EXPECTED),
+    (CubicRegressionSplineTransformer(), _SPLINE_EXPECTED),
     (NaturalCubicSplineTransformer(), _SPLINE_EXPECTED),
     (PSplineTransformer(), _SPLINE_EXPECTED),
     (TensorProductSplineTransformer(), _SPLINE_EXPECTED),
@@ -130,8 +128,8 @@ DEFERRED = [
         ),
     ),
     pytest.param(
-        CustomBinTransformer(),
-        id="CustomBinTransformer",
+        NumericBinningTransformer(),
+        id="NumericBinningTransformer",
         marks=pytest.mark.xfail(
             reason="Single-column ordinal binner; expects (n_samples, 1) input, "
             "incompatible with generic multi-feature checks.",
@@ -139,29 +137,11 @@ DEFERRED = [
         ),
     ),
     pytest.param(
-        CyclicalTimeTransformer(period=12),
-        id="CyclicalTimeTransformer",
+        PeriodicEncodingTransformer(period=12),
+        id="PeriodicEncodingTransformer",
         marks=pytest.mark.xfail(
             reason="Requires a `period` constructor argument (not default-"
             "constructible) and constrains inputs to [0, period].",
-            strict=True,
-        ),
-    ),
-    pytest.param(
-        LagFeatureTransformer(),
-        id="LagFeatureTransformer",
-        marks=pytest.mark.xfail(
-            reason="Windowing transformer changes the sample count, so it fails "
-            "checks that assume transform preserves n_samples.",
-            strict=True,
-        ),
-    ),
-    pytest.param(
-        RollingStatsTransformer(),
-        id="RollingStatsTransformer",
-        marks=pytest.mark.xfail(
-            reason="Windowing transformer changes the sample count, so it fails "
-            "checks that assume transform preserves n_samples.",
             strict=True,
         ),
     ),

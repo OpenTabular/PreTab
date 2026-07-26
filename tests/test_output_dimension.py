@@ -13,11 +13,11 @@ import pytest
 
 from pretab.transformers import (
     BSplineTransformer,
-    CubicSplineTransformer,
-    CustomBinTransformer,
+    CubicRegressionSplineTransformer,
     ISplineTransformer,
     MSplineTransformer,
     NaturalCubicSplineTransformer,
+    NumericBinningTransformer,
     PLETransformer,
     PSplineTransformer,
     RBFExpansionTransformer,
@@ -47,7 +47,7 @@ def Xy():
 
 # Splines whose transformed width is exactly ``n_features * output_dim``.
 PER_FEATURE_SPLINES = [
-    CubicSplineTransformer,
+    CubicRegressionSplineTransformer,
     NaturalCubicSplineTransformer,
     PSplineTransformer,
     MSplineTransformer,
@@ -120,7 +120,7 @@ def test_ple_output_dim_is_a_per_feature_cap(Xy):
 
 def test_custombin_is_always_a_single_ordinal_column():
     X = np.linspace(0, 1, 50).reshape(-1, 1)
-    transformer = CustomBinTransformer(output_dim=OUTPUT_DIM).fit(X)
+    transformer = NumericBinningTransformer(output_dim=OUTPUT_DIM).fit(X)
     Xt = transformer.transform(X)
     assert Xt.shape[1] == 1
     assert transformer.total_output_dim_ == 1

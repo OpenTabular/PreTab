@@ -3,12 +3,12 @@ and periodic encoding. Modules are moved here during the 1.0.0 restructure (Phas
 and renamed to their intention-revealing public names in Phase 5.
 """
 
-from .binning import CustomBinTransformer
-from .periodic import CyclicalTimeTransformer
+from .binning import NumericBinningTransformer
+from .periodic import PeriodicEncodingTransformer
 from .piecewise import PLETransformer
 
 __all__ = [
-    "CustomBinTransformer",
-    "CyclicalTimeTransformer",
+    "NumericBinningTransformer",
     "PLETransformer",
+    "PeriodicEncodingTransformer",
 ]

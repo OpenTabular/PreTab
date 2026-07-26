@@ -8,7 +8,7 @@ from ...placement.adapters import SplinePlacementAdapter
 from .mixins import SplineBasisMixin
 
 
-class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
+class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     r"""
     Cubic Spline Transformer for one-dimensional or multi-dimensional input features.
 
@@ -100,9 +100,9 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     Examples
     --------
     >>> import numpy as np
-    >>> from pretab.transformers import CubicSplineTransformer
+    >>> from pretab.transformers import CubicRegressionSplineTransformer
     >>> X = np.linspace(0, 1, 20).reshape(-1, 1)
-    >>> transformer = CubicSplineTransformer(output_dim=8)
+    >>> transformer = CubicRegressionSplineTransformer(output_dim=8)
     >>> Xt = transformer.fit_transform(X)
     >>> Xt.shape
     (20, 8)

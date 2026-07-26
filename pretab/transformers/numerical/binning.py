@@ -8,7 +8,7 @@ from ...core.parameters import UNSET, AliasResolverMixin
 from ...exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 
 
-class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
+class NumericBinningTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
     """
     Custom binning transformer for one-dimensional numerical features.
 
@@ -50,9 +50,9 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
     Examples
     --------
     >>> import numpy as np
-    >>> from pretab.transformers import CustomBinTransformer
+    >>> from pretab.transformers import NumericBinningTransformer
     >>> X = np.linspace(0, 1, 10).reshape(-1, 1)
-    >>> transformer = CustomBinTransformer(output_dim=4)
+    >>> transformer = NumericBinningTransformer(output_dim=4)
     >>> transformer.fit_transform(X).shape
     (10, 1)
     """
@@ -113,7 +113,7 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
                 X = X.astype(np.float64)
             except (ValueError, TypeError) as exc:
                 raise PretabDataError(
-                    "CustomBinTransformer requires numeric input: it bins continuous "
+                    "NumericBinningTransformer requires numeric input: it bins continuous "
                     "values with pandas.cut and cannot process string/categorical "
                     "data. Encode string columns with a categorical method (e.g. "
                     "'int' or 'one-hot') before binning."
@@ -121,7 +121,7 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
 
         bins_spec = self._resolve_param("output_dim", default=UNSET)
         if bins_spec is UNSET:
-            raise InvalidParamError("CustomBinTransformer requires 'output_dim'.")
+            raise InvalidParamError("NumericBinningTransformer requires 'output_dim'.")
 
         if isinstance(bins_spec, int):
             # Calculate equal width bins based on the range of the data and number of bins

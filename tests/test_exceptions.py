@@ -35,9 +35,7 @@ from pretab.exceptions import (
 from pretab.placement.adapters import SplinePlacementAdapter
 from pretab.transformers import (
     BSplineTransformer,
-    LagFeatureTransformer,
     PLETransformer,
-    RollingStatsTransformer,
     ThinPlateSplineTransformer,
 )
 
@@ -207,26 +205,6 @@ def test_cart_selector_requires_y(xy):
     X, _ = xy
     with pytest.raises(IncompatibleParamsError, match="requires y"):
         SplinePlacementAdapter(placement_strategy="cart", degree=3).get_knot_locations(X, y=None)
-
-
-# --------------------------------------------------------------------------- #
-# Temporal transformers.
-# --------------------------------------------------------------------------- #
-
-
-def test_lag_insufficient_samples():
-    X = np.arange(5).reshape(-1, 1).astype(float)
-    with pytest.raises(InsufficientSamplesError) as exc:
-        LagFeatureTransformer(n_lags=10).fit(X)
-    assert isinstance(exc.value, ValueError)
-
-
-def test_rolling_unsupported_stat():
-    X = np.arange(20).reshape(-1, 1).astype(float)
-    transformer = RollingStatsTransformer(window_size=3, stats=("mean", "bogus"))
-    transformer.fit(X)
-    with pytest.raises(InvalidParamError, match="bogus"):
-        transformer.transform(X)
 
 
 # --------------------------------------------------------------------------- #

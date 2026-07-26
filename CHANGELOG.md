@@ -70,6 +70,11 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Refactor
 
+- **transformers**: rename `CustomBinTransformer` → `NumericBinningTransformer`, `CyclicalTimeTransformer` → `PeriodicEncodingTransformer`, and `CubicSplineTransformer` → `CubicRegressionSplineTransformer` (intention-revealing public names)
+- **transformers**: remove `LagFeatureTransformer` and `RollingStatsTransformer` (row-count-changing time-series utilities outside the tabular scope)
+- **splines**: restrict `PSplineTransformer` to `placement_strategy="uniform"` (penalized splines require equally-spaced knots)
+- **compose**: exclude the multivariate `tensorspline` / `tprs` methods from the per-column `Preprocessor` whitelist (they remain available as standalone transformers)
+- **categorical**: deprecate `OneHotFromOrdinalTransformer` (use the `"one-hot"` categorical method backed by scikit-learn's `OneHotEncoder`)
 - consistent param order
 - remove dead selection helpers
 - **ple**: use location selectors for thresholds

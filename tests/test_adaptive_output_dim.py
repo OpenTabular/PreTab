@@ -52,8 +52,6 @@ FIXED_WIDTH = {
     "cubicspline": OUTPUT_DIM,
     "naturalspline": OUTPUT_DIM,
     "pspline": OUTPUT_DIM,
-    "tensorspline": OUTPUT_DIM,
-    "tprs": OUTPUT_DIM,
     "mspline": OUTPUT_DIM,
     "ispline": OUTPUT_DIM,
     # B-spline defaults to include_bias=True -> output_dim + 1
@@ -75,11 +73,11 @@ TARGET_AWARE_LEGACY_SPLINE_METHODS = [
 ]
 
 # Fixed-only spline families: target-aware placement does not apply. The
-# penalized splines (``pspline``, ``tensorspline``) assume equally-spaced knots
-# for their difference penalty, and the thin-plate spline (``tprs``) is
-# kernel-based (knot-free). All three stay fixed-width regardless of the adaptive
-# / selector knobs.
-FIXED_ONLY_SPLINE_METHODS = ["pspline", "tensorspline", "tprs"]
+# penalized ``pspline`` assumes equally-spaced knots for its difference penalty,
+# so it stays fixed-width regardless of the adaptive / selector knobs. (The
+# multivariate ``tensorspline`` / ``tprs`` are standalone-only and not selectable
+# through the Preprocessor, so they are exercised in their own transformer tests.)
+FIXED_ONLY_SPLINE_METHODS = ["pspline"]
 
 # All spline families (kept for callers that want the full set).
 SPLINE_METHODS = TARGET_AWARE_LEGACY_SPLINE_METHODS + FIXED_ONLY_SPLINE_METHODS + BMI_SPLINE_METHODS
@@ -289,11 +287,11 @@ def test_legacy_spline_adaptive_via_preprocessor(data, method):
 
 @pytest.mark.parametrize("method", FIXED_ONLY_SPLINE_METHODS)
 def test_fixed_only_spline_ignores_adaptive(data, method):
-    """Penalized / kernel splines are not target-aware: the adaptive window is a no-op.
+    """Penalized splines are not target-aware: the adaptive window is a no-op.
 
-    ``pspline`` / ``tensorspline`` need equally-spaced knots for their difference
-    penalty and ``tprs`` is knot-free, so the Preprocessor never routes them
-    through the selector / adaptive path -- the width stays ``output_dim``.
+    ``pspline`` needs equally-spaced knots for its difference penalty, so the
+    Preprocessor never routes it through the selector / adaptive path -- the width
+    stays ``output_dim``.
     """
     X, y = data
     fixed = _num_width(

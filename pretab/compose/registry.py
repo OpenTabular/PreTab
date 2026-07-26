@@ -37,10 +37,10 @@ from ..transformers.feature_maps.rbf import RBFExpansionTransformer
 from ..transformers.feature_maps.relu import ReLUExpansionTransformer
 from ..transformers.feature_maps.sigmoid import SigmoidExpansionTransformer
 from ..transformers.feature_maps.tanh import TanhExpansionTransformer
-from ..transformers.numerical.binning import CustomBinTransformer
+from ..transformers.numerical.binning import NumericBinningTransformer
 from ..transformers.numerical.piecewise import PLETransformer
 from ..transformers.splines.b_spline import BSplineTransformer
-from ..transformers.splines.cubic_regression import CubicSplineTransformer
+from ..transformers.splines.cubic_regression import CubicRegressionSplineTransformer
 from ..transformers.splines.i_spline import ISplineTransformer
 from ..transformers.splines.m_spline import MSplineTransformer
 from ..transformers.splines.multivariate.tensor_product import (
@@ -74,6 +74,7 @@ CATEGORICAL = "categorical"
 
 # Canonical placement strategy names, split by supervision.
 _UNSUPERVISED_STRATEGIES = frozenset({"uniform", "quantile"})
+_UNIFORM_ONLY = frozenset({"uniform"})
 _TARGET_AWARE_STRATEGIES = frozenset({"cart", "lightgbm"})
 _ALL_STRATEGIES = _UNSUPERVISED_STRATEGIES | _TARGET_AWARE_STRATEGIES
 
@@ -191,7 +192,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
         supports_adaptive_resolution=True,
     ),
     # --- numerical / categorical: binning (no placement) ---
-    _spec("custombin", CustomBinTransformer, ("output_dim",), feature_kind=frozenset({NUMERICAL, CATEGORICAL})),
+    _spec("custombin", NumericBinningTransformer, ("output_dim",), feature_kind=frozenset({NUMERICAL, CATEGORICAL})),
     # --- numerical: feature maps (optional target-aware, adaptive) ---
     _spec(
         "rbf",
@@ -220,7 +221,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
     # --- numerical: freely-placed knot splines (optional target-aware, adaptive) ---
     _spec(
         "cubicspline",
-        CubicSplineTransformer,
+        CubicRegressionSplineTransformer,
         ("output_dim", "degree", "include_bias", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
         **_BOTH_MODE,
     ),
@@ -235,7 +236,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
         "pspline",
         PSplineTransformer,
         ("output_dim", "degree", "diff_order"),
-        placement_strategies=_UNSUPERVISED_STRATEGIES,
+        placement_strategies=_UNIFORM_ONLY,
     ),
     _spec(
         "tensorspline",
@@ -243,9 +244,16 @@ _SPECS: tuple[TransformerSpec, ...] = (
         ("output_dim", "degree", "diff_order"),
         arity="multivariate",
         placement_strategies=_UNSUPERVISED_STRATEGIES,
+        preprocessor_compatible=False,
     ),
     # --- numerical: kernel-based thin-plate spline (knot-free, multivariate) ---
-    _spec("tprs", ThinPlateSplineTransformer, ("output_dim",), arity="multivariate"),
+    _spec(
+        "tprs",
+        ThinPlateSplineTransformer,
+        ("output_dim",),
+        arity="multivariate",
+        preprocessor_compatible=False,
+    ),
     # --- numerical: B / M / I spline bases (optional target-aware, adaptive) ---
     _spec(
         "bspline",
@@ -297,11 +305,14 @@ def categorical_method_names() -> frozenset[str]:
 
 # Derived lookup tables consumed by the factory and config layers.
 # ``NUMERICAL_METHODS`` maps a numerical method to ``(class, allowed_args_list)``;
-# ``CATEGORICAL_METHODS`` is the set of categorical method names.
+# ``CATEGORICAL_METHODS`` is the set of categorical method names. Methods flagged
+# ``preprocessor_compatible=False`` (the multivariate tensor-product / thin-plate
+# splines) are standalone-only and deliberately excluded from the per-column
+# ``Preprocessor`` whitelist.
 NUMERICAL_METHODS: dict[str, tuple[type, list[str]]] = {
     name: (spec.transformer_cls, list(spec.allowed_args))
     for name, spec in TRANSFORMER_REGISTRY.items()
-    if spec.is_numerical
+    if spec.is_numerical and spec.preprocessor_compatible
 }
 CATEGORICAL_METHODS: frozenset[str] = categorical_method_names()
 

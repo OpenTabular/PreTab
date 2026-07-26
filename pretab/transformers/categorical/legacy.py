@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
@@ -8,6 +10,13 @@ class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
 
     This is useful when features have already been ordinal-encoded and a one-hot
     representation is required for model training.
+
+    .. deprecated:: 1.0.0
+        ``OneHotFromOrdinalTransformer`` is deprecated and will be removed in a
+        future release. Use the ``"one-hot"`` categorical method (backed by
+        scikit-learn's :class:`~sklearn.preprocessing.OneHotEncoder`), which
+        one-hot encodes raw categories directly without a separate
+        ordinal-encoding step.
 
     Attributes
     ----------
@@ -30,6 +39,15 @@ class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
     >>> transformer.fit_transform(X).shape
     (3, 5)
     """
+
+    def __init__(self):
+        warnings.warn(
+            "OneHotFromOrdinalTransformer is deprecated and will be removed in a "
+            "future release. Use the 'one-hot' categorical method (sklearn's "
+            "OneHotEncoder), which one-hot encodes raw categories directly.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     def fit(self, X, y=None):
         """Learn the maximum bin index for each feature from the data.

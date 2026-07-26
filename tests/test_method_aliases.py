@@ -7,6 +7,7 @@ from pretab.compose.registry import (
     CATEGORICAL_METHODS,
     NUMERICAL_ALIASES,
     NUMERICAL_METHODS,
+    numerical_method_names,
     resolve_method,
 )
 from pretab.exceptions import InvalidParamError
@@ -86,8 +87,13 @@ def test_every_canonical_name_resolves_to_itself():
 
 
 def test_alias_targets_are_canonical():
+    # Alias targets must be canonical *registry* names. The multivariate
+    # tensor-product / thin-plate methods are standalone-only (excluded from the
+    # per-column ``NUMERICAL_METHODS`` whitelist), so validate against the full
+    # registry rather than the Preprocessor whitelist.
+    numerical_canonical = numerical_method_names()
     for target in NUMERICAL_ALIASES.values():
-        assert target in NUMERICAL_METHODS
+        assert target in numerical_canonical
     for target in CATEGORICAL_ALIASES.values():
         assert target in CATEGORICAL_METHODS
 

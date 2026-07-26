@@ -11,13 +11,13 @@ from .feature_maps import (
     TanhExpansionTransformer,
 )
 from .numerical import (
-    CustomBinTransformer,
-    CyclicalTimeTransformer,
+    NumericBinningTransformer,
+    PeriodicEncodingTransformer,
     PLETransformer,
 )
 from .splines import (
     BSplineTransformer,
-    CubicSplineTransformer,
+    CubicRegressionSplineTransformer,
     ISplineTransformer,
     MSplineTransformer,
     NaturalCubicSplineTransformer,
@@ -25,29 +25,23 @@ from .splines import (
     TensorProductSplineTransformer,
     ThinPlateSplineTransformer,
 )
-from .temporal import (
-    LagFeatureTransformer,
-    RollingStatsTransformer,
-)
 
 __all__ = [
     "BSplineTransformer",
     "ContinuousOrdinalTransformer",
-    "CubicSplineTransformer",
-    "CustomBinTransformer",
-    "CyclicalTimeTransformer",
+    "CubicRegressionSplineTransformer",
     "ISplineTransformer",
-    "LagFeatureTransformer",
     "LanguageEmbeddingTransformer",
     "MSplineTransformer",
     "NaturalCubicSplineTransformer",
     "NoTransformer",
+    "NumericBinningTransformer",
     "OneHotFromOrdinalTransformer",
     "PLETransformer",
     "PSplineTransformer",
+    "PeriodicEncodingTransformer",
     "RBFExpansionTransformer",
     "ReLUExpansionTransformer",
-    "RollingStatsTransformer",
     "SigmoidExpansionTransformer",
     "TanhExpansionTransformer",
     "TensorProductSplineTransformer",

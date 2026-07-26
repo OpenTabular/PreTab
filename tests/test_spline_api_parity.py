@@ -9,7 +9,7 @@ import pytest
 
 from pretab.exceptions import IncompatibleParamsError
 from pretab.transformers import (
-    CubicSplineTransformer,
+    CubicRegressionSplineTransformer,
     NaturalCubicSplineTransformer,
     PSplineTransformer,
     TensorProductSplineTransformer,
@@ -18,16 +18,24 @@ from pretab.transformers import (
 
 # (class, output_dim) for the four knot-based splines that share the placement API.
 KNOT_SPLINES = [
-    (CubicSplineTransformer, 8),
+    (CubicRegressionSplineTransformer, 8),
     (NaturalCubicSplineTransformer, 6),
     (PSplineTransformer, 8),
+    (TensorProductSplineTransformer, 5),
+]
+
+# Splines that also accept quantile placement. P-splines are uniform-only
+# (equally-spaced knots for the difference penalty), so they are excluded here.
+QUANTILE_SPLINES = [
+    (CubicRegressionSplineTransformer, 8),
+    (NaturalCubicSplineTransformer, 6),
     (TensorProductSplineTransformer, 5),
 ]
 
 # The knot-based splines that also support the target-aware placement path.
 # (The penalized ``pspline`` / ``tensorspline`` are unsupervised-only.)
 TARGET_AWARE_SPLINES = [
-    (CubicSplineTransformer, 8),
+    (CubicRegressionSplineTransformer, 8),
     (NaturalCubicSplineTransformer, 6),
 ]
 
@@ -59,7 +67,7 @@ def test_default_strategy_matches_explicit_uniform(cls, output_dim, X_uniform):
     np.testing.assert_allclose(default, explicit, rtol=1e-10)
 
 
-@pytest.mark.parametrize(("cls", "output_dim"), KNOT_SPLINES)
+@pytest.mark.parametrize(("cls", "output_dim"), QUANTILE_SPLINES)
 def test_quantile_strategy_runs_and_differs(cls, output_dim, X_skewed):
     """placement_strategy='quantile' produces a finite basis of the same width as uniform."""
     uniform = cls(output_dim=output_dim, placement_strategy="uniform").fit_transform(X_skewed)
@@ -111,7 +119,7 @@ def test_thinplate_include_bias_adds_one_column():
 @pytest.mark.parametrize(
     ("cls", "expected"),
     [
-        (CubicSplineTransformer, {"target_aware", "placement_strategy", "task", "include_bias"}),
+        (CubicRegressionSplineTransformer, {"target_aware", "placement_strategy", "task", "include_bias"}),
         (NaturalCubicSplineTransformer, {"degree", "target_aware", "placement_strategy", "task"}),
         (PSplineTransformer, {"placement_strategy", "include_bias"}),
         (TensorProductSplineTransformer, {"placement_strategy", "include_bias"}),

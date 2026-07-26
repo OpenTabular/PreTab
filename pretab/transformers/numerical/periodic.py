@@ -5,7 +5,7 @@ from ...core.base import BasePreTabTransformer
 from ...exceptions import PretabDataError
 
 
-class CyclicalTimeTransformer(BasePreTabTransformer):
+class PeriodicEncodingTransformer(BasePreTabTransformer):
     r"""Encode a cyclical time variable using sine and cosine components.
 
     Maps a periodic integer feature (such as hour of day or day of week) onto two
@@ -36,9 +36,9 @@ class CyclicalTimeTransformer(BasePreTabTransformer):
     Examples
     --------
     >>> import numpy as np
-    >>> from pretab.transformers import CyclicalTimeTransformer
+    >>> from pretab.transformers import PeriodicEncodingTransformer
     >>> X = np.array([[0], [6], [12], [18]])
-    >>> transformer = CyclicalTimeTransformer(period=24)
+    >>> transformer = PeriodicEncodingTransformer(period=24)
     >>> transformer.fit_transform(X).shape
     (4, 2)
     """
