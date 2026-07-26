@@ -118,6 +118,12 @@ EXPECTED_PARAMS = {
     "categorical_imputation",
     "add_missing_indicator",
     "policy",
+    "max_output_features",
+    "max_features_per_input",
+    "max_dense_memory",
+    "overflow_policy",
+    "output_format",
+    "dtype",
     "verbose",
 }
 

@@ -22,6 +22,7 @@ __all__ = [
     "InvalidParamError",
     "LeakageWarning",
     "OptionalDependencyError",
+    "OutputBudgetError",
     "PretabConfigError",
     "PretabDataError",
     "PretabError",
@@ -85,6 +86,11 @@ class PretabNotFittedError(PretabError, NotFittedError):
 
 class OptionalDependencyError(PretabError, ImportError):
     """A required optional dependency is not installed."""
+
+
+class OutputBudgetError(PretabError, ValueError):
+    """The fitted preprocessor would exceed a configured output budget
+    (``max_output_features`` / ``max_features_per_input`` / ``max_dense_memory``)."""
 
 
 # --- Message factories ---

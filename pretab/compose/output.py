@@ -5,13 +5,28 @@ keeps each feature's transformed block separate (and any external embedding
 blocks alongside them). This module owns that formatting only -- it performs no
 fitting and holds no capability logic; the per-block slices it consumes are
 computed in :mod:`pretab.compose.inspection`.
+
+It also owns the dense/sparse decision (``output_format``), the dtype-independent
+memory report (``output_report_``), and wrapping the stacked array into a pandas
+or polars DataFrame for :meth:`~pretab.Preprocessor.set_output`.
 """
 
 import numpy as np
+from scipy import sparse as sp
 
-from ..exceptions import IncompatibleParamsError
+from ..exceptions import IncompatibleParamsError, OptionalDependencyError
 
-__all__ = ["attach_embeddings", "build_output_dict", "format_output"]
+__all__ = [
+    "attach_embeddings",
+    "build_output_dict",
+    "compute_output_report",
+    "format_output",
+    "to_dataframe_output",
+]
+
+# Density at or below which ``output_format="auto"`` switches to a sparse matrix,
+# matching scikit-learn's ColumnTransformer ``sparse_threshold`` convention.
+_SPARSE_AUTO_THRESHOLD = 0.3
 
 _EMBEDDINGS_NOT_EXPECTED = (
     "Embeddings were not expected, but were provided.\n"
@@ -20,13 +35,99 @@ _EMBEDDINGS_NOT_EXPECTED = (
 )
 
 
-def build_output_dict(transformed, slices) -> dict:
+def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESHOLD):
+    """Resolve the concrete output format and build the memory report.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        The dense stacked output.
+    output_format : {"auto", "dense", "sparse"}
+        Requested format. ``"auto"`` picks ``"sparse"`` when the density is below
+        ``threshold``.
+    threshold : float, default=0.3
+        Density cut-off for the ``"auto"`` decision.
+
+    Returns
+    -------
+    tuple of (str, dict)
+        The resolved format (``"dense"`` or ``"sparse"``) and a report dict with
+        ``format``, ``shape``, ``density``, ``dense_bytes``, ``actual_bytes``, and
+        ``memory_saved_bytes``.
+    """
+    density = float(np.count_nonzero(array)) / array.size if array.size else 0.0
+    dense_bytes = int(array.nbytes)
+
+    if output_format == "sparse":
+        use_sparse = True
+    elif output_format == "auto":
+        use_sparse = density < threshold
+    else:  # "dense"
+        use_sparse = False
+
+    if use_sparse:
+        csr = sp.csr_matrix(array)
+        actual_bytes = int(csr.data.nbytes + csr.indices.nbytes + csr.indptr.nbytes)
+        fmt = "sparse"
+    else:
+        actual_bytes = dense_bytes
+        fmt = "dense"
+
+    report = {
+        "format": fmt,
+        "shape": tuple(int(s) for s in array.shape),
+        "density": density,
+        "dense_bytes": dense_bytes,
+        "actual_bytes": actual_bytes,
+        "memory_saved_bytes": max(0, dense_bytes - actual_bytes),
+    }
+    return fmt, report
+
+
+def to_dataframe_output(array, columns, container):
+    """Wrap a dense stacked array in a pandas or polars DataFrame.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        Dense stacked output.
+    columns : sequence of str
+        One name per output column (from ``get_feature_names_out``).
+    container : {"pandas", "polars"}
+        Target dataframe library.
+
+    Raises
+    ------
+    OptionalDependencyError
+        If ``container="polars"`` but polars is not installed.
+    """
+    columns = list(columns)
+    if container == "pandas":
+        import pandas as pd
+
+        return pd.DataFrame(array, columns=columns)
+    try:
+        import polars as pl
+    except ImportError as exc:  # pragma: no cover - exercised only without polars
+        raise OptionalDependencyError(
+            "set_output(transform='polars') requires the optional 'polars' package. "
+            "Install it with `pip install polars`."
+        ) from exc
+    return pl.from_numpy(array, schema=columns)
+
+
+def build_output_dict(transformed, slices, *, as_sparse=False) -> dict:
     """Split a stacked array into a name -> block dict using ``slices``.
 
     ``slices`` is an ordered iterable of ``(name, start, width)`` describing each
-    transformer's contiguous span in the stacked output.
+    transformer's contiguous span in the stacked output. When ``as_sparse`` is
+    True each block is returned as a SciPy CSR matrix.
     """
-    return {name: transformed[:, start : start + width] for name, start, width in slices}
+    result = {}
+    for name, start, width in slices:
+        block = transformed[:, start : start + width]
+        result[name] = sp.csr_matrix(block) if as_sparse else block
+    return result
 
 
 def attach_embeddings(result: dict, embeddings, *, expected: bool) -> dict:
@@ -47,15 +148,23 @@ def attach_embeddings(result: dict, embeddings, *, expected: bool) -> dict:
     return result
 
 
-def format_output(transformed, *, return_array, slices=None, embeddings=None, embeddings_expected=False):
+def format_output(
+    transformed,
+    *,
+    return_array,
+    slices=None,
+    embeddings=None,
+    embeddings_expected=False,
+    output_format="dense",
+):
     """Return the transformed data as a stacked array or a per-block dict.
 
     Parameters
     ----------
     transformed : numpy.ndarray
-        The stacked array produced by the fitted ColumnTransformer.
+        The dense stacked array produced by the fitted ColumnTransformer.
     return_array : bool
-        If True, return ``transformed`` unchanged; otherwise build the dict.
+        If True, return the stacked array (dense or CSR); otherwise build the dict.
     slices : iterable of (str, int, int), optional
         Ordered ``(name, start, width)`` spans; required when ``return_array`` is
         False.
@@ -63,11 +172,15 @@ def format_output(transformed, *, return_array, slices=None, embeddings=None, em
         External embedding blocks to attach to the dict output.
     embeddings_expected : bool, default=False
         Whether embedding blocks were configured at fit time.
+    output_format : {"dense", "sparse"}, default="dense"
+        Resolved output format. ``"sparse"`` returns a CSR matrix (array path) or
+        CSR blocks (dict path).
     """
+    as_sparse = output_format == "sparse"
     if return_array:
-        return transformed
+        return sp.csr_matrix(transformed) if as_sparse else transformed
 
-    result = build_output_dict(transformed, slices or [])
+    result = build_output_dict(transformed, slices or [], as_sparse=as_sparse)
     if embeddings is not None:
         attach_embeddings(result, embeddings, expected=embeddings_expected)
     return result

@@ -4,13 +4,14 @@ from .core.logging import configure_logging, set_verbosity
 from .core.policy import RepresentationPolicy
 from .core.representation import FeatureLineage, RepresentationSpec
 from .core.supervised import CrossFittedTransformer
-from .exceptions import LeakageWarning, PretabWarning
+from .exceptions import LeakageWarning, OutputBudgetError, PretabWarning
 from .preprocessor import Preprocessor
 
 __all__ = [
     "CrossFittedTransformer",
     "FeatureLineage",
     "LeakageWarning",
+    "OutputBudgetError",
     "Preprocessor",
     "PretabWarning",
     "RepresentationPolicy",

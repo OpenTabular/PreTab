@@ -1,7 +1,10 @@
 import time
+import warnings
 
 import numpy as np
+from scipy import sparse as sp
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils._set_output import _get_output_config
 from sklearn.utils.validation import check_is_fitted
 
 from .compose.config import PreprocessorConfig
@@ -13,9 +16,10 @@ from .compose.inspection import (
     build_transformer_summary,
     get_output_slices,
 )
-from .compose.output import format_output
+from .compose.output import compute_output_report, format_output, to_dataframe_output
 from .core.logging import configure_logging, get_logger
 from .core.policy import RepresentationPolicy, apply_constant_policy
+from .exceptions import ConfigWarning, OutputBudgetError, invalid_param_error
 
 logger = get_logger(__name__)
 
@@ -130,6 +134,36 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         constant columns, out-of-range values, missing values, and non-finite inputs are
         handled. ``None`` uses the default policy, which reproduces the library's historical
         behaviour. Pass a mapping such as ``{"constant": "error"}`` to tighten a single axis.
+    max_output_features : int or None, default=None
+        Upper bound on the total number of output columns produced across all input
+        features. ``None`` disables the check. A violation is handled per
+        ``overflow_policy``.
+    max_features_per_input : int or None, default=None
+        Upper bound on the number of output columns any single input feature may
+        expand to. ``None`` disables the check. A violation is handled per
+        ``overflow_policy``.
+    max_dense_memory : int or None, default=None
+        Upper bound, in bytes, on the estimated dense output footprint
+        (``n_rows * total_output_dim_ * itemsize``) evaluated against the training
+        data at ``fit``. ``None`` disables the check. A violation is handled per
+        ``overflow_policy``. See :meth:`estimate_memory` to estimate this for any
+        input.
+    overflow_policy : {"error", "warn", "ignore"}, default="error"
+        What to do when a configured output budget is exceeded: ``"error"`` raises
+        :class:`~pretab.exceptions.OutputBudgetError`, ``"warn"`` emits a
+        :class:`~pretab.exceptions.ConfigWarning`, ``"ignore"`` proceeds silently.
+        Only takes effect when at least one budget parameter above is set.
+    output_format : {"dense", "sparse", "auto"}, default="dense"
+        Container used for the transformed output. ``"dense"`` (the default, for
+        backward compatibility) returns NumPy arrays; ``"sparse"`` returns SciPy
+        CSR matrices (a single stacked CSR when ``return_array=True``, otherwise CSR
+        blocks in the output dict); ``"auto"`` selects ``"sparse"`` when the output
+        density falls below ``0.3`` and ``"dense"`` otherwise. Ignored when
+        :meth:`set_output` requests a pandas or polars DataFrame. Every ``transform``
+        records the resolved choice and its memory footprint in ``output_report_``.
+    dtype : numpy dtype or None, default=None
+        Optional dtype to cast the transformed output to (e.g. ``numpy.float32`` to
+        halve memory). ``None`` keeps the native ``float64`` output.
     verbose : int, default=0
         Verbosity level controlling ``fit``-time logging, applied through the shared
         ``"pretab"`` logger so a single setting on this entry point governs the whole
@@ -159,6 +193,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     output_dims\_ : dict
         Per-feature expanded output-column counts, keyed by input feature name.
         The values sum to ``total_output_dim_``.
+    output_report\_ : dict
+        Memory report for the most recent ``transform``, with keys ``format``
+        (``"dense"`` or ``"sparse"``), ``shape``, ``density``, ``dense_bytes``,
+        ``actual_bytes``, and ``memory_saved_bytes``. Set on every ``transform``.
     embeddings\_ : bool
         Whether embedding vectors were provided at ``fit`` time and are expected in transformation.
     embedding_dimensions\_ : dict
@@ -245,6 +283,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         categorical_imputation="most_frequent",
         add_missing_indicator=False,
         policy=None,
+        max_output_features=None,
+        max_features_per_input=None,
+        max_dense_memory=None,
+        overflow_policy="error",
+        output_format="dense",
+        dtype=None,
         verbose=0,
     ):
         """
@@ -273,6 +317,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.categorical_imputation = categorical_imputation
         self.add_missing_indicator = add_missing_indicator
         self.policy = policy
+        self.max_output_features = max_output_features
+        self.max_features_per_input = max_features_per_input
+        self.max_dense_memory = max_dense_memory
+        self.overflow_policy = overflow_policy
+        self.output_format = output_format
+        self.dtype = dtype
         self.verbose = verbose
 
     def fit(self, X, y=None, embeddings=None):
@@ -351,6 +401,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.column_transformer_.fit(X, y)
         self.n_features_in_ = X.shape[1]
 
+        valid_formats = ("auto", "dense", "sparse")
+        if self.output_format not in valid_formats:
+            raise invalid_param_error(
+                type(self).__name__,
+                "output_format",
+                self.output_format,
+                "must be one of 'auto', 'dense', 'sparse'",
+                valid=set(valid_formats),
+            )
+
+        self._enforce_output_budget(X.shape[0])
+
         if verbose >= 1:
             logger.info(
                 "fit complete: %d numerical (%s) + %d categorical (%s) feature(s) -> %d output columns in %.3fs",
@@ -385,8 +447,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Returns
         -------
-        dict or np.ndarray
-            Transformed data. A dictionary if return_array=False, else a NumPy array.
+        dict, np.ndarray, scipy.sparse matrix, or DataFrame
+            Transformed data. By default a dictionary of per-feature blocks; a
+            single stacked array when ``return_array=True``; a SciPy CSR matrix (or
+            CSR blocks) when ``output_format`` resolves to ``"sparse"``; or a pandas
+            / polars DataFrame when configured via :meth:`set_output`.
         """
 
         check_is_fitted(self)
@@ -394,6 +459,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         X = to_dataframe(X, copy=True)
 
         transformed_X = self.column_transformer_.transform(X)
+        if sp.issparse(transformed_X):
+            transformed_X = transformed_X.toarray()
+        transformed_X = np.asarray(transformed_X)
+        if self.dtype is not None:
+            transformed_X = transformed_X.astype(self.dtype, copy=False)
+
+        fmt, self.output_report_ = compute_output_report(transformed_X, self.output_format)
+
+        container = _get_output_config("transform", self)["dense"]
+        if container in ("pandas", "polars"):
+            return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
 
         slices = None if return_array else get_output_slices(self.column_transformer_, X)
         return format_output(
@@ -402,6 +478,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             slices=slices,
             embeddings=embeddings,
             embeddings_expected=self.embeddings_,
+            output_format=fmt,
         )
 
     def fit_transform(self, X, y=None, embeddings=None, return_array=False):
@@ -504,6 +581,103 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             else:
                 dims[columns[0]] = width
         return dims
+
+    def _output_itemsize(self) -> int:
+        """Bytes per element of the dense transformed array (float64 for now)."""
+        return np.dtype(np.float64).itemsize
+
+    def estimate_output_shape(self, X) -> tuple:
+        """Estimate the shape of the dense transformed array for ``X``.
+
+        Fitted method. Returns ``(n_rows, total_output_dim_)`` where ``n_rows`` is
+        the number of rows in ``X`` and the column count is the fitted output width
+        (the same width :meth:`transform` would produce with ``return_array=True``).
+
+        Parameters
+        ----------
+        X : pandas.DataFrame, numpy.ndarray, or dict
+            Input whose row count drives the estimate; not transformed.
+
+        Returns
+        -------
+        tuple of int
+            ``(n_rows, n_output_columns)``.
+        """
+        check_is_fitted(self)
+        n_rows = to_dataframe(X).shape[0]
+        return (int(n_rows), int(self.total_output_dim_))
+
+    def estimate_memory(self, X) -> int:
+        """Estimate the dense-array memory footprint (in bytes) of transforming ``X``.
+
+        Fitted method. Computed as ``n_rows * total_output_dim_ * itemsize`` for the
+        dense output dtype, without materialising the transform.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame, numpy.ndarray, or dict
+            Input whose row count drives the estimate; not transformed.
+
+        Returns
+        -------
+        int
+            Estimated number of bytes for the dense transformed array.
+        """
+        n_rows, n_cols = self.estimate_output_shape(X)
+        return int(n_rows * n_cols * self._output_itemsize())
+
+    def _enforce_output_budget(self, n_rows: int) -> None:
+        """Check the fitted output width against the configured output budget.
+
+        Runs at the end of :meth:`fit`. When no budget parameter is set this is a
+        no-op (the historical behaviour). Any violation is handled according to
+        ``overflow_policy``: ``"error"`` raises
+        :class:`~pretab.exceptions.OutputBudgetError`, ``"warn"`` emits a
+        :class:`~pretab.exceptions.ConfigWarning`, and ``"ignore"`` proceeds
+        silently.
+        """
+        valid_policies = ("error", "warn", "ignore")
+        if self.overflow_policy not in valid_policies:
+            raise invalid_param_error(
+                type(self).__name__,
+                "overflow_policy",
+                self.overflow_policy,
+                "must be one of 'error', 'warn', 'ignore'",
+                valid=set(valid_policies),
+            )
+
+        violations: list[str] = []
+
+        total = int(self.total_output_dim_)
+        if self.max_output_features is not None and total > self.max_output_features:
+            violations.append(
+                f"total output columns ({total}) exceed max_output_features ({self.max_output_features})"
+            )
+
+        if self.max_features_per_input is not None:
+            for feature, width in self.output_dims_.items():
+                if width > self.max_features_per_input:
+                    violations.append(
+                        f"feature {feature!r} expands to {width} columns, "
+                        f"exceeding max_features_per_input ({self.max_features_per_input})"
+                    )
+
+        if self.max_dense_memory is not None:
+            estimated = n_rows * total * self._output_itemsize()
+            if estimated > self.max_dense_memory:
+                violations.append(
+                    f"dense output for {n_rows} row(s) needs ~{estimated} bytes, "
+                    f"exceeding max_dense_memory ({self.max_dense_memory})"
+                )
+
+        if not violations:
+            return
+
+        message = "Output budget exceeded: " + "; ".join(violations) + "."
+        if self.overflow_policy == "error":
+            raise OutputBudgetError(message)
+        if self.overflow_policy == "warn":
+            warnings.warn(message, ConfigWarning, stacklevel=2)
 
     def get_feature_info(self, verbose=True):
         """
