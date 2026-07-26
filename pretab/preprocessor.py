@@ -1,18 +1,29 @@
+import time
+
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
-from sklearn.exceptions import NotFittedError
 from sklearn.pipeline import Pipeline
-from sklearn.base import TransformerMixin
+from sklearn.utils.validation import check_is_fitted
 
-from .utils import (
-    get_numerical_transformer_steps,
+from .core.exceptions import (
+    IncompatibleParamsError,
+    invalid_param_error,
+)
+from .core.logging import configure_logging, get_logger
+from .core.params import validate_placement
+from .pipeline import (
     get_categorical_transformer_steps,
+    get_numerical_transformer_steps,
 )
 
+logger = get_logger(__name__)
 
-class Preprocessor(TransformerMixin):
-    """
+
+
+class Preprocessor(TransformerMixin, BaseEstimator):
+    r"""
     Preprocessor class for automated tabular feature preprocessing using scikit-learn-compatible pipelines.
 
     This class provides a flexible interface for preprocessing tabular datasets containing numerical and
@@ -31,199 +42,223 @@ class Preprocessor(TransformerMixin):
 
     Parameters
     ----------
+    numerical_method : str, default="ple"
+        Preprocessing strategy applied to every numerical column unless overridden per feature.
+        Common choices: ``"ple"`` (piecewise-linear encoding), ``"minmax"`` / ``"standardization"``
+        / ``"robust"`` (scaling), ``"quantile"`` (rank transform), ``"rbf"`` / ``"relu"`` /
+        ``"sigmoid"`` / ``"tanh"`` (feature maps), and ``"cubicspline"`` / ``"naturalspline"`` /
+        ``"pspline"`` / ``"bspline"`` (spline bases). Pass ``None`` (resolved to ``"none"``) to leave
+        numerical columns unchanged. See *Notes* for the complete list.
+    categorical_method : str, default="int"
+        Preprocessing strategy applied to every categorical column unless overridden per feature.
+        Choices: ``"int"`` (contiguous integer codes), ``"one-hot"`` (dummy columns),
+        ``"onehot_from_ordinal"`` (integer codes then one-hot), ``"pretrained"`` (sentence-transformer
+        language embeddings), and ``"custombin"`` (discretized bin codes). Pass ``None`` (resolved to
+        ``"none"``) to leave categorical columns unchanged.
     feature_preprocessing : dict, optional
-        Dictionary mapping feature names to specific preprocessing methods. Overrides global defaults.
-    n_bins : int, default=64
-        Number of bins used for binning-based preprocessing (e.g., for discretizers or PLE).
-    numerical_preprocessing : str, default="ple"
-        Preprocessing method for numerical features (e.g., "standardization", "minmax", "ple", "rbf", etc.).
-    categorical_preprocessing : str, default="int"
-        Preprocessing method for categorical features (e.g., "int", "ordinal", "onehot").
-    use_decision_tree_bins : bool, default=False
-        Whether to use decision tree binning for numerical discretization.
-    binning_strategy : str, default="uniform"
-        Strategy for bin placement when not using tree-based methods. Options: "uniform", "quantile".
-    task : str, default="regression"
-        Problem type used to guide preprocessing (e.g., "regression" or "classification").
-    cat_cutoff : float or int, default=0.03
-        Threshold to determine whether integer-valued features are treated as categorical.
-    treat_all_integers_as_numerical : bool, default=False
-        If True, treat all integer-typed columns as numerical regardless of cardinality.
+        Mapping of individual column names to a method, overriding the global ``numerical_method`` /
+        ``categorical_method`` for those columns only, e.g.
+        ``{"age": "cubicspline", "city": "pretrained"}``. Columns absent from the dict fall back to
+        the global defaults.
+    output_dim : int, default=7
+        The single width knob shared by every numerical method: the number of non-bias output
+        columns produced per input feature (bins for PLE/binning, centers for the feature maps,
+        basis functions for the splines). The B/M/I splines clamp it into their supported
+        ``[5, 50]`` range. Used as the fixed per-feature width when ``adaptive`` is False.
     degree : int, default=3
-        Degree of polynomial or spline basis functions where applicable.
-    scaling_strategy : str, default="minmax"
-        Strategy for feature scaling (e.g., "standardization", "minmax", etc.).
-    n_knots : int, default=64
-        Number of knots used in spline-based feature expansions.
-    use_decision_tree_knots : bool, default=True
-        Whether to use decision tree-based knot placement for spline transformations.
-    knots_strategy : str, default="uniform"
-        Strategy for placing knots for splines ("uniform" or "quantile").
-    spline_implementation : str, default="sklearn"
-        Which spline backend implementation to use (e.g., "sklearn", "custom").
-    min_unique_vals : int, default=5
-        Minimum number of unique values required for a feature to be treated as numerical.
+        Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
+        (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.
+    target_aware : bool, default=True
+        Whether target-aware methods (feature maps and splines) use ``y`` to place their basis
+        units, e.g. decision-tree knot/center selection. Requires ``y`` to be passed to ``fit``;
+        set to False for a purely unsupervised, ``y``-free fit. Pairs with ``placement_strategy``:
+        when True the strategy must be ``"cart"`` or ``"lightgbm"``; when False it must be
+        ``"uniform"`` or ``"quantile"``.
+    placement_strategy : str, default="cart"
+        How basis units / knots are placed, interpreted according to ``target_aware``. When
+        ``target_aware`` is True: ``"cart"`` (a single decision tree, always available) or
+        ``"lightgbm"`` (a gradient-boosted ensemble, requires the optional ``lightgbm``
+        dependency). When ``target_aware`` is False: ``"uniform"`` (evenly spaced across the
+        feature range) or ``"quantile"`` (spaced by the data quantiles). Applies to the feature
+        maps, PLE, and the knot-based splines (``"bspline"`` / ``"mspline"`` / ``"ispline"`` /
+        ``"cubicspline"`` / ``"naturalspline"``); the always-target-aware ``"ple"`` only honors the
+        supervised strategies, while the penalized ``"pspline"`` / ``"tensorspline"`` (which assume
+        equally-spaced knots) and the kernel-based ``"tprs"`` only honor the unsupervised ones.
+    task : str, default="regression"
+        Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
+        place basis units / knots against ``y``. Only consulted when ``target_aware`` is True.
+    adaptive : bool, default=False
+        Whether adaptive-capable methods size each feature's output dimension from the data
+        (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
+        Fixed-width methods (e.g. plain scalers) ignore this flag.
+    min_output_dim : int, default=5
+        Lower bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
+        fixed-width methods and when ``adaptive`` is False.
+    max_output_dim : int, default=10
+        Upper bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
+        fixed-width methods and when ``adaptive`` is False.
+    random_state : int or None, default=None
+        Global seed forwarded to every stochastic numerical method (PLE and feature-map
+        decision trees, the ``quantile`` transformer, and target-aware spline knot
+        selectors) to make ``fit`` reproducible. When ``None`` (the default) each transformer
+        keeps its own default seed, so the value is only propagated when explicitly set --
+        preserving prior behavior while giving a single knob to pin reproducibility. Forwarded
+        by ``get_params`` / ``clone`` so an embedding host (e.g. DeepTab) can pass it through.
+    scaling : str, default="minmax"
+        Optional scaler inserted *before* the numerical method: ``"minmax"`` (rescale to ``[-1, 1]``)
+        or ``"standardization"`` (zero mean, unit variance). Skipped automatically when the chosen
+        method already scales (e.g. ``numerical_method="minmax"``).
+    cat_cutoff : float or int, default=0.03
+        Threshold deciding whether an integer column is treated as categorical. A float is a
+        unique-ratio cutoff (``n_unique / n_rows < cat_cutoff`` -> categorical); an int is an
+        absolute unique-count cutoff (``n_unique < cat_cutoff`` -> categorical).
+    treat_all_integers_as_numerical : bool, default=False
+        If True, every integer-typed column is treated as numerical regardless of cardinality,
+        bypassing the ``cat_cutoff`` heuristic.
+    handle_missing : {"error", "median"}, default="median"
+        Missing-value policy. ``"median"`` keeps the default mean ``SimpleImputer`` that runs
+        before every numerical method (so NaNs are filled and, e.g., PLE uses its median
+        handling). ``"error"`` drops that imputer so missing values are *not* silently filled
+        and reach the transformers, which then raise on NaN. Forwarded to the NaN-aware
+        methods (currently PLE) via the numerical pipeline.
+    verbose : int, default=0
+        Verbosity level controlling ``fit``-time logging, applied through the shared
+        ``"pretab"`` logger so a single setting on this entry point governs the whole
+        package (including the individual numerical/categorical transformers). Accepts an
+        int ``0``-``3`` and also ``bool`` (``True`` -> ``1``, ``False`` -> ``0``):
+
+        - ``0`` -- silent on the happy path (only :class:`~pretab.PretabWarning` data warnings).
+        - ``1`` -- one fit-summary line (feature counts, resolved methods, total output width, duration).
+        - ``2`` -- the per-feature table that :meth:`get_feature_info` builds.
+        - ``3`` -- internal decisions (fitted bins / knots / centers).
+
+        Stored verbatim and forwarded by ``get_params`` / ``clone``, so an embedding host
+        (e.g. DeepTab) can pass it straight through ``Preprocessor(**kwargs)``. PreTab never
+        configures the root logger or attaches a handler when the host already owns one, so
+        ``verbose=0`` keeps PreTab silent under a host's own logging.
 
     Attributes
     ----------
-    column_transformer : ColumnTransformer
+    column_transformer\_ : ColumnTransformer
         The internal scikit-learn column transformer that handles feature-wise preprocessing.
-    fitted : bool
-        Whether the preprocessor has been fitted.
-    embeddings : bool
-        Whether embedding vectors are expected and used in transformation.
-    embedding_dimensions : dict
+        Set when the preprocessor is fitted.
+    n_features_in\_ : int
+        Number of input features seen during ``fit``.
+    total_output_dim\_ : int
+        Total number of output columns produced across all input features
+        (equals the width of ``transform(..., return_array=True)``).
+    output_dims\_ : dict
+        Per-feature expanded output-column counts, keyed by input feature name.
+        The values sum to ``total_output_dim_``.
+    embeddings\_ : bool
+        Whether embedding vectors were provided at ``fit`` time and are expected in transformation.
+    embedding_dimensions\_ : dict
         Dictionary of embedding feature names to their expected dimensionality.
+
+    Notes
+    -----
+    Available ``numerical_method`` values: ``"none"``, ``"minmax"``, ``"standardization"``,
+    ``"robust"``, ``"quantile"``, ``"polynomial"``, ``"box-cox"``, ``"yeo-johnson"``, ``"ple"``,
+    ``"custombin"``, ``"rbf"``, ``"relu"``, ``"sigmoid"``, ``"tanh"``, ``"cubicspline"``,
+    ``"naturalspline"``, ``"pspline"``, ``"tensorspline"``, ``"tprs"``, ``"bspline"``,
+    ``"mspline"``, ``"ispline"``.
+
+    Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
+    ``"pretrained"``, ``"custombin"``, ``"none"``. The ``"pretrained"`` method requires the optional
+    ``sentence-transformers`` dependency (``pip install "pretab[embeddings]"``).
+
+    Method names are resolved case-insensitively and ignore ``-`` / ``_`` / space separators, so
+    ``"one-hot"``, ``"one_hot"`` and ``"OneHot"`` are equivalent. Common synonyms and abbreviations
+    are also accepted, e.g. ``"std"`` / ``"standard"`` -> ``"standardization"``, ``"ohe"`` /
+    ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
+    ``"polynomial"``, ``"thin-plate"`` -> ``"tprs"``, and ``"passthrough"`` -> ``"none"``.
+
+    ``transform`` returns a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` by
+    default, or a single stacked array when ``return_array=True``.
 
     Examples
     --------
-    >>> from prefab import Preprocessor
+    Basic usage -- PLE for numerics and integer codes for categoricals (the defaults):
+
     >>> import pandas as pd
-    >>> df = pd.DataFrame({
-    ...     "age": [25, 32, 47],
-    ...     "gender": ["M", "F", "F"]
-    ... })
+    >>> from pretab import Preprocessor
+    >>> df = pd.DataFrame({"age": [25, 32, 47, 51], "gender": ["M", "F", "F", "M"]})
+    >>> y = [0.1, 0.4, 0.9, 1.2]
     >>> pre = Preprocessor()
-    >>> pre.fit(df)
-    >>> out = pre.transform(df)
-    >>> out.keys()
-    dict_keys(['num_age', 'cat_gender'])
+    >>> out = pre.fit_transform(df, y)
+    >>> sorted(out.keys())
+    ['cat_gender', 'num_age']
+
+    Cubic-spline basis for numerics with one-hot encoded categoricals:
+
+    >>> pre = Preprocessor(numerical_method="cubicspline", categorical_method="one-hot",
+    ...                    output_dim=10, degree=3)
+    >>> out = pre.fit_transform(df, y)
+
+    Radial-basis feature maps with target-aware center placement:
+
+    >>> pre = Preprocessor(numerical_method="rbf", target_aware=True, task="regression",
+    ...                    output_dim=8)
+    >>> out = pre.fit_transform(df, y)
+
+    A different method per column via ``feature_preprocessing``:
+
+    >>> pre = Preprocessor(feature_preprocessing={"age": "pspline", "gender": "one-hot"})
+    >>> out = pre.fit_transform(df, y)
+
+    Data-driven (adaptive) width, returned as a single stacked array:
+
+    >>> pre = Preprocessor(numerical_method="ple", adaptive=True,
+    ...                    min_output_dim=4, max_output_dim=12)
+    >>> arr = pre.fit_transform(df, y, return_array=True)
+    >>> arr.ndim
+    2
     """
 
     def __init__(
         self,
+        numerical_method="ple",
+        categorical_method="int",
         feature_preprocessing=None,
-        n_bins=64,
-        numerical_preprocessing="ple",
-        categorical_preprocessing="int",
-        use_decision_tree_bins=False,
-        binning_strategy="uniform",
+        output_dim=7,
+        degree=3,
+        target_aware=True,
+        placement_strategy="cart",
         task="regression",
+        adaptive=False,
+        min_output_dim=5,
+        max_output_dim=10,
+        random_state=None,
+        scaling="minmax",
         cat_cutoff=0.03,
         treat_all_integers_as_numerical=False,
-        degree=3,
-        scaling_strategy="minmax",
-        n_knots=64,
-        use_decision_tree_knots=True,
-        knots_strategy="uniform",
-        spline_implementation="sklearn",
-        min_unique_vals=5,
+        handle_missing="median",
+        verbose=0,
     ):
         """
         Initialize the Preprocessor with various transformation options for tabular data.
 
-        Parameters
-        ----------
-        feature_preprocessing : dict, optional
-            Dictionary specifying preprocessing methods per feature. If None, global settings are used.
-        n_bins : int, default=64
-            Number of bins to use for binning-based transformations.
-        numerical_preprocessing : str, default="ple"
-            Preprocessing strategy for numerical features.
-        categorical_preprocessing : str, default="int"
-            Preprocessing strategy for categorical features.
-        use_decision_tree_bins : bool, default=False
-            Whether to use decision tree-based binning for numerical features.
-        binning_strategy : str, default="uniform"
-            Strategy for determining bin edges ("uniform", "quantile").
-        task : str, default="regression"
-            Task type for decision tree splitting ("regression", "classification").
-        cat_cutoff : float or int, default=0.03
-            Threshold to determine whether integer-valued columns are treated as categorical.
-        treat_all_integers_as_numerical : bool, default=False
-            If True, treat all integer columns as numerical.
-        degree : int, default=3
-            Degree of polynomial or spline basis expansion.
-        scaling_strategy : str, default="minmax"
-            Scaling method for numerical data ("standardization", "minmax", etc.).
-        n_knots : int, default=64
-            Number of knots for spline transformations.
-        use_decision_tree_knots : bool, default=True
-            Use decision tree-based knot placement for splines.
-        knots_strategy : str, default="uniform"
-            Strategy for placing spline knots.
-        spline_implementation : str, default="sklearn"
-            Backend implementation to use for splines.
-        min_unique_vals : int, default=5
-            Minimum number of unique values required for numerical processing.
+        See the :class:`Preprocessor` class docstring for the full parameter reference,
+        available ``numerical_method`` / ``categorical_method`` values, and usage examples.
         """
 
-        self.n_bins = n_bins
-        self.numerical_preprocessing = (
-            numerical_preprocessing.lower()
-            if numerical_preprocessing is not None
-            else "none"
-        )
-        self.categorical_preprocessing = (
-            categorical_preprocessing.lower()
-            if categorical_preprocessing is not None
-            else "none"
-        )
-
-        self.use_decision_tree_bins = use_decision_tree_bins
-        self.feature_preprocessing = feature_preprocessing or {}
-        self.column_transformer = None
-        self.fitted = False
-        self.binning_strategy = binning_strategy
+        self.numerical_method = numerical_method
+        self.categorical_method = categorical_method
+        self.feature_preprocessing = feature_preprocessing
+        self.output_dim = output_dim
+        self.degree = degree
+        self.target_aware = target_aware
+        self.placement_strategy = placement_strategy
         self.task = task
+        self.adaptive = adaptive
+        self.min_output_dim = min_output_dim
+        self.max_output_dim = max_output_dim
+        self.random_state = random_state
+        self.scaling = scaling
         self.cat_cutoff = cat_cutoff
         self.treat_all_integers_as_numerical = treat_all_integers_as_numerical
-        self.degree = degree
-        self.scaling_strategy = scaling_strategy
-        self.n_knots = n_knots
-        self.use_decision_tree_knots = use_decision_tree_knots
-        self.knots_strategy = knots_strategy
-        self.spline_implementation = spline_implementation
-        self.min_unique_vals = min_unique_vals
-        self.embeddings = False
-        self.embedding_dimensions = {}
-
-    def get_params(self, deep=True):
-        """Get parameters for the preprocessor.
-
-        Parameters
-        ----------
-        deep : bool, default=True
-            If True, will return parameters of subobjects that are estimators.
-
-        Returns
-        -------
-        params : dict
-            Parameter names mapped to their values.
-        """
-        params = {
-            "n_bins": self.n_bins,
-            "numerical_preprocessing": self.numerical_preprocessing,
-            "categorical_preprocessing": self.categorical_preprocessing,
-            "use_decision_tree_bins": self.use_decision_tree_bins,
-            "binning_strategy": self.binning_strategy,
-            "task": self.task,
-            "cat_cutoff": self.cat_cutoff,
-            "treat_all_integers_as_numerical": self.treat_all_integers_as_numerical,
-            "degree": self.degree,
-            "scaling_strategy": self.scaling_strategy,
-            "n_knots": self.n_knots,
-            "use_decision_tree_knots": self.use_decision_tree_knots,
-            "knots_strategy": self.knots_strategy,
-        }
-        return params
-
-    def set_params(self, **params):
-        """Set parameters for the preprocessor.
-
-        Parameters
-        ----------
-        **params : dict
-            Parameter names mapped to their new values.
-
-        Returns
-        -------
-        self : object
-            Preprocessor instance.
-        """
-        for key, value in params.items():
-            setattr(self, key, value)
-        return self
+        self.handle_missing = handle_missing
+        self.verbose = verbose
 
     def _detect_column_types(self, X):
         """
@@ -264,8 +299,9 @@ class Preprocessor(TransformerMixin):
                 elif isinstance(self.cat_cutoff, int):
                     cutoff_condition = num_unique_values < self.cat_cutoff
                 else:
-                    raise ValueError(
-                        "cat_cutoff should be either a float or an integer."
+                    raise invalid_param_error(
+                        type(self).__name__, "cat_cutoff", self.cat_cutoff,
+                        "must be a float (unique-ratio cutoff) or an int (absolute unique-count cutoff)",
                     )
 
                 if X[col].dtype.kind not in "iufc" or (
@@ -296,53 +332,96 @@ class Preprocessor(TransformerMixin):
             Fitted instance of the preprocessor.
         """
 
+        verbose = int(self.verbose or 0)
+        if verbose > 0:
+            configure_logging(verbose)
+        start_time = time.perf_counter()
+
+        validate_placement(self.target_aware, self.placement_strategy)
+
         if isinstance(X, dict):
             X = pd.DataFrame(X)
         elif isinstance(X, np.ndarray):
             X = pd.DataFrame(X, columns=[f"feature_{i}" for i in range(X.shape[1])])
 
+        numerical_method = (
+            self.numerical_method.lower()
+            if self.numerical_method is not None
+            else "none"
+        )
+        categorical_method = (
+            self.categorical_method.lower()
+            if self.categorical_method is not None
+            else "none"
+        )
+        feature_preprocessing = self.feature_preprocessing or {}
+
+        self.embeddings_ = False
+        self.embedding_dimensions_ = {}
         if embeddings is not None:
-            self.embeddings = True
+            self.embeddings_ = True
             if isinstance(embeddings, np.ndarray):
-                self.embedding_dimensions["embedding_1"] = embeddings.shape[1]
+                self.embedding_dimensions_["embedding_1"] = embeddings.shape[1]
             elif isinstance(embeddings, list):
                 for i, e in enumerate(embeddings):
-                    self.embedding_dimensions[f"embedding_{i + 1}"] = e.shape[1]
+                    self.embedding_dimensions_[f"embedding_{i + 1}"] = e.shape[1]
 
         numerical_features, categorical_features = self._detect_column_types(X)
         transformers = []
 
         for feature in numerical_features:
-            method = self.feature_preprocessing.get(
-                feature, self.numerical_preprocessing
-            )
+            method = feature_preprocessing.get(feature, numerical_method)
+            # Forward ``random_state`` only when the user set one, so unset keeps
+            # each transformer's own default seed (PLE / selectors = 51, others
+            # unseeded) and a set value pins every stochastic method globally.
+            seed_kwargs = {} if self.random_state is None else {"random_state": self.random_state}
             steps = get_numerical_transformer_steps(
                 method=method,
                 task=self.task,
-                use_decision_tree=self.use_decision_tree_knots,
-                add_imputer=True,
+                target_aware=self.target_aware,
+                add_imputer=self.handle_missing != "error",
                 imputer_strategy="mean",
-                bins=self.n_bins,
+                output_dim=self.output_dim,
+                adaptive=self.adaptive,
+                min_output_dim=self.min_output_dim if self.adaptive else None,
+                max_output_dim=self.max_output_dim if self.adaptive else None,
                 degree=self.degree,
-                n_knots=self.n_knots,
-                scaling=self.scaling_strategy,
-                strategy=self.knots_strategy,
-                implementation=self.spline_implementation,
+                scaling=self.scaling,
+                placement_strategy=self.placement_strategy,
+                handle_missing=self.handle_missing,
+                **seed_kwargs,
             )
             transformers.append((f"num_{feature}", Pipeline(steps), [feature]))
 
         for feature in categorical_features:
-            method = self.feature_preprocessing.get(
-                feature, self.categorical_preprocessing
-            )
-            steps = get_categorical_transformer_steps(method)
+            method = feature_preprocessing.get(feature, categorical_method)
+            steps = get_categorical_transformer_steps(method, output_dim=self.output_dim)
             transformers.append((f"cat_{feature}", Pipeline(steps), [feature]))
 
-        self.column_transformer = ColumnTransformer(
+        self.column_transformer_ = ColumnTransformer(
             transformers=transformers, remainder="passthrough"
         )
-        self.column_transformer.fit(X, y)
-        self.fitted = True
+        self.column_transformer_.fit(X, y)
+        self.n_features_in_ = X.shape[1]
+
+        if verbose >= 1:
+            logger.info(
+                "fit complete: %d numerical (%s) + %d categorical (%s) feature(s) "
+                "-> %d output columns in %.3fs",
+                len(numerical_features),
+                numerical_method,
+                len(categorical_features),
+                categorical_method,
+                len(self.get_feature_names_out()),
+                time.perf_counter() - start_time,
+            )
+        if verbose >= 2:
+            info = self.get_feature_info(verbose=False)
+            for line in self._feature_table_lines(*info):
+                logger.debug(line)
+        if verbose >= 3:
+            self._log_internal_decisions()
+
         return self
 
     def transform(self, X, embeddings=None, return_array=False):
@@ -364,10 +443,7 @@ class Preprocessor(TransformerMixin):
             Transformed data. A dictionary if return_array=False, else a NumPy array.
         """
 
-        if not self.fitted:
-            raise NotFittedError(
-                "Preprocessor must be fitted before calling transform."
-            )
+        check_is_fitted(self)
 
         if isinstance(X, dict):
             X = pd.DataFrame(X)
@@ -376,14 +452,14 @@ class Preprocessor(TransformerMixin):
         else:
             X = X.copy()
 
-        transformed_X = self.column_transformer.transform(X)
+        transformed_X = self.column_transformer_.transform(X)
 
         if return_array:
             return transformed_X
 
         transformed_dict = {}
         start = 0
-        for name, transformer, columns in self.column_transformer.transformers_:
+        for name, transformer, columns in self.column_transformer_.transformers_:
             if transformer == "drop":
                 continue
             if hasattr(transformer, "transform"):
@@ -394,8 +470,12 @@ class Preprocessor(TransformerMixin):
             start += width
 
         if embeddings is not None:
-            if not self.embeddings:
-                raise ValueError("Embeddings were not expected, but were provided.")
+            if not self.embeddings_:
+                raise IncompatibleParamsError(
+                    "Embeddings were not expected, but were provided.\n"
+                    "Fix: configure an embedding feature in feature_preprocessing before "
+                    "passing embeddings to transform, or omit the embeddings argument."
+                )
             if isinstance(embeddings, np.ndarray):
                 transformed_dict["embedding_1"] = embeddings.astype(np.float32)
             elif isinstance(embeddings, list):
@@ -429,6 +509,68 @@ class Preprocessor(TransformerMixin):
             X, embeddings, return_array
         )
 
+    def get_feature_names_out(self, input_features=None):
+        """
+        Get output feature names for transformation.
+
+        Delegates to the fitted internal :class:`~sklearn.compose.ColumnTransformer`,
+        returning one name per output column of the stacked array produced by
+        ``transform(..., return_array=True)``.
+
+        Parameters
+        ----------
+        input_features : array-like of str or None, default=None
+            Input feature names. Passed through to the underlying column transformer.
+
+        Returns
+        -------
+        feature_names_out : numpy.ndarray of str
+            Transformed feature names.
+        """
+
+        check_is_fitted(self)
+        return self.column_transformer_.get_feature_names_out(input_features)
+
+    @property
+    def total_output_dim_(self) -> int:
+        """Total number of output columns produced across all input features.
+
+        Fitted attribute (available only after ``fit``). Defined as
+        ``len(self.get_feature_names_out())`` so it always equals the true width
+        of the array returned by ``transform(..., return_array=True)``.
+        """
+        check_is_fitted(self)
+        return len(self.get_feature_names_out())
+
+    @property
+    def output_dims_(self) -> dict:
+        """Per-feature expanded output-column counts.
+
+        Fitted attribute (available only after ``fit``). Maps each input feature
+        (by name) to the number of columns it contributes to the transformed
+        array, complementing the scalar :attr:`total_output_dim_`. The values sum
+        to :attr:`total_output_dim_`. Useful when features get different
+        ``output_dim`` values (via ``feature_preprocessing``) or expand to a
+        non-uniform width (e.g. one-hot encoded categoricals).
+        """
+        check_is_fitted(self)
+        column_transformer = self.column_transformer_
+        output_indices = column_transformer.output_indices_
+        dims: dict = {}
+        for name, _transformer, columns in column_transformer.transformers_:
+            span = output_indices[name]
+            width = span.stop - span.start
+            if width == 0:
+                continue
+            if name == "remainder":
+                # Passthrough columns: one output column per untransformed feature.
+                for full in column_transformer.get_feature_names_out()[span]:
+                    feature = full.split("__", 1)[-1] if "__" in full else full
+                    dims[feature] = dims.get(feature, 0) + 1
+            else:
+                dims[columns[0]] = width
+        return dims
+
     def get_feature_info(self, verbose=True):
         """
         Retrieves metadata about the transformed features.
@@ -442,7 +584,9 @@ class Preprocessor(TransformerMixin):
         Parameters
         ----------
         verbose : bool, default=True
-            If True, prints detailed information for each feature.
+            If True, renders an aligned per-feature table through the ``pretab``
+            logger (attaching a stream handler when none is configured). If False,
+            the info dicts are returned silently.
 
         Returns
         -------
@@ -455,10 +599,7 @@ class Preprocessor(TransformerMixin):
                 Metadata for embedding features, if used.
         """
 
-        if not self.fitted:
-            raise NotFittedError(
-                "Preprocessor must be fitted before calling get_feature_info."
-            )
+        check_is_fitted(self)
 
         numerical_feature_info = {}
         categorical_feature_info = {}
@@ -466,9 +607,9 @@ class Preprocessor(TransformerMixin):
         embedding_feature_info = (
             {
                 key: {"preprocessing": None, "dimension": dim, "categories": None}
-                for key, dim in self.embedding_dimensions.items()
+                for key, dim in self.embedding_dimensions_.items()
             }
-            if self.embeddings
+            if self.embeddings_
             else {}
         )
 
@@ -476,7 +617,7 @@ class Preprocessor(TransformerMixin):
             name,
             transformer_pipeline,
             columns,
-        ) in self.column_transformer.transformers_:
+        ) in self.column_transformer_.transformers_:
             steps = [step[0] for step in transformer_pipeline.steps]
 
             for feature_name in columns:
@@ -501,17 +642,18 @@ class Preprocessor(TransformerMixin):
                         try:
                             transformed_feature = last_step.transform(dummy_input)
                             dimension = transformed_feature.shape[1]
-                        except Exception:
+                        except (ValueError, TypeError, AttributeError, IndexError) as exc:
+                            logger.debug(
+                                "Could not introspect output width of %r: %s",
+                                feature_name,
+                                exc,
+                            )
                             dimension = None
                     numerical_feature_info[feature_name] = {
                         "preprocessing": preprocessing_type,
                         "dimension": dimension,
                         "categories": None,
                     }
-                    if verbose:
-                        print(
-                            f"Numerical Feature: {feature_name}, Info: {numerical_feature_info[feature_name]}"
-                        )
 
                 elif "continuous_ordinal" in steps:
                     step = transformer_pipeline.named_steps["continuous_ordinal"]
@@ -522,10 +664,6 @@ class Preprocessor(TransformerMixin):
                         "dimension": dimension,
                         "categories": categories,
                     }
-                    if verbose:
-                        print(
-                            f"Categorical Feature (Ordinal): {feature_name}, Info: {categorical_feature_info[feature_name]}"
-                        )
 
                 elif "onehot" in steps:
                     step = transformer_pipeline.named_steps["onehot"]
@@ -537,10 +675,6 @@ class Preprocessor(TransformerMixin):
                         "dimension": dimension,
                         "categories": categories,
                     }
-                    if verbose:
-                        print(
-                            f"Categorical Feature (One-Hot): {feature_name}, Info: {categorical_feature_info[feature_name]}"
-                        )
 
                 else:
                     last_step = transformer_pipeline.steps[-1][1]
@@ -549,7 +683,12 @@ class Preprocessor(TransformerMixin):
                         try:
                             transformed_feature = last_step.transform(dummy_input)
                             dimension = transformed_feature.shape[1]
-                        except Exception:
+                        except (ValueError, TypeError, AttributeError, IndexError) as exc:
+                            logger.debug(
+                                "Could not introspect output width of %r: %s",
+                                feature_name,
+                                exc,
+                            )
                             dimension = None
                     if "cat" in name:
                         categorical_feature_info[feature_name] = {
@@ -563,17 +702,66 @@ class Preprocessor(TransformerMixin):
                             "dimension": dimension,
                             "categories": None,
                         }
-                    if verbose:
-                        print(
-                            f"Feature: {feature_name}, Info: {preprocessing_type}, Dimension: {dimension}"
-                        )
 
-                if verbose:
-                    print("-" * 50)
-
-        if verbose and self.embeddings:
-            print("Embeddings:")
-            for key, value in embedding_feature_info.items():
-                print(f"  Feature: {key}, Dimension: {value['dimension']}")
+        if verbose:
+            configure_logging(1)
+            for line in self._feature_table_lines(
+                numerical_feature_info,
+                categorical_feature_info,
+                embedding_feature_info,
+            ):
+                logger.info(line)
 
         return numerical_feature_info, categorical_feature_info, embedding_feature_info
+
+    def _feature_table_lines(self, numerical_info, categorical_info, embedding_info):
+        """Build aligned, human-readable rows describing the fitted feature layout."""
+        rows = []
+        for feat, info in numerical_info.items():
+            rows.append(
+                (str(feat), "numerical", str(info["preprocessing"]), info["dimension"], info["categories"])
+            )
+        for feat, info in categorical_info.items():
+            rows.append(
+                (str(feat), "categorical", str(info["preprocessing"]), info["dimension"], info["categories"])
+            )
+        for feat, info in embedding_info.items():
+            rows.append((str(feat), "embedding", "-", info["dimension"], info["categories"]))
+        if not rows:
+            return []
+
+        feat_w = max(len("feature"), *(len(r[0]) for r in rows))
+        kind_w = max(len("kind"), *(len(r[1]) for r in rows))
+        pipe_w = max(len("pipeline"), *(len(r[2]) for r in rows))
+        header = (
+            f"{'feature':<{feat_w}}  {'kind':<{kind_w}}  "
+            f"{'pipeline':<{pipe_w}}  {'dim':>4}  {'cats':>5}"
+        )
+        lines = [header, "-" * len(header)]
+        for feat, kind, pipe, dim, cats in rows:
+            dim_s = "-" if dim is None else str(dim)
+            cats_s = "-" if cats is None else str(cats)
+            lines.append(
+                f"{feat:<{feat_w}}  {kind:<{kind_w}}  "
+                f"{pipe:<{pipe_w}}  {dim_s:>4}  {cats_s:>5}"
+            )
+        return lines
+
+    def _log_internal_decisions(self):
+        """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
+        for name, transformer, _columns in self.column_transformer_.transformers_:
+            last_step = (
+                transformer.steps[-1][1]
+                if hasattr(transformer, "steps")
+                else transformer
+            )
+            for attr in (
+                "thresholds_",
+                "knots_",
+                "centers_",
+                "n_knots_",
+                "total_output_dim_",
+            ):
+                if hasattr(last_step, attr):
+                    logger.debug("%s.%s = %r", name, attr, getattr(last_step, attr))
+

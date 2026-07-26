@@ -65,3 +65,37 @@ def test_onehot_transform_raises_if_not_fit():
     transformer = OneHotFromOrdinalTransformer()
     with pytest.raises(AttributeError):
         transformer.transform(X)
+
+
+def test_onehot_from_ordinal_unseen_larger_code_gives_zero_row():
+    transformer = OneHotFromOrdinalTransformer()
+    transformer.fit(np.array([[0], [1], [2]]))
+
+    # A code larger than the fitted range must not raise IndexError; it maps to
+    # an all-zero row (handle_unknown="ignore" behaviour).
+    Xt = transformer.transform(np.array([[1], [3]]))
+
+    expected = np.array(
+        [
+            [0, 1, 0],
+            [0, 0, 0],
+        ]
+    )
+    assert Xt.shape == (2, 3)
+    np.testing.assert_array_equal(Xt, expected)
+
+
+def test_onehot_from_ordinal_negative_code_gives_zero_row():
+    transformer = OneHotFromOrdinalTransformer()
+    transformer.fit(np.array([[0], [1], [2]]))
+
+    # Negative codes must not silently wrap around via numpy indexing.
+    Xt = transformer.transform(np.array([[-1], [0]]))
+
+    expected = np.array(
+        [
+            [0, 0, 0],
+            [1, 0, 0],
+        ]
+    )
+    np.testing.assert_array_equal(Xt, expected)

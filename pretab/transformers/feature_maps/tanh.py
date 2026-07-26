@@ -1,12 +1,11 @@
 import numpy as np
-import warnings
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
-from ..utils.utils import center_identification_using_decision_tree
+
+from ...core.params import UNSET
+from ._base import BaseCenterExpansion
 
 
-class TanhExpansionTransformer(BaseEstimator, TransformerMixin):
-    """
+class TanhExpansionTransformer(BaseCenterExpansion):
+    r"""
     Applies hyperbolic tangent (tanh) basis expansion to input features using specified or learned center locations.
 
     This transformer expands each input feature into multiple tanh-activated features, useful for capturing
@@ -14,103 +13,95 @@ class TanhExpansionTransformer(BaseEstimator, TransformerMixin):
 
     Parameters
     ----------
-    n_centers : int, default=10
-        Number of tanh centers per feature.
+    output_dim : int, default=6
+        Number of tanh centers (output columns) per feature.
 
     scale : float, default=1.0
         Controls the sharpness of the tanh transitions. Smaller values make the activation sharper.
 
-    use_decision_tree : bool, default=True
-        If True, uses a decision tree to determine the tanh center locations based on the input `X` and target `y`.
+    target_aware : bool, default=False
+        Whether to place centers with a target-aware selector (requires `y`).
+
+    placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, optional
+        Selector when `target_aware=True` (`"cart"` or `"lightgbm"`); spacing when
+        `target_aware=False` (`"uniform"` or `"quantile"`). If left unset, resolves
+        to `"cart"` on the target-aware path and `"quantile"` otherwise.
 
     task : {"regression", "classification"}, default="regression"
-        Type of prediction task. Required for decision tree-based center selection.
+        Task type for the target-aware selector used to place centers.
 
-    strategy : {"uniform", "quantile"}, default="uniform"
-        Strategy to determine center placement when `use_decision_tree=False`.
+    adaptive : bool, default=False
+        If True (with `target_aware=True`), the per-feature number of centers may
+        vary within `[min_output_dim, max_output_dim]` instead of being fixed to
+        `output_dim`. Has no effect on the `quantile` / `uniform` paths.
+
+    min_output_dim : int or None, default=None
+        Lower bound on the per-feature number of centers in adaptive mode.
+
+    max_output_dim : int or None, default=None
+        Upper bound on the per-feature number of centers in adaptive mode.
+
+    random_state : int or None, default=None
+        Random state forwarded to the target-aware selector for reproducibility.
 
     Attributes
     ----------
     centers_ : list of ndarray
         A list of center values for each input feature used in the tanh expansion.
 
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted).
+
     Notes
     -----
-    Each original feature `x` is transformed into `n_centers` features of the form:
-        tanh((x - c) / scale)
+    Each original feature :math:`x` is transformed into ``output_dim`` features of
+    the form
 
-    where `c` is a center value and `scale` controls the spread of the activation.
+    .. math::
+
+        \tanh\!\left(\frac{x - c}{s}\right),
+
+    where :math:`c` is a center value and :math:`s` (``scale``) controls the
+    spread of the activation on the non-target-aware path; the target-aware
+    default may place a data-driven number.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pretab.transformers import TanhExpansionTransformer
+    >>> X = np.array([[1.0], [2.0], [3.0]])
+    >>> transformer = TanhExpansionTransformer(output_dim=3, target_aware=False, placement_strategy="uniform")
+    >>> transformer.fit(X)
+    TanhExpansionTransformer(...)
+    >>> transformer.transform(X).shape
+    (3, 3)
     """
+
+    _feature_suffix_value = "tanh"
 
     def __init__(
         self,
-        n_centers=10,
+        output_dim=UNSET,
         scale: float = 1.0,
-        use_decision_tree=True,
+        target_aware: bool = False,
+        placement_strategy=UNSET,
         task: str = "regression",
-        strategy="uniform",
+        adaptive: bool = False,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
+        random_state: int | None = None,
     ):
-        self.n_centers = n_centers
-        self.scale = scale
-        self.use_decision_tree = use_decision_tree
-        self.strategy = strategy
-        self.task = task
-
-        if self.strategy not in ["uniform", "quantile"]:
-            raise ValueError("Invalid strategy. Choose 'uniform' or 'quantile'.")
-        if self.task not in ["regression", "classification"]:
-            raise ValueError("Invalid task. Choose 'regression' or 'classification'.")
-
-    def fit(self, X, y=None):
-        X = check_array(X, dtype=np.float64)
-
-        if not np.issubdtype(X.dtype, np.floating):
-            raise ValueError("Input X must be of float type.")
-
-        if self.use_decision_tree and y is None:
-            raise ValueError(
-                "Target variable 'y' must be provided when use_decision_tree=True."
-            )
-
-        self.centers_ = []
-
-        if self.use_decision_tree:
-            centers_list = center_identification_using_decision_tree(
-                X, y, self.task, self.n_centers
-            )
-        else:
-            if self.strategy == "quantile":
-                centers_list = [
-                    np.percentile(X[:, i], np.linspace(0, 100, self.n_centers))
-                    for i in range(X.shape[1])
-                ]
-            else:  # uniform
-                centers_list = [
-                    np.linspace(X[:, i].min(), X[:, i].max(), self.n_centers)
-                    for i in range(X.shape[1])
-                ]
-
-        self.centers_ = centers_list
-        return self
-
-    def transform(self, X):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
+        super().__init__(
+            output_dim=output_dim,
+            target_aware=target_aware,
+            placement_strategy=placement_strategy,
+            task=task,
+            adaptive=adaptive,
+            min_output_dim=min_output_dim,
+            max_output_dim=max_output_dim,
+            random_state=random_state,
         )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        self.scale = scale
 
-        if len(self.centers_) != X.shape[1]:
-            raise ValueError("X and centers must have the same number of features.")
-
-        transformed = []
-        for i in range(X.shape[1]):
-            centers = np.asarray(self.centers_[i])
-            tanh_feats = np.tanh((X[:, [i]] - centers[np.newaxis, :]) / self.scale)
-            transformed.append(tanh_feats)
-
-        return np.hstack(transformed)
+    def _expand_column(self, x_col, centers):
+        return np.tanh((x_col - centers[np.newaxis, :]) / self.scale)

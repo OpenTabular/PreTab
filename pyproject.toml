@@ -1,0 +1,148 @@
+[project]
+name = "pretab"
+version = "0.1.0"
+description = "A scikit-learn compatible preprocessing library for tabular data with rich encoders, splines, and neural basis expansions."
+authors = [
+  { name = "Anton Thielmann" },
+  { name = "Manish Kumar" },
+]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10,<3.14"
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+embeddings = ["sentence-transformers>=2.0"]
+knots = ["lightgbm>=4.0"]
+all = ["sentence-transformers>=2.0", "lightgbm>=4.0"]
+
+[project.urls]
+homepage = "https://github.com/OpenTabular/PreTab"
+repository = "https://github.com/OpenTabular/PreTab"
+package = "https://pypi.org/project/pretab/"
+
+[tool.poetry]
+packages = [{ include = "pretab" }]
+
+[build-system]
+requires = ["poetry-core>=2.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.dependencies]
+numpy = ">=1.24,<3.0"
+pandas = ">=2.0,<3.0"
+scikit-learn = ">=1.3,<2.0"
+scipy = ">=1.10,<2.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0"
+pytest-cov = "^4.1"
+ruff = "0.15.12"       # keep in sync with .pre-commit-config.yaml ruff rev
+pre-commit = "^3.6"
+commitizen = "^3.29.1"
+twine = "^6.2.0"
+pyright = "^1.1.409"
+pip-audit = "^2.7"
+ipykernel = "^7.3.0"
+
+[tool.poetry.group.docs]
+optional = true
+
+[tool.poetry.group.docs.dependencies]
+sphinx = ">=7.0"
+sphinxawesome-theme = ">=5.0"
+myst-parser = ">=2.0"
+sphinx-design = ">=0.5"
+sphinx-copybutton = ">=0.5"
+accessible-pygments = ">=0.0.4"
+
+# test configuration
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+norecursedirs = [
+  "dev",
+  "docs",
+  "examples",
+  ".venv",
+]
+filterwarnings = [
+  # scikit-learn / scipy deprecation noise
+  "ignore::DeprecationWarning:sklearn",
+  "ignore::DeprecationWarning:scipy",
+]
+
+# code quality tools
+[tool.pyright]
+include = ["pretab", "tests"]
+exclude = [
+  "**/__pycache__",
+  ".venv",
+  "build",
+  "dist",
+  "docs",
+  "examples",
+]
+
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportPrivateImportUsage = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnsupportedDunderAll = false
+
+# Configure code linting
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = [
+  "A",   # flake8-builtins
+  "B",   # flake8-bugbear
+  "C4",
+  "E",   # pycodestyle - errors
+  "F",   # pyflakes
+  "I",   # isort
+  "RUF", # ruff specific rules
+  "S",   # flake8-bandit
+  "UP",  # pyupgrade
+  "W",   # pycodestyle - warnings
+]
+
+ignore = [
+  "B006",
+  "F401", # Ignore unused imports
+  "F841", # Ignore unused local variables
+  "E501", # Ignore line length
+  "D100", # Missing module-level docstring
+  "D101", # Missing class-level docstring
+  "D102", # Missing method-level docstring
+  "D103", # Missing function-level docstring
+  "B007",
+  "S307",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# allow asserts in test files (bandit)
+"test_*" = ["S101"]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 120
+
+# Commitizen configuration
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+tag_format = "v$version"
+update_changelog_on_bump = true
+major_version_zero = true
+prerelease_offset = 1
+changelog_merge_prerelease = true

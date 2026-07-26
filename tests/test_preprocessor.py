@@ -1,7 +1,9 @@
 import pytest
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
+from sklearn.utils.validation import check_is_fitted
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
 
 
@@ -91,3 +93,164 @@ def test_dict_keys_reflect_column_names(sample_data):
     for k in out:
         if "embedding" not in k:
             assert any(k.startswith(p) for p in expected_prefixes)
+
+
+# --- sklearn estimator-contract compliance (Phase 11) ---
+
+EXPECTED_PARAMS = {
+    "numerical_method",
+    "categorical_method",
+    "feature_preprocessing",
+    "output_dim",
+    "adaptive",
+    "min_output_dim",
+    "max_output_dim",
+    "task",
+    "target_aware",
+    "placement_strategy",
+    "degree",
+    "scaling",
+    "cat_cutoff",
+    "treat_all_integers_as_numerical",
+    "random_state",
+    "handle_missing",
+    "verbose",
+}
+
+
+def test_get_params_is_complete():
+    assert set(Preprocessor().get_params()) == EXPECTED_PARAMS
+
+
+def test_init_stores_params_verbatim():
+    # __init__ must not mutate constructor args (sklearn clone invariant).
+    pre = Preprocessor(numerical_method="PLE", feature_preprocessing=None, verbose=2)
+    assert pre.numerical_method == "PLE"
+    assert pre.feature_preprocessing is None
+    assert pre.verbose == 2
+
+
+def test_clone_preserves_every_param():
+    pre = Preprocessor(
+        numerical_method="cubicspline",
+        output_dim=8,
+        adaptive=True,
+        feature_preprocessing={"a": "pspline"},
+        verbose=1,
+    )
+    cloned = clone(pre)
+    assert isinstance(cloned, Preprocessor)
+    assert cloned.get_params() == pre.get_params()
+
+
+def test_set_params_roundtrip():
+    pre = Preprocessor()
+    pre.set_params(output_dim=11, numerical_method="rbf")
+    assert pre.get_params()["output_dim"] == 11
+    assert pre.get_params()["numerical_method"] == "rbf"
+
+
+def test_set_params_rejects_unknown_key():
+    with pytest.raises(ValueError):
+        Preprocessor().set_params(not_a_param=1)
+
+
+def test_check_is_fitted_before_and_after(sample_data):
+    X, y = sample_data
+    pre = Preprocessor()
+    with pytest.raises(NotFittedError):
+        check_is_fitted(pre)
+    pre.fit(X, y)
+    check_is_fitted(pre)  # no raise
+    assert pre.n_features_in_ == X.shape[1]
+
+
+def test_get_feature_names_out_matches_array_width(sample_data):
+    X, y = sample_data
+    pre = Preprocessor()
+    pre.fit(X, y)
+    names = pre.get_feature_names_out()
+    arr = pre.transform(X, return_array=True)
+    assert isinstance(arr, np.ndarray)
+    assert len(names) == arr.shape[1]
+
+
+def test_get_feature_names_out_before_fit_raises():
+    with pytest.raises(NotFittedError):
+        Preprocessor().get_feature_names_out()
+
+
+def test_lowercase_and_none_method_resolution(sample_data):
+    X, y = sample_data
+    # Mixed-case / None methods are resolved at fit time, not stored on the instance.
+    pre = Preprocessor(numerical_method="PLE", categorical_method=None)  # type: ignore[arg-type]
+    out = pre.fit_transform(X, y)
+    assert isinstance(out, dict)
+    assert pre.numerical_method == "PLE"  # unchanged on the instance
+    assert pre.categorical_method is None
+
+
+def test_total_output_dim_matches_array_width(sample_data):
+    X, y = sample_data
+    pre = Preprocessor().fit(X, y)
+    arr = pre.transform(X, return_array=True)
+    assert isinstance(arr, np.ndarray)
+    assert pre.total_output_dim_ == arr.shape[1]
+
+
+def test_output_dims_keys_are_input_features(sample_data):
+    X, y = sample_data
+    pre = Preprocessor().fit(X, y)
+    assert set(pre.output_dims_) == set(X.columns)
+
+
+def test_output_dims_sum_to_total_output_dim(sample_data):
+    X, y = sample_data
+    pre = Preprocessor().fit(X, y)
+    assert sum(pre.output_dims_.values()) == pre.total_output_dim_
+
+
+def test_output_dims_reflects_per_feature_widths():
+    X = pd.DataFrame(
+        {
+            "a": np.linspace(0, 1, 60),
+            "b": np.linspace(-1, 1, 60),
+        }
+    )
+    y = pd.Series(np.random.randn(60))
+    # 'a' uses the rbf feature map (output_dim columns); 'b' is overridden to
+    # plain min-max scaling (a single column) via feature_preprocessing.
+    pre = Preprocessor(
+        numerical_method="rbf",
+        output_dim=5,
+        feature_preprocessing={"b": "minmax"},
+    ).fit(X, y)
+    dims = pre.output_dims_
+    assert dims["a"] == 5
+    assert dims["b"] == 1
+    assert sum(dims.values()) == pre.total_output_dim_
+
+
+def test_output_dims_nonuniform_for_one_hot_categorical():
+    X = pd.DataFrame(
+        {
+            "num": np.linspace(0, 1, 30),
+            "cat": ["A", "B", "C"] * 10,
+        }
+    )
+    y = pd.Series(np.random.randn(30))
+    pre = Preprocessor(
+        numerical_method="minmax", categorical_method="one-hot"
+    ).fit(X, y)
+    dims = pre.output_dims_
+    assert dims["num"] == 1
+    assert dims["cat"] == 3  # one-hot of three categories
+    assert sum(dims.values()) == pre.total_output_dim_
+
+
+def test_output_dims_and_total_before_fit_raise():
+    with pytest.raises(NotFittedError):
+        _ = Preprocessor().output_dims_
+    with pytest.raises(NotFittedError):
+        _ = Preprocessor().total_output_dim_
+

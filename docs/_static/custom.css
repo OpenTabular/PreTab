@@ -1,0 +1,621 @@
+/*
+ * custom.css — sphinxawesome_theme compatible
+ *
+ * NOTE: This file must NOT use --pst-color-* variables or .bd-* selectors.
+ * Those belong to pydata-sphinx-theme / sphinx-book-theme and do not exist
+ * here. All overrides use standard CSS selectors or sphinxawesome variables.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+/* ── Admonition blocks with icons ───────────────────────────────────────── */
+/* Base styling for all admonitions */
+.admonition {
+  border-left: 4px solid;
+  border-radius: 4px;
+  margin: 1.5rem 0;
+  padding: 0.75rem 1rem;
+  background: #f8f9fa;
+}
+
+html[data-theme="dark"] .admonition {
+  background: #1c1f24;
+}
+
+.admonition-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem 0;
+  display: flex;
+  align-items: center;
+}
+
+.admonition-title::before {
+  content: "";
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Note - blue */
+.admonition.note {
+  border-left-color: #0969da;
+  background: #ddf4ff;
+}
+
+html[data-theme="dark"] .admonition.note {
+  background: #0d1117;
+  border-left-color: #58a6ff;
+}
+
+.admonition.note .admonition-title {
+  color: #0969da;
+}
+
+html[data-theme="dark"] .admonition.note .admonition-title {
+  color: #58a6ff;
+}
+
+.admonition.note .admonition-title::before {
+  content: "ℹ️";
+}
+
+/* Tip - green */
+.admonition.tip {
+  border-left-color: #1a7f37;
+  background: #dafbe1;
+}
+
+html[data-theme="dark"] .admonition.tip {
+  background: #0d1117;
+  border-left-color: #3fb950;
+}
+
+.admonition.tip .admonition-title {
+  color: #1a7f37;
+}
+
+html[data-theme="dark"] .admonition.tip .admonition-title {
+  color: #3fb950;
+}
+
+.admonition.tip .admonition-title::before {
+  content: "💡";
+}
+
+/* Important - purple */
+.admonition.important {
+  border-left-color: #8250df;
+  background: #fbefff;
+}
+
+html[data-theme="dark"] .admonition.important {
+  background: #0d1117;
+  border-left-color: #a371f7;
+}
+
+.admonition.important .admonition-title {
+  color: #8250df;
+}
+
+html[data-theme="dark"] .admonition.important .admonition-title {
+  color: #a371f7;
+}
+
+.admonition.important .admonition-title::before {
+  content: "⚡";
+}
+
+/* Warning - orange/yellow */
+.admonition.warning {
+  border-left-color: #bf8700;
+  background: #fff8c5;
+}
+
+html[data-theme="dark"] .admonition.warning {
+  background: #1c1810;
+  border-left-color: #d29922;
+}
+
+.admonition.warning .admonition-title {
+  color: #9a6700;
+}
+
+html[data-theme="dark"] .admonition.warning .admonition-title {
+  color: #d29922;
+}
+
+.admonition.warning .admonition-title::before {
+  content: "⚠️";
+}
+
+/* Caution - orange (similar to warning) */
+.admonition.caution {
+  border-left-color: #bf8700;
+  background: #fff8c5;
+}
+
+html[data-theme="dark"] .admonition.caution {
+  background: #1c1810;
+  border-left-color: #d29922;
+}
+
+.admonition.caution .admonition-title {
+  color: #9a6700;
+}
+
+html[data-theme="dark"] .admonition.caution .admonition-title {
+  color: #d29922;
+}
+
+.admonition.caution .admonition-title::before {
+  content: "⚠️";
+}
+
+/* Danger/Error - red */
+.admonition.danger,
+.admonition.error {
+  border-left-color: #cf222e;
+  background: #ffebe9;
+}
+
+html[data-theme="dark"] .admonition.danger,
+html[data-theme="dark"] .admonition.error {
+  background: #1c0f0f;
+  border-left-color: #f85149;
+}
+
+.admonition.danger .admonition-title,
+.admonition.error .admonition-title {
+  color: #cf222e;
+}
+
+html[data-theme="dark"] .admonition.danger .admonition-title,
+html[data-theme="dark"] .admonition.error .admonition-title {
+  color: #f85149;
+}
+
+.admonition.danger .admonition-title::before,
+.admonition.error .admonition-title::before {
+  content: "🚫";
+}
+
+/* Hint - teal */
+.admonition.hint {
+  border-left-color: #1b7c83;
+  background: #d1f0f3;
+}
+
+html[data-theme="dark"] .admonition.hint {
+  background: #0d1117;
+  border-left-color: #39c5cf;
+}
+
+.admonition.hint .admonition-title {
+  color: #1b7c83;
+}
+
+html[data-theme="dark"] .admonition.hint .admonition-title {
+  color: #39c5cf;
+}
+
+.admonition.hint .admonition-title::before {
+  content: "🔑";
+}
+
+/* Seealso - blue (similar to note) */
+.admonition.seealso {
+  border-left-color: #0969da;
+  background: #ddf4ff;
+}
+
+html[data-theme="dark"] .admonition.seealso {
+  background: #0d1117;
+  border-left-color: #58a6ff;
+}
+
+.admonition.seealso .admonition-title {
+  color: #0969da;
+}
+
+html[data-theme="dark"] .admonition.seealso .admonition-title {
+  color: #58a6ff;
+}
+
+.admonition.seealso .admonition-title::before {
+  content: "🔗";
+}
+
+/* Attention - orange/red */
+.admonition.attention {
+  border-left-color: #cf222e;
+  background: #ffebe9;
+}
+
+html[data-theme="dark"] .admonition.attention {
+  background: #1c0f0f;
+  border-left-color: #f85149;
+}
+
+.admonition.attention .admonition-title {
+  color: #cf222e;
+}
+
+html[data-theme="dark"] .admonition.attention .admonition-title {
+  color: #f85149;
+}
+
+.admonition.attention .admonition-title::before {
+  content: "❗";
+}
+
+/* Adjust paragraph spacing inside admonitions */
+.admonition p:last-child {
+  margin-bottom: 0;
+}
+
+.admonition ul:last-child,
+.admonition ol:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Monospace font for all code ─────────────────────────────────────────── */
+code,
+kbd,
+samp,
+pre,
+.highlight pre,
+tt.literal,
+code.literal {
+  font-family:
+    "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", "Consolas",
+    monospace;
+}
+
+/* ── Code block sizing and shape ─────────────────────────────────────────── */
+/* Single border lives on pre; div.highlight only clips the radius. */
+div.highlight {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.highlight pre {
+  font-size: 0.9rem;
+  line-height: 1.65;
+  border-radius: 8px;
+  border: 1px solid #d0d7de; /* override theme.css's var(--color-border) */
+  margin-top: 0; /* theme adds a large top-margin — reset it */
+  padding: 1rem 1.25rem;
+  font-feature-settings:
+    "liga" 1,
+    "calt" 1;
+}
+
+html[data-theme="dark"] .highlight pre {
+  border-color: #30363d;
+}
+
+/* Inline code */
+code.literal,
+p code,
+li code,
+td code {
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", "Consolas", monospace;
+  font-size: 0.82em;
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+  background: #f3f4f6;
+  border: 1px solid #e2e4e8;
+  color: #c2185b;
+}
+
+html[data-theme="dark"] code.literal,
+html[data-theme="dark"] p code,
+html[data-theme="dark"] li code,
+html[data-theme="dark"] td code {
+  background: #161b22;
+  border-color: #30363d;
+  color: #ff7b72;
+}
+
+/* ── Syntax highlighting — light palette (GitHub-inspired) ──────────────── */
+/* keywords: blue   │ strings: green  │ fn/class defs: purple               */
+/* comments: gray   │ numbers: blue   │ variable names: neutral (no colour)  */
+div.highlight,
+.highlight pre {
+  background: #f6f8fa;
+  color: #24292f;
+}
+/* def, class, import, from, if, return, for, … → blue */
+.highlight .k,
+.highlight .kn,
+.highlight .kd,
+.highlight .kr,
+.highlight .kc,
+.highlight .kw {
+  color: #0550ae;
+  font-weight: 600;
+}
+/* string literals → green */
+.highlight .s,
+.highlight .s1,
+.highlight .s2,
+.highlight .sa,
+.highlight .sb,
+.highlight .sc,
+.highlight .sd,
+.highlight .se,
+.highlight .si,
+.highlight .sh {
+  color: #116329;
+}
+/* numbers → blue */
+.highlight .mi,
+.highlight .mf,
+.highlight .mh,
+.highlight .mo {
+  color: #0550ae;
+}
+/* function names in definitions → purple */
+.highlight .nf,
+.highlight .fm {
+  color: #8250df;
+}
+/* class names in definitions → purple */
+.highlight .nc {
+  color: #8250df;
+  font-weight: 600;
+}
+/* decorators (@property, @staticmethod, …) → purple */
+.highlight .nd {
+  color: #8250df;
+}
+/* builtins (print, len, range, …) → blue */
+.highlight .nb,
+.highlight .bp {
+  color: #0969da;
+}
+/* namespace / module names → neutral */
+.highlight .nn {
+  color: #24292f;
+}
+/* operators → neutral */
+.highlight .o,
+.highlight .ow {
+  color: #24292f;
+}
+/* comments → gray italic */
+.highlight .c,
+.highlight .c1,
+.highlight .cm,
+.highlight .cs,
+.highlight .cp {
+  color: #6e7781;
+  font-style: italic;
+}
+/* variable / param names → NEUTRAL (no colour; avoid painting everything) */
+.highlight .n,
+.highlight .na,
+.highlight .nv,
+.highlight .py,
+.highlight .p {
+  color: #24292f;
+}
+
+/* ── Syntax highlighting — dark palette (GitHub Dark) ──────────────────── */
+html[data-theme="dark"] div.highlight,
+html[data-theme="dark"] .highlight pre {
+  background: #0d1117;
+  color: #e6edf3;
+}
+/* keywords → blue */
+html[data-theme="dark"] .highlight .k,
+html[data-theme="dark"] .highlight .kn,
+html[data-theme="dark"] .highlight .kd,
+html[data-theme="dark"] .highlight .kr,
+html[data-theme="dark"] .highlight .kc,
+html[data-theme="dark"] .highlight .kw {
+  color: #79c0ff;
+  font-weight: 600;
+}
+/* strings → green */
+html[data-theme="dark"] .highlight .s,
+html[data-theme="dark"] .highlight .s1,
+html[data-theme="dark"] .highlight .s2,
+html[data-theme="dark"] .highlight .sa,
+html[data-theme="dark"] .highlight .se,
+html[data-theme="dark"] .highlight .si,
+html[data-theme="dark"] .highlight .sh {
+  color: #7ee787;
+}
+/* numbers → blue */
+html[data-theme="dark"] .highlight .mi,
+html[data-theme="dark"] .highlight .mf,
+html[data-theme="dark"] .highlight .mh {
+  color: #79c0ff;
+}
+/* function names → purple */
+html[data-theme="dark"] .highlight .nf,
+html[data-theme="dark"] .highlight .fm {
+  color: #d2a8ff;
+}
+/* class names → purple */
+html[data-theme="dark"] .highlight .nc {
+  color: #d2a8ff;
+  font-weight: 600;
+}
+/* decorators → purple */
+html[data-theme="dark"] .highlight .nd {
+  color: #d2a8ff;
+}
+/* builtins → blue */
+html[data-theme="dark"] .highlight .nb,
+html[data-theme="dark"] .highlight .bp {
+  color: #79c0ff;
+}
+/* namespace names → neutral */
+html[data-theme="dark"] .highlight .nn {
+  color: #e6edf3;
+}
+/* operators → neutral */
+html[data-theme="dark"] .highlight .o,
+html[data-theme="dark"] .highlight .ow {
+  color: #e6edf3;
+}
+/* comments → gray */
+html[data-theme="dark"] .highlight .c,
+html[data-theme="dark"] .highlight .c1,
+html[data-theme="dark"] .highlight .cm,
+html[data-theme="dark"] .highlight .cp {
+  color: #8b949e;
+  font-style: italic;
+}
+/* variable / param names → NEUTRAL */
+html[data-theme="dark"] .highlight .n,
+html[data-theme="dark"] .highlight .na,
+html[data-theme="dark"] .highlight .nv,
+html[data-theme="dark"] .highlight .py,
+html[data-theme="dark"] .highlight .p {
+  color: #e6edf3;
+}
+
+/* ── Sidebar nav section separators ─────────────────────────────────────── */
+/* All p.caption elements are flat siblings inside a single <nav>.            */
+/* The ~ combinator targets every caption that follows the first one,         */
+/* adding a hairline rule above it without an orphan border at the top.       */
+#left-sidebar nav p.caption ~ p.caption {
+  border-top: 1px solid #d0d7de;
+  padding-top: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+html[data-theme="dark"] #left-sidebar nav p.caption ~ p.caption {
+  border-top-color: #30363d;
+}
+
+/* ── List item spacing — Tailwind prose adds too much gap ────────────────── */
+/* Scoped to #content so sidebar/nav lists are unaffected */
+#content ul li,
+#content ol li {
+  margin-top: 0.2rem;
+  margin-bottom: 0.2rem;
+  line-height: 1.55;
+}
+
+/* Numpydoc field lists (Parameters, Returns, etc.) */
+#content dl > dd > ul li,
+#content dl > dd > ol li {
+  margin-top: 0.1rem;
+  margin-bottom: 0.1rem;
+}
+
+/* ── Body text and heading contrast ─────────────────────────────────────── */
+/* Ensure body text has good contrast (not too gray) */
+#content {
+  color: #1f2937;
+  max-width: 860px;
+  font-family:
+    "Inter",
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+html[data-theme="dark"] #content {
+  color: #e5e7eb;
+}
+
+/* Make headings more prominent with better contrast */
+#content h1,
+#content h2,
+#content h3,
+#content h4 {
+  color: #111827;
+  font-weight: 700;
+}
+
+html[data-theme="dark"] #content h1,
+html[data-theme="dark"] #content h2,
+html[data-theme="dark"] #content h3,
+html[data-theme="dark"] #content h4 {
+  color: #f9fafb;
+}
+
+/* Section headings with emoji get extra spacing */
+#content h2,
+#content h3 {
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+#content h1 {
+  margin-bottom: 1.5rem;
+}
+
+/* Paragraphs with good line height and spacing */
+#content p {
+  line-height: 1.7;
+  margin-bottom: 1rem;
+  color: #374151;
+}
+
+html[data-theme="dark"] #content p {
+  color: #d1d5db;
+}
+
+/* Strong/bold text more prominent */
+#content strong {
+  font-weight: 700;
+  color: #111827;
+}
+
+html[data-theme="dark"] #content strong {
+  color: #f3f4f6;
+}
+
+/* Links with better visibility */
+#content a {
+  color: #2563eb;
+  font-weight: 500;
+}
+
+html[data-theme="dark"] #content a {
+  color: #60a5fa;
+}
+
+#content a:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+html[data-theme="dark"] #content a:hover {
+  color: #93c5fd;
+}
+
+/* ── Autosummary table styling ───────────────────────────────────────────── */
+table.autosummary {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+table.autosummary td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+}
+
+html[data-theme="dark"] table.autosummary td {
+  border-bottom-color: #30363d;
+}
+
+table.autosummary td:first-child code {
+  font-weight: 600;
+  color: #8250df;
+}
+
+html[data-theme="dark"] table.autosummary td:first-child code {
+  color: #d2a8ff;
+}

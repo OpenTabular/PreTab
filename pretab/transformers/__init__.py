@@ -1,5 +1,10 @@
 from .binning import CustomBinTransformer
 from .embeddings import LanguageEmbeddingTransformer
+from .encoders import (
+    ContinuousOrdinalTransformer,
+    NoTransformer,
+    ToFloatTransformer,
+)
 from .feature_maps import (
     RBFExpansionTransformer,
     ReLUExpansionTransformer,
@@ -9,11 +14,14 @@ from .feature_maps import (
 from .onehot import OneHotFromOrdinalTransformer
 from .ple import PLETransformer
 from .splines import (
+    BSplineTransformer,
     CubicSplineTransformer,
-    ThinPlateSplineTransformer,
-    TensorProductSplineTransformer,
+    ISplineTransformer,
+    MSplineTransformer,
     NaturalCubicSplineTransformer,
     PSplineTransformer,
+    TensorProductSplineTransformer,
+    ThinPlateSplineTransformer,
 )
 from .temporal import (
     CyclicalTimeTransformer,
@@ -22,20 +30,26 @@ from .temporal import (
 )
 
 __all__ = [
+    "BSplineTransformer",
+    "ContinuousOrdinalTransformer",
+    "CubicSplineTransformer",
     "CustomBinTransformer",
+    "CyclicalTimeTransformer",
+    "ISplineTransformer",
+    "LagFeatureTransformer",
     "LanguageEmbeddingTransformer",
-    "RBFExpansionTransformer",
-    "ReLUExpansionTransformer",
-    "SigmoidExpansionTransformer",
-    "TanhExpansionTransformer",
+    "MSplineTransformer",
+    "NaturalCubicSplineTransformer",
+    "NoTransformer",
     "OneHotFromOrdinalTransformer",
     "PLETransformer",
-    "CubicSplineTransformer",
-    "ThinPlateSplineTransformer",
-    "TensorProductSplineTransformer",
-    "NaturalCubicSplineTransformer",
     "PSplineTransformer",
-    "CyclicalTimeTransformer",
-    "LagFeatureTransformer",
+    "RBFExpansionTransformer",
+    "ReLUExpansionTransformer",
     "RollingStatsTransformer",
+    "SigmoidExpansionTransformer",
+    "TanhExpansionTransformer",
+    "TensorProductSplineTransformer",
+    "ThinPlateSplineTransformer",
+    "ToFloatTransformer",
 ]

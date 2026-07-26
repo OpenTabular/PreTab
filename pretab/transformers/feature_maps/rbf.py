@@ -1,123 +1,107 @@
 import numpy as np
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array
-from ..utils.utils import center_identification_using_decision_tree
-import warnings
+
+from ...core.params import UNSET
+from ._base import BaseCenterExpansion
 
 
-class RBFExpansionTransformer(BaseEstimator, TransformerMixin):
-    """
+class RBFExpansionTransformer(BaseCenterExpansion):
+    r"""
     Radial Basis Function (RBF) feature expansion for numerical tabular data.
 
     This transformer expands each feature into a set of RBF (Gaussian) basis functions
-    centered at fixed points. The centers can be determined either by a decision tree
-    (based on supervised splits) or based on quantiles or uniform spacing.
+    centered at fixed points. The centers can be determined either by a target-aware
+    selector (based on supervised splits) or based on quantiles or uniform spacing.
 
     Parameters
     ----------
-    n_centers : int, default=10
-        Number of RBF centers per feature.
+    output_dim : int, default=6
+        Number of RBF centers (output columns) per feature.
 
     gamma : float, default=1.0
         Width parameter of the RBF kernel. Larger values make the kernel narrower.
 
-    use_decision_tree : bool, default=True
-        Whether to use a decision tree to select center locations based on `y`.
+    target_aware : bool, default=False
+        Whether to place centers with a target-aware selector (requires `y`).
+
+    placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, optional
+        Selector when `target_aware=True` (`"cart"` or `"lightgbm"`); spacing when
+        `target_aware=False` (`"uniform"` or `"quantile"`). If left unset, resolves
+        to `"cart"` on the target-aware path and `"quantile"` otherwise.
 
     task : {"regression", "classification"}, default="regression"
-        Type of task for the decision tree used to find center locations.
+        Task type for the target-aware selector used to place centers.
 
-    strategy : {"uniform", "quantile"}, default="uniform"
-        Strategy for choosing centers when not using a decision tree.
+    adaptive : bool, default=False
+        If True (with `target_aware=True`), the per-feature number of centers may
+        vary within `[min_output_dim, max_output_dim]` instead of being fixed to
+        `output_dim`. Has no effect on the `quantile` / `uniform` paths.
+
+    min_output_dim : int or None, default=None
+        Lower bound on the per-feature number of centers in adaptive mode.
+
+    max_output_dim : int or None, default=None
+        Upper bound on the per-feature number of centers in adaptive mode.
+
+    random_state : int or None, default=None
+        Random state forwarded to the target-aware selector for reproducibility.
 
     Attributes
     ----------
     centers_ : list of ndarray
         List of arrays containing center locations for each feature.
 
+    total_output_dim_ : int
+        Total number of output columns across all features (fitted).
+
+    Notes
+    -----
+    For a feature :math:`x` and centers :math:`c_i`, each output column is a
+    Gaussian radial basis function
+
+    .. math::
+
+        \phi_i(x) = \exp\left(-\gamma (x - c_i)^2\right),
+
+    producing ``output_dim`` new features per original feature on the
+    non-target-aware path; the target-aware default may place a data-driven number.
+
     Examples
     --------
-    >>> from prefab.transformers import RBFExpansionTransformer
     >>> import numpy as np
-    >>> X = np.array([[1.], [2.], [3.]])
-    >>> transformer = RBFExpansionTransformer(n_centers=3, gamma=0.5, use_decision_tree=False)
+    >>> from pretab.transformers import RBFExpansionTransformer
+    >>> X = np.array([[1.0], [2.0], [3.0]])
+    >>> transformer = RBFExpansionTransformer(output_dim=3, gamma=0.5, target_aware=False, placement_strategy="uniform")
     >>> transformer.fit(X)
     RBFExpansionTransformer(...)
     >>> transformer.transform(X).shape
     (3, 3)
     """
 
+    _feature_suffix_value = "rbf"
+
     def __init__(
         self,
-        n_centers=10,
+        output_dim=UNSET,
         gamma: float = 1.0,
-        use_decision_tree=True,
+        target_aware: bool = False,
+        placement_strategy=UNSET,
         task: str = "regression",
-        strategy="uniform",
+        adaptive: bool = False,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
+        random_state: int | None = None,
     ):
-        self.n_centers = n_centers
-        self.gamma = gamma
-        self.use_decision_tree = use_decision_tree
-        self.strategy = strategy
-        self.task = task
-
-        if self.strategy not in ["uniform", "quantile"]:
-            raise ValueError("Invalid strategy. Choose 'uniform' or 'quantile'.")
-
-        if self.task not in ["regression", "classification"]:
-            raise ValueError("Invalid task. Choose 'regression' or 'classification'.")
-
-    def fit(self, X, y=None):
-        X = check_array(X, dtype=np.float64)
-
-        if not np.issubdtype(X.dtype, np.floating):
-            raise ValueError("Input X must be of float type.")
-
-        if self.use_decision_tree and y is None:
-            raise ValueError(
-                "Target variable 'y' must be provided when use_decision_tree=True."
-            )
-
-        self.centers_ = []
-
-        if self.use_decision_tree:
-            centers_list = center_identification_using_decision_tree(
-                X, y, self.task, self.n_centers
-            )
-        else:
-            if self.strategy == "quantile":
-                centers_list = [
-                    np.percentile(X[:, i], np.linspace(0, 100, self.n_centers))
-                    for i in range(X.shape[1])
-                ]
-            else:  # uniform
-                centers_list = [
-                    np.linspace(X[:, i].min(), X[:, i].max(), self.n_centers)
-                    for i in range(X.shape[1])
-                ]
-
-        self.centers_ = centers_list
-        return self
-
-    def transform(self, X):
-        original_dim = np.shape(X)[1] if np.ndim(X) == 2 else 1
-        X = check_array(
-            X, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan"
+        super().__init__(
+            output_dim=output_dim,
+            target_aware=target_aware,
+            placement_strategy=placement_strategy,
+            task=task,
+            adaptive=adaptive,
+            min_output_dim=min_output_dim,
+            max_output_dim=max_output_dim,
+            random_state=random_state,
         )
-        if X.shape[1] < original_dim:
-            warnings.warn(
-                "Some input features were dropped during check_array validation.",
-                UserWarning,
-            )
+        self.gamma = gamma
 
-        if len(self.centers_) != X.shape[1]:
-            raise ValueError("X and centers must have the same number of features.")
-
-        transformed = []
-        for i in range(X.shape[1]):
-            centers = np.asarray(self.centers_[i])
-            # shape: (n_samples, n_centers)
-            rbf_feats = np.exp(-self.gamma * (X[:, [i]] - centers[np.newaxis, :]) ** 2)
-            transformed.append(rbf_feats)
-
-        return np.hstack(transformed)
+    def _expand_column(self, x_col, centers):
+        return np.exp(-self.gamma * (x_col - centers[np.newaxis, :]) ** 2)

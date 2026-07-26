@@ -70,6 +70,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/api/_autosummary/
 
 # PyBuilder
 .pybuilder/
@@ -183,11 +184,5 @@ post-checkout
 post-commit
 post-merge
 pre-push
-docs/notebooks/lightning_logs/*
-docs/notebooks/lightning_logs
-docs/notebooks/data
-docs/notebooks/data/*
-docs/notebooks/embeddings
-docs/notebooks/embeddings/*
-docs/notebooks/checkpoints
-docs/notebooks/checkpoints/*
+docs/notebooks/*
+docs/notebooks/
