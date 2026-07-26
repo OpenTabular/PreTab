@@ -117,6 +117,7 @@ EXPECTED_PARAMS = {
     "numerical_imputation",
     "categorical_imputation",
     "add_missing_indicator",
+    "missing_policy",
     "policy",
     "max_output_features",
     "max_features_per_input",

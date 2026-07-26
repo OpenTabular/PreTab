@@ -29,6 +29,7 @@ _CONFIG_DEFAULTS = {
     "numerical_imputation": "median",
     "categorical_imputation": "most_frequent",
     "add_missing_indicator": False,
+    "missing_policy": None,
     "verbose": 0,
 }
 

@@ -3,7 +3,7 @@ from .categorical import (
     LanguageEmbeddingTransformer,
     OneHotFromOrdinalTransformer,
 )
-from .encoders import NoTransformer, ToFloatTransformer
+from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
 from .feature_maps import (
     FourierFeatureTransformer,
     NystroemFeaturesTransformer,
@@ -37,6 +37,7 @@ __all__ = [
     "ISplineTransformer",
     "LanguageEmbeddingTransformer",
     "MSplineTransformer",
+    "MissingStateIndicator",
     "NaturalCubicSplineTransformer",
     "NoTransformer",
     "NumericBinningTransformer",

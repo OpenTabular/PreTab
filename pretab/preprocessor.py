@@ -19,7 +19,7 @@ from .compose.inspection import (
 from .compose.output import compute_output_report, format_output, to_dataframe_output
 from .core.logging import configure_logging, get_logger
 from .core.policy import RepresentationPolicy, apply_constant_policy
-from .exceptions import ConfigWarning, OutputBudgetError, invalid_param_error
+from .exceptions import ConfigWarning, OutputBudgetError, PretabDataError, invalid_param_error
 
 logger = get_logger(__name__)
 
@@ -129,6 +129,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         If True, append a binary missing-value indicator column for each imputed feature (via the
         imputer's ``add_indicator``; a standalone ``MissingIndicator`` is used when imputation is
         disabled). Applies to both numerical and categorical pipelines.
+    missing_policy : {"error", "propagate", "impute", "impute_with_indicator", "separate_state"} or None, default=None
+        High-level missing-value strategy. ``None`` (default) keeps the explicit
+        ``numerical_imputation`` / ``categorical_imputation`` / ``add_missing_indicator``
+        parameters authoritative. When set it overrides them:
+
+        - ``"error"`` -- raise :class:`~pretab.exceptions.PretabDataError` if any missing
+          value is present at ``fit`` or ``transform``.
+        - ``"propagate"`` -- disable imputation so NaNs reach the transformers unchanged
+          (each family applies its own missing-value contract).
+        - ``"impute"`` -- impute with the configured strategy (no indicator).
+        - ``"impute_with_indicator"`` -- impute and append a missing indicator column.
+        - ``"separate_state"`` -- impute for the representation *and* emit a dedicated
+          ``__missing`` column per feature that stays outside the ordinary basis, so a
+          downstream model can learn a separate response to missingness.
     policy : RepresentationPolicy or dict or None, default=None
         Central edge-case policy (see :class:`~pretab.RepresentationPolicy`) governing how
         constant columns, out-of-range values, missing values, and non-finite inputs are
@@ -282,6 +296,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         numerical_imputation="median",
         categorical_imputation="most_frequent",
         add_missing_indicator=False,
+        missing_policy=None,
         policy=None,
         max_output_features=None,
         max_features_per_input=None,
@@ -316,6 +331,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.numerical_imputation = numerical_imputation
         self.categorical_imputation = categorical_imputation
         self.add_missing_indicator = add_missing_indicator
+        self.missing_policy = missing_policy
         self.policy = policy
         self.max_output_features = max_output_features
         self.max_features_per_input = max_features_per_input
@@ -368,10 +384,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             numerical_imputation=self.numerical_imputation,
             categorical_imputation=self.categorical_imputation,
             add_missing_indicator=self.add_missing_indicator,
+            missing_policy=self.missing_policy,
             verbose=self.verbose,
         )
 
         X = to_dataframe(X)
+
+        if self.missing_policy == "error":
+            self._reject_missing(X)
 
         self.embeddings_ = False
         self.embedding_dimensions_ = {}
@@ -457,6 +477,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         check_is_fitted(self)
 
         X = to_dataframe(X, copy=True)
+
+        if self.missing_policy == "error":
+            self._reject_missing(X)
 
         transformed_X = self.column_transformer_.transform(X)
         if sp.issparse(transformed_X):
@@ -625,6 +648,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
         n_rows, n_cols = self.estimate_output_shape(X)
         return int(n_rows * n_cols * self._output_itemsize())
+
+    def _reject_missing(self, X) -> None:
+        """Raise when ``missing_policy="error"`` but ``X`` contains missing values."""
+        na_columns = [col for col in X.columns if X[col].isna().any()]
+        if na_columns:
+            raise PretabDataError(
+                f"missing_policy='error' but missing values were found in columns {na_columns}.\n"
+                "Fix: impute the data first, or choose a different missing_policy "
+                "('propagate', 'impute', 'impute_with_indicator', 'separate_state')."
+            )
 
     def _enforce_output_budget(self, n_rows: int) -> None:
         """Check the fitted output width against the configured output budget.

@@ -5,8 +5,10 @@ models can consume: a float cast and a pass-through.
 """
 
 from .floats import NoTransformer, ToFloatTransformer
+from .missing import MissingStateIndicator
 
 __all__ = [
+    "MissingStateIndicator",
     "NoTransformer",
     "ToFloatTransformer",
 ]

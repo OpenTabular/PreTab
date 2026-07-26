@@ -12,11 +12,12 @@ import warnings
 
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
 from ..transformers.encoders.floats import ToFloatTransformer
+from ..transformers.encoders.missing import MissingStateIndicator
 from .config import PreprocessorConfig
 from .registry import (
     CATEGORICAL_ALIASES,
@@ -241,15 +242,15 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
                 f"with placement_strategy in {{'cart', 'lightgbm'}}; got target_aware=False."
             )
 
+    plan = config.imputation_plan(is_numerical=is_numerical)
     if is_numerical:
-        add_imputer = config.numerical_imputation is not None
         steps = get_numerical_transformer_steps(
             method=method,
             task=config.task,
             target_aware=config.target_aware,
-            add_imputer=add_imputer,
-            imputer_strategy=config.numerical_imputation or "median",
-            add_missing_indicator=config.add_missing_indicator,
+            add_imputer=plan["add_imputer"],
+            imputer_strategy=plan["strategy"],
+            add_missing_indicator=plan["add_indicator"],
             output_dim=config.output_dim,
             adaptive=config.adaptive,
             min_output_dim=config.min_output_dim if config.adaptive else None,
@@ -260,14 +261,21 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             **config.seed_kwargs,
         )
     else:
-        add_imputer = config.categorical_imputation is not None
         steps = get_categorical_transformer_steps(
             method,
-            add_imputer=add_imputer,
-            imputer_strategy=config.categorical_imputation or "most_frequent",
-            add_missing_indicator=config.add_missing_indicator,
+            add_imputer=plan["add_imputer"],
+            imputer_strategy=plan["strategy"],
+            add_missing_indicator=plan["add_indicator"],
         )
-    return Pipeline(steps)
+
+    pipeline = Pipeline(steps)
+    if plan["separate_state"]:
+        # Emit a dedicated ``__missing`` column (built on the raw input) alongside
+        # the imputed representation, so the indicator never enters the basis.
+        return FeatureUnion(
+            [("representation", pipeline), ("missing", MissingStateIndicator())]
+        )
+    return pipeline
 
 
 def build_column_transformer(config: PreprocessorConfig, numerical_features, categorical_features) -> ColumnTransformer:
