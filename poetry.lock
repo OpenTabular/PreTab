@@ -1610,7 +1610,7 @@ description = "LightGBM Python-package"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"knots\" or extra == \"all\""
+markers = "extra == \"lightgbm\" or extra == \"all\""
 files = [
     {file = "lightgbm-4.6.0-py3-none-macosx_10_15_x86_64.whl", hash = "sha256:b7a393de8a334d5c8e490df91270f0763f83f959574d504c7ccb9eee4aef70ed"},
     {file = "lightgbm-4.6.0-py3-none-macosx_12_0_arm64.whl", hash = "sha256:2dafd98d4e02b844ceb0b61450a660681076b1ea6c7adb8c566dfd66832aafad"},
@@ -4933,9 +4933,9 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 [extras]
 all = ["lightgbm", "sentence-transformers"]
 embeddings = ["sentence-transformers"]
-knots = ["lightgbm"]
+lightgbm = ["lightgbm"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.14"
-content-hash = "9284f76b116e86a2475762d9afb1a957ea14db64959dbe8e0e3e0a11bc47d5cd"
+content-hash = "2a0bad6485988b0c36e131940e3f5df70bb2624604cfecb76ddd25b49eb1cab6"

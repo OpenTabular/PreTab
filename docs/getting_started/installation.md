@@ -24,6 +24,19 @@ dependencies (including PyTorch), so it is a sizeable download. Add it only if y
 to use the `pretrained` categorical strategy.
 ```
 
+The `lightgbm` extra enables the gradient-boosted `placement_strategy="lightgbm"` for
+supervised knot, center, and threshold selection:
+
+```bash
+pip install "pretab[lightgbm]"
+```
+
+Use the convenience `all` extra to install every optional dependency at once:
+
+```bash
+pip install "pretab[all]"
+```
+
 ## From source
 
 pretab uses [Poetry](https://python-poetry.org/) for dependency management and
