@@ -81,9 +81,7 @@ class BaseLocationSelector(ABC):
             Sorted array of selected locations.
         """
         if y is None:
-            raise IncompatibleParamsError(
-                f"{type(self).__name__} requires y to select locations."
-            )
+            raise IncompatibleParamsError(f"{type(self).__name__} requires y to select locations.")
         task = task or "regression"
 
         x = np.asarray(x)
@@ -115,9 +113,7 @@ class BaseLocationSelector(ABC):
         return np.array(sorted(locations))
 
     @abstractmethod
-    def _ordered_candidates(
-        self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task
-    ) -> tuple[list[float], object]:
+    def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         """Fit a model and return candidate locations plus trimming context.
 
         The candidates must be returned in the selector's preferred order (the
@@ -195,9 +191,7 @@ class CARTLocationSelector(BaseLocationSelector):
         self.random_state = random_state
         self.min_samples_floor = min_samples_split
 
-    def _ordered_candidates(
-        self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task
-    ) -> tuple[list[float], object]:
+    def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         if task == "regression":
             tree = DecisionTreeRegressor(
                 max_depth=self.max_tree_depth,
@@ -327,9 +321,7 @@ class LightGBMLocationSelector(BaseLocationSelector):
             ) from exc
         return lgb
 
-    def _ordered_candidates(
-        self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task
-    ) -> tuple[list[float], object]:
+    def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         lgb = self._import_lightgbm()
 
         params = {

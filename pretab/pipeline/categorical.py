@@ -27,9 +27,7 @@ def get_categorical_transformer_steps(
 
     if add_imputer:
         imputer_kwargs = imputer_kwargs or {}
-        steps.append(
-            ("imputer", SimpleImputer(strategy=imputer_strategy, **imputer_kwargs))
-        )
+        steps.append(("imputer", SimpleImputer(strategy=imputer_strategy, **imputer_kwargs)))
 
     if method == "int":
         steps.append(("continuous_ordinal", ContinuousOrdinalTransformer()))
@@ -52,7 +50,9 @@ def get_categorical_transformer_steps(
         steps.append(("onehot_from_ordinal", OneHotFromOrdinalTransformer()))
     else:
         raise invalid_param_error(
-            "get_categorical_transformer_steps", "method", method,
+            "get_categorical_transformer_steps",
+            "method",
+            method,
             "unrecognized categorical preprocessing method",
             valid=set(CATEGORICAL_METHODS),
         )

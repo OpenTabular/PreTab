@@ -81,9 +81,7 @@ def test_verbose_2_logs_feature_table(sample_data, caplog):
     caplog.set_level(logging.DEBUG, logger="pretab")
     Preprocessor(numerical_method="ple", verbose=2).fit(X, y)
     assert "fit complete" in caplog.text  # summary still emitted
-    debug_text = "\n".join(
-        r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG
-    )
+    debug_text = "\n".join(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
     assert "feature" in debug_text  # table header
     assert "pipeline" in debug_text
 
@@ -92,9 +90,7 @@ def test_verbose_3_logs_internal_decisions(sample_data, caplog):
     X, y = sample_data
     caplog.set_level(logging.DEBUG, logger="pretab")
     Preprocessor(numerical_method="ple", verbose=3).fit(X, y)
-    debug_text = "\n".join(
-        r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG
-    )
+    debug_text = "\n".join(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
     # Level 3 surfaces fitted internals (e.g. PLE thresholds / output width).
     assert "thresholds_" in debug_text or "total_output_dim_" in debug_text
 
@@ -169,10 +165,7 @@ def test_set_verbosity_sets_logger_level():
 def test_configure_logging_attaches_stream_handler_when_none():
     logger = logging.getLogger("pretab")
     configure_logging(1)
-    assert any(
-        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.NullHandler)
-        for h in logger.handlers
-    )
+    assert any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.NullHandler) for h in logger.handlers)
     assert logger.level == logging.INFO
 
 

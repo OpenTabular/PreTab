@@ -1,6 +1,8 @@
+import warnings
+
 import numpy as np
 import pytest
-import warnings
+
 from pretab.transformers import TanhExpansionTransformer
 
 

@@ -92,9 +92,7 @@ def test_cart_matches_knot_adapter(data):
 def test_lightgbm_select_runs(data):
     pytest.importorskip("lightgbm")
     X, y = data
-    locations = LightGBMLocationSelector(n_estimators=30).select(
-        X, y, task="regression", min_count=2, max_count=10
-    )
+    locations = LightGBMLocationSelector(n_estimators=30).select(X, y, task="regression", min_count=2, max_count=10)
 
     assert locations.ndim == 1
     assert np.all(np.diff(locations) > 0)

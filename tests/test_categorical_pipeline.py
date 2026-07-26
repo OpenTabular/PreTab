@@ -27,4 +27,3 @@ def test_one_hot_handle_unknown_override():
     pipe.fit(np.array([["A"], ["B"]]))
     with pytest.raises(ValueError):
         pipe.transform(np.array([["C"]]))
-

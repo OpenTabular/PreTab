@@ -114,11 +114,7 @@ autodoc_default_options = {
     # Exclude scikit-learn metadata-routing boilerplate that is inherited from
     # BaseEstimator / TransformerMixin and is not part of pretab's public API.
     "exclude-members": (
-        "set_output,"
-        "get_metadata_routing,"
-        "set_fit_request,"
-        "set_transform_request,"
-        "set_inverse_transform_request,"
+        "set_output,get_metadata_routing,set_fit_request,set_transform_request,set_inverse_transform_request,"
     ),
 }
 

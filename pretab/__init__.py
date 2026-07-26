@@ -1,4 +1,4 @@
-from ._version import __version__  # noqa: F401
+from ._version import __version__
 from .core.exceptions import PretabWarning
 from .core.logging import configure_logging, set_verbosity
 from .preprocessor import Preprocessor

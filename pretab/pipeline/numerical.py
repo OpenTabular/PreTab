@@ -36,6 +36,7 @@ def supports_target_aware(method: str) -> bool:
     resolved = resolve_method(method, NUMERICAL_METHODS, NUMERICAL_ALIASES)
     return resolved in TARGET_AWARE_SPLINE_METHODS
 
+
 # Valid range for the number of spline basis functions per feature.
 _MIN_SPLINE_BASIS = 5
 _MAX_SPLINE_BASIS = 50
@@ -50,10 +51,19 @@ def filter_kwargs(transformer_cls, kwargs, allowed=None):
 # Method families grouped by which placement modes they support. The Preprocessor
 # shares a single ``target_aware`` / ``placement_strategy`` pair; each family only
 # receives the placement kwargs it can honor.
-BOTH_MODE_METHODS = frozenset({
-    "rbf", "relu", "sigmoid", "tanh",
-    "bspline", "mspline", "ispline", "cubicspline", "naturalspline",
-})
+BOTH_MODE_METHODS = frozenset(
+    {
+        "rbf",
+        "relu",
+        "sigmoid",
+        "tanh",
+        "bspline",
+        "mspline",
+        "ispline",
+        "cubicspline",
+        "naturalspline",
+    }
+)
 # PLE is inherently target-aware: only the supervised selectors apply.
 TARGET_AWARE_ONLY_METHODS = frozenset({"ple"})
 # Penalized splines assume equally-spaced knots: only the spacing rules apply.
@@ -136,7 +146,9 @@ def get_numerical_transformer_steps(
 
     if method not in NUMERICAL_METHODS:
         raise invalid_param_error(
-            "get_numerical_transformer_steps", "method", method,
+            "get_numerical_transformer_steps",
+            "method",
+            method,
             "unrecognized numerical preprocessing method",
             valid=set(NUMERICAL_METHODS),
         )

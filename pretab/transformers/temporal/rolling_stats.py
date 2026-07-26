@@ -74,7 +74,9 @@ class RollingStatsTransformer(BasePreTabTransformer):
                 stat_val = rolled.max(axis=2)
             else:
                 raise invalid_param_error(
-                    type(self).__name__, "stats", stat,
+                    type(self).__name__,
+                    "stats",
+                    stat,
                     "each stat must be one of 'mean', 'std', 'min', 'max'",
                     valid={"mean", "std", "min", "max"},
                 )

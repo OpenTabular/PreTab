@@ -165,12 +165,16 @@ def test_tensor_product_adaptive_is_noop(data):
     """Penalized tensor splines are unsupervised: the adaptive window is a no-op."""
     X, y = data
     fixed = TensorProductSplineTransformer(output_dim=5).fit_transform(X, y).shape[1]
-    adaptive = TensorProductSplineTransformer(
-        output_dim=5,
-        adaptive=True,
-        min_output_dim=4,
-        max_output_dim=7,
-    ).fit_transform(X, y).shape[1]
+    adaptive = (
+        TensorProductSplineTransformer(
+            output_dim=5,
+            adaptive=True,
+            min_output_dim=4,
+            max_output_dim=7,
+        )
+        .fit_transform(X, y)
+        .shape[1]
+    )
     assert fixed == adaptive
 
 
@@ -220,9 +224,7 @@ def frame():
 def test_preprocessor_non_adaptive_output_dim_outside_default_window(frame):
     # Default min/max are 5/10; a fixed output_dim outside that must not raise.
     X, y = frame
-    out = Preprocessor(numerical_method="ple", output_dim=32, cat_cutoff=0.0).fit_transform(
-        X, y, return_array=True
-    )
+    out = Preprocessor(numerical_method="ple", output_dim=32, cat_cutoff=0.0).fit_transform(X, y, return_array=True)
     assert isinstance(out, np.ndarray)
     assert out.shape[1] == 64
 

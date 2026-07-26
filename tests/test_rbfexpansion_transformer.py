@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from sklearn.utils.validation import check_is_fitted
+
 from pretab.transformers import RBFExpansionTransformer
 
 
@@ -20,9 +21,7 @@ def y_regression():
 
 
 def test_rbf_uniform_single_feature(X_single_feature):
-    transformer = RBFExpansionTransformer(
-        output_dim=5, target_aware=False, placement_strategy="uniform"
-    )
+    transformer = RBFExpansionTransformer(output_dim=5, target_aware=False, placement_strategy="uniform")
     transformer.fit(X_single_feature)
     Xt = transformer.transform(X_single_feature)
 
@@ -32,9 +31,7 @@ def test_rbf_uniform_single_feature(X_single_feature):
 
 
 def test_rbf_quantile_multi_feature(X_multi_feature):
-    transformer = RBFExpansionTransformer(
-        output_dim=4, target_aware=False, placement_strategy="quantile"
-    )
+    transformer = RBFExpansionTransformer(output_dim=4, target_aware=False, placement_strategy="quantile")
     transformer.fit(X_multi_feature)
     Xt = transformer.transform(X_multi_feature)
 
@@ -64,7 +61,7 @@ def test_rbf_invalid_task():
 
 def test_rbf_missing_target_with_tree(X_single_feature):
     transformer = RBFExpansionTransformer(target_aware=True)
-    with pytest.raises(ValueError, match="Target variable.*must be provided"):
+    with pytest.raises(ValueError, match=r"Target variable.*must be provided"):
         transformer.fit(X_single_feature)
 
 

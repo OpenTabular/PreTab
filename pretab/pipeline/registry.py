@@ -60,7 +60,10 @@ NUMERICAL_METHODS = {
     "robust": (RobustScaler, []),
     "box-cox": (PowerTransformer, []),
     "yeo-johnson": (PowerTransformer, []),
-    "ple": (PLETransformer, ["output_dim", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state", "handle_missing"]),
+    "ple": (
+        PLETransformer,
+        ["output_dim", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state", "handle_missing"],
+    ),
     "custombin": (CustomBinTransformer, ["output_dim"]),
     "rbf": (
         RBFExpansionTransformer,
@@ -108,8 +111,23 @@ NUMERICAL_METHODS = {
             "random_state",
         ],
     ),
-    "cubicspline": (CubicSplineTransformer, ["output_dim", "degree", "include_bias", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"]),
-    "naturalspline": (NaturalCubicSplineTransformer, ["output_dim", "include_bias", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"]),
+    "cubicspline": (
+        CubicSplineTransformer,
+        [
+            "output_dim",
+            "degree",
+            "include_bias",
+            "task",
+            "adaptive",
+            "min_output_dim",
+            "max_output_dim",
+            "random_state",
+        ],
+    ),
+    "naturalspline": (
+        NaturalCubicSplineTransformer,
+        ["output_dim", "include_bias", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"],
+    ),
     # pspline / tensorspline are penalized (difference-penalty) splines that rely
     # on equally-spaced knots, so they are *not* target-aware: no ``task`` here.
     "pspline": (PSplineTransformer, ["output_dim", "degree", "diff_order"]),
@@ -127,9 +145,7 @@ NUMERICAL_METHODS = {
 
 # Canonical categorical method names (numerical ones are the NUMERICAL_METHODS
 # keys). Kept here so both pipeline sides resolve names through one module.
-CATEGORICAL_METHODS = frozenset(
-    {"int", "one-hot", "onehot_from_ordinal", "pretrained", "custombin", "none"}
-)
+CATEGORICAL_METHODS = frozenset({"int", "one-hot", "onehot_from_ordinal", "pretrained", "custombin", "none"})
 
 
 def _squash(name: str) -> str:

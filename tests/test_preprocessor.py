@@ -1,9 +1,10 @@
-import pytest
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 from sklearn.utils.validation import check_is_fitted
+
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
 
 
@@ -239,9 +240,7 @@ def test_output_dims_nonuniform_for_one_hot_categorical():
         }
     )
     y = pd.Series(np.random.randn(30))
-    pre = Preprocessor(
-        numerical_method="minmax", categorical_method="one-hot"
-    ).fit(X, y)
+    pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot").fit(X, y)
     dims = pre.output_dims_
     assert dims["num"] == 1
     assert dims["cat"] == 3  # one-hot of three categories
@@ -253,4 +252,3 @@ def test_output_dims_and_total_before_fit_raise():
         _ = Preprocessor().output_dims_
     with pytest.raises(NotFittedError):
         _ = Preprocessor().total_output_dim_
-

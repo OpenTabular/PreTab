@@ -46,10 +46,7 @@ class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
             Fitted transformer.
         """
         # Fit should determine the mapping from original categories to sequential integers starting from 0
-        self.mapping_ = [
-            {category: i + 1 for i, category in enumerate(np.unique(col))}
-            for col in X.T
-        ]
+        self.mapping_ = [{category: i + 1 for i, category in enumerate(np.unique(col))} for col in X.T]
         for mapping in self.mapping_:
             mapping[None] = 0  # Assign 0 to unknown values
         self.n_features_in_ = len(self.mapping_)
@@ -70,12 +67,7 @@ class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
         """
         check_is_fitted(self, "mapping_")
         # Transform the categories to their mapped integer values
-        X_transformed = np.array(
-            [
-                [self.mapping_[col].get(value, 0) for col, value in enumerate(row)]
-                for row in X
-            ]
-        )
+        X_transformed = np.array([[self.mapping_[col].get(value, 0) for col, value in enumerate(row)] for row in X])
         return X_transformed
 
     def get_feature_names_out(self, input_features=None):

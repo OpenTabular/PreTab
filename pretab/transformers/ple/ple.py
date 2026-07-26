@@ -199,9 +199,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         min_bins, max_bins = self._resolve_bin_bounds(n_bins, min_bins_req, max_bins_req)
 
         if self.task not in ("regression", "classification"):
-            raise InvalidParamError(
-                f"Unsupported task: {self.task}. Use 'regression' or 'classification'."
-            )
+            raise InvalidParamError(f"Unsupported task: {self.task}. Use 'regression' or 'classification'.")
 
         # Thresholds come from a target-aware location selector (CART by default,
         # optionally LightGBM): split points spaced out and ranked by impurity /
@@ -216,8 +214,11 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         for i in range(X.shape[1]):
             thresholds = np.sort(
                 selector.select(
-                    X[:, i], y, task=self.task,
-                    min_count=min_thresholds, max_count=max_thresholds,
+                    X[:, i],
+                    y,
+                    task=self.task,
+                    min_count=min_thresholds,
+                    max_count=max_thresholds,
                 )
             )
 

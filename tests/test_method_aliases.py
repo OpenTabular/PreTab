@@ -117,7 +117,9 @@ def sample_data():
 def test_numerical_alias_matches_canonical_output(sample_data, alias, canonical):
     X, y = sample_data
     out_alias = Preprocessor(numerical_method=alias, categorical_method="int").fit_transform(X, y, return_array=True)
-    out_canon = Preprocessor(numerical_method=canonical, categorical_method="int").fit_transform(X, y, return_array=True)
+    out_canon = Preprocessor(numerical_method=canonical, categorical_method="int").fit_transform(
+        X, y, return_array=True
+    )
     np.testing.assert_allclose(out_alias, out_canon)
 
 
@@ -128,7 +130,9 @@ def test_numerical_alias_matches_canonical_output(sample_data, alias, canonical)
 def test_categorical_alias_matches_canonical_output(sample_data, alias, canonical):
     X, y = sample_data
     out_alias = Preprocessor(numerical_method="minmax", categorical_method=alias).fit_transform(X, y, return_array=True)
-    out_canon = Preprocessor(numerical_method="minmax", categorical_method=canonical).fit_transform(X, y, return_array=True)
+    out_canon = Preprocessor(numerical_method="minmax", categorical_method=canonical).fit_transform(
+        X, y, return_array=True
+    )
     np.testing.assert_allclose(out_alias, out_canon)
 
 

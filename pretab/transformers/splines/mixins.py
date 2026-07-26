@@ -88,12 +88,8 @@ class SplineBasisMixin(BasePreTabTransformer):
         x = np.asarray(x)
         if selector is not None:
             if y is None:
-                raise IncompatibleParamsError(
-                    "A knot selector requires y during fit for target-aware knot placement."
-                )
-            selected = np.asarray(
-                selector.get_knot_locations(x.reshape(-1, 1), y, task=task), dtype=float
-            )
+                raise IncompatibleParamsError("A knot selector requires y during fit for target-aware knot placement.")
+            selected = np.asarray(selector.get_knot_locations(x.reshape(-1, 1), y, task=task), dtype=float)
             x_min, x_max = x.min(), x.max()
             selected = np.unique(selected[(selected > x_min) & (selected < x_max)])
             if min_interior is None and max_interior is None:
@@ -148,8 +144,9 @@ class SplineBasisMixin(BasePreTabTransformer):
         lo, hi = self._resolve_output_bounds(output_dim, min_req, max_req, floor=floor)
         return lo - offset, hi - offset
 
-    def _place_bspline_knots(self, x, y, output_dim, degree, strategy, selector, task,
-                             min_interior=None, max_interior=None):
+    def _place_bspline_knots(
+        self, x, y, output_dim, degree, strategy, selector, task, min_interior=None, max_interior=None
+    ):
         """Return the full padded B-spline knot vector for one feature.
 
         Places ``output_dim - degree - 1`` interior knots (via
@@ -163,9 +160,7 @@ class SplineBasisMixin(BasePreTabTransformer):
         """
         x = np.asarray(x)
         n_interior = output_dim - degree - 1
-        interior = self._place_interior_knots(
-            x, y, n_interior, strategy, selector, task, min_interior, max_interior
-        )
+        interior = self._place_interior_knots(x, y, n_interior, strategy, selector, task, min_interior, max_interior)
         x_min, x_max = x.min(), x.max()
         boundary_left = np.repeat(x_min, degree + 1)
         boundary_right = np.repeat(x_max, degree + 1)

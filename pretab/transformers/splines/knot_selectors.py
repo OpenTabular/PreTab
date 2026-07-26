@@ -78,7 +78,9 @@ class BaseKnotSelector(ABC):
         if self.spline_type in ("bspline", "mspline", "ispline"):
             return basis_to_knots(n_basis, self.degree)
         raise invalid_param_error(
-            type(self).__name__, "spline_type", self.spline_type,
+            type(self).__name__,
+            "spline_type",
+            self.spline_type,
             "must be one of 'bspline', 'mspline', 'ispline'",
             valid={"bspline", "mspline", "ispline"},
         )
@@ -156,9 +158,7 @@ class CARTKnotSelector(BaseKnotSelector):
     ) -> np.ndarray:
         if y is None:
             raise IncompatibleParamsError("CARTKnotSelector requires y to select knots.")
-        return self._selector.select(
-            X, y, task=task, min_count=self.min_knots, max_count=self.max_knots
-        )
+        return self._selector.select(X, y, task=task, min_count=self.min_knots, max_count=self.max_knots)
 
 
 class LightGBMKnotSelector(BaseKnotSelector):
@@ -239,9 +239,7 @@ class LightGBMKnotSelector(BaseKnotSelector):
     ) -> np.ndarray:
         if y is None:
             raise IncompatibleParamsError("LightGBMKnotSelector requires y to select knots.")
-        return self._selector.select(
-            X, y, task=task, min_count=self.min_knots, max_count=self.max_knots
-        )
+        return self._selector.select(X, y, task=task, min_count=self.min_knots, max_count=self.max_knots)
 
 
 def build_knot_selector(
@@ -266,7 +264,9 @@ def build_knot_selector(
     if placement_strategy == "lightgbm":
         return LightGBMKnotSelector(**kwargs)
     raise invalid_param_error(
-        "build_knot_selector", "placement_strategy", placement_strategy,
+        "build_knot_selector",
+        "placement_strategy",
+        placement_strategy,
         "must be 'cart' or 'lightgbm' when target_aware=True",
         valid={"cart", "lightgbm"},
     )

@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.base import TransformerMixin, BaseEstimator
+from sklearn.base import BaseEstimator, TransformerMixin
+
+from pretab.core.exceptions import InsufficientSamplesError, PretabDataError
 from pretab.transformers import CustomBinTransformer
 
 
@@ -37,7 +39,9 @@ def test_custom_bin_transformer_input_types(bins, input_type):
     X = (
         np.array(raw)  # Always convert to array to be safe
         if input_type == "list"
-        else np.array(raw) if input_type == "np" else pd.DataFrame(raw, columns=["x"])
+        else np.array(raw)
+        if input_type == "np"
+        else pd.DataFrame(raw, columns=["x"])
     )
     transformer = CustomBinTransformer(output_dim=bins)
     Xt = transformer.fit_transform(X)
@@ -48,7 +52,7 @@ def test_custom_bin_transformer_input_types(bins, input_type):
 
 def test_custom_bin_transformer_invalid_input():
     transformer = CustomBinTransformer(output_dim=3)
-    with pytest.raises(Exception):
+    with pytest.raises(PretabDataError):
         transformer.transform("invalid_input")
 
 
@@ -56,12 +60,12 @@ def test_custom_bin_transformer_raises_on_invalid_shape():
     transformer = CustomBinTransformer(output_dim=3)
     X = np.array([[0.1]])  # This will become scalar after squeeze()
 
-    with pytest.raises(ValueError, match="Input must have more than 2 observations."):
+    with pytest.raises(ValueError, match=r"Input must have more than 2 observations."):
         transformer.transform(X)
 
 
 def test_custom_bin_transformer_invalid_bins_type():
-    with pytest.raises(Exception):
+    with pytest.raises(InsufficientSamplesError):
         CustomBinTransformer(output_dim="not_valid").fit_transform(np.array([[0.1]]))
 
 

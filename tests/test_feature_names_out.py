@@ -20,9 +20,7 @@ def _num():
 @pytest.mark.parametrize("transformer", _num())
 def test_numeric_encoders_default_names(transformer):
     transformer.fit(np.zeros((5, 2)))
-    np.testing.assert_array_equal(
-        transformer.get_feature_names_out(), np.asarray(["x0", "x1"], dtype=object)
-    )
+    np.testing.assert_array_equal(transformer.get_feature_names_out(), np.asarray(["x0", "x1"], dtype=object))
 
 
 @pytest.mark.parametrize("transformer", _num())
@@ -37,9 +35,7 @@ def test_numeric_encoders_passthrough_names(transformer):
 def test_continuous_ordinal_default_names():
     X = np.array([["a", "x"], ["b", "y"], ["a", "x"]], dtype=object)
     transformer = ContinuousOrdinalTransformer().fit(X)
-    np.testing.assert_array_equal(
-        transformer.get_feature_names_out(), np.asarray(["x0", "x1"], dtype=object)
-    )
+    np.testing.assert_array_equal(transformer.get_feature_names_out(), np.asarray(["x0", "x1"], dtype=object))
 
 
 def test_continuous_ordinal_passthrough_names():

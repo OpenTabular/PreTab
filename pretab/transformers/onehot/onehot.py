@@ -46,9 +46,7 @@ class OneHotFromOrdinalTransformer(TransformerMixin, BaseEstimator):
         self : object
             Fitted transformer.
         """
-        self.max_bins_ = (
-            np.max(X, axis=0).astype(int) + 1
-        )  # Find the maximum bin index for each feature
+        self.max_bins_ = np.max(X, axis=0).astype(int) + 1  # Find the maximum bin index for each feature
         self.n_features_in_ = np.asarray(X).shape[1]
         return self
 

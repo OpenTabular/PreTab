@@ -39,9 +39,7 @@ def test_non_adaptive_target_path_gives_exact_output_dim(data):
 
 def test_adaptive_target_path_clamps_within_window(data):
     X, y = data
-    t = PLETransformer(
-        output_dim=10, adaptive=True, min_output_dim=3, max_output_dim=6
-    ).fit(X, y)
+    t = PLETransformer(output_dim=10, adaptive=True, min_output_dim=3, max_output_dim=6).fit(X, y)
     assert all(3 <= n <= 6 for n in t.n_bins_per_feature_)
     assert all(2 <= len(th) <= 5 for th in t.thresholds_)
 
@@ -49,9 +47,7 @@ def test_adaptive_target_path_clamps_within_window(data):
 def test_thresholds_match_cart_location_selector(data):
     X, y = data
     t = PLETransformer(output_dim=5, task="regression").fit(X, y)
-    expected = CARTLocationSelector().select(
-        X[:, 0], y, task="regression", min_count=4, max_count=4
-    )
+    expected = CARTLocationSelector().select(X[:, 0], y, task="regression", min_count=4, max_count=4)
     np.testing.assert_array_equal(t.thresholds_[0], expected)
 
 

@@ -24,9 +24,7 @@ from .knots import select_knots
 __all__ = ["resolve_locations", "trim_to_count"]
 
 
-def trim_to_count(
-    locations: np.ndarray, count: int, importance: np.ndarray | None = None
-) -> np.ndarray:
+def trim_to_count(locations: np.ndarray, count: int, importance: np.ndarray | None = None) -> np.ndarray:
     """Reduce ``locations`` to at most ``count`` entries.
 
     When ``importance`` is ``None`` the array is down-sampled by even spacing

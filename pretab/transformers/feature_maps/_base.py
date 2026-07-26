@@ -80,9 +80,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         placement_strategy = self._resolve_placement_strategy()
         validate_placement(self.target_aware, placement_strategy)
         if self.task not in ("regression", "classification"):
-            raise InvalidParamError(
-                f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}."
-            )
+            raise InvalidParamError(f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}.")
         n_centers = self._resolve_param("output_dim", default=6)
         min_req = self._resolve_param("min_output_dim", default=None)
         max_req = self._resolve_param("max_output_dim", default=None)
@@ -92,9 +90,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
             raise InvalidParamError(f"output_dim must be >= 1, got {n_centers}")
 
         if self.target_aware and y is None:
-            raise IncompatibleParamsError(
-                "Target variable 'y' must be provided when target_aware=True."
-            )
+            raise IncompatibleParamsError("Target variable 'y' must be provided when target_aware=True.")
 
         if self.target_aware:
             # Centers come from a target-aware location selector (CART by default,
@@ -103,28 +99,23 @@ class BaseCenterExpansion(BasePreTabTransformer):
             # each feature keeps exactly ``output_dim`` centers.
             selector = self._build_selector(placement_strategy)
             if self.adaptive:
-                min_centers, max_centers = self._resolve_output_bounds(
-                    n_centers, min_req, max_req, floor=1
-                )
+                min_centers, max_centers = self._resolve_output_bounds(n_centers, min_req, max_req, floor=1)
             else:
                 min_centers = max_centers = n_centers
             centers_list = [
                 selector.select(
-                    X[:, i], y, task=self.task,
-                    min_count=min_centers, max_count=max_centers,
+                    X[:, i],
+                    y,
+                    task=self.task,
+                    min_count=min_centers,
+                    max_count=max_centers,
                 )
                 for i in range(X.shape[1])
             ]
         elif placement_strategy == "quantile":
-            centers_list = [
-                np.percentile(X[:, i], np.linspace(0, 100, n_centers))
-                for i in range(X.shape[1])
-            ]
+            centers_list = [np.percentile(X[:, i], np.linspace(0, 100, n_centers)) for i in range(X.shape[1])]
         else:  # uniform
-            centers_list = [
-                np.linspace(X[:, i].min(), X[:, i].max(), n_centers)
-                for i in range(X.shape[1])
-            ]
+            centers_list = [np.linspace(X[:, i].min(), X[:, i].max(), n_centers) for i in range(X.shape[1])]
 
         self.centers_ = centers_list
         return self
@@ -165,9 +156,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
             return CARTLocationSelector(random_state=self.random_state)
         if placement_strategy == "lightgbm":
             return LightGBMLocationSelector(random_state=self.random_state)
-        raise InvalidParamError(
-            f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {placement_strategy!r}."
-        )
+        raise InvalidParamError(f"Invalid placement_strategy. Choose 'cart' or 'lightgbm'. Got {placement_strategy!r}.")
 
     def __sklearn_tags__(self):
         """Require ``y`` only when centers are placed by a target-aware selector."""

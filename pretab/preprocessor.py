@@ -21,7 +21,6 @@ from .pipeline import (
 logger = get_logger(__name__)
 
 
-
 class Preprocessor(TransformerMixin, BaseEstimator):
     r"""
     Preprocessor class for automated tabular feature preprocessing using scikit-learn-compatible pipelines.
@@ -293,20 +292,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 numerical_features.append(col)
             else:
                 if isinstance(self.cat_cutoff, float):
-                    cutoff_condition = (
-                        num_unique_values / total_samples
-                    ) < self.cat_cutoff
+                    cutoff_condition = (num_unique_values / total_samples) < self.cat_cutoff
                 elif isinstance(self.cat_cutoff, int):
                     cutoff_condition = num_unique_values < self.cat_cutoff
                 else:
                     raise invalid_param_error(
-                        type(self).__name__, "cat_cutoff", self.cat_cutoff,
+                        type(self).__name__,
+                        "cat_cutoff",
+                        self.cat_cutoff,
                         "must be a float (unique-ratio cutoff) or an int (absolute unique-count cutoff)",
                     )
 
-                if X[col].dtype.kind not in "iufc" or (
-                    X[col].dtype.kind == "i" and cutoff_condition
-                ):
+                if X[col].dtype.kind not in "iufc" or (X[col].dtype.kind == "i" and cutoff_condition):
                     categorical_features.append(col)
                 else:
                     numerical_features.append(col)
@@ -344,16 +341,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         elif isinstance(X, np.ndarray):
             X = pd.DataFrame(X, columns=[f"feature_{i}" for i in range(X.shape[1])])
 
-        numerical_method = (
-            self.numerical_method.lower()
-            if self.numerical_method is not None
-            else "none"
-        )
-        categorical_method = (
-            self.categorical_method.lower()
-            if self.categorical_method is not None
-            else "none"
-        )
+        numerical_method = self.numerical_method.lower() if self.numerical_method is not None else "none"
+        categorical_method = self.categorical_method.lower() if self.categorical_method is not None else "none"
         feature_preprocessing = self.feature_preprocessing or {}
 
         self.embeddings_ = False
@@ -398,16 +387,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             steps = get_categorical_transformer_steps(method, output_dim=self.output_dim)
             transformers.append((f"cat_{feature}", Pipeline(steps), [feature]))
 
-        self.column_transformer_ = ColumnTransformer(
-            transformers=transformers, remainder="passthrough"
-        )
+        self.column_transformer_ = ColumnTransformer(transformers=transformers, remainder="passthrough")
         self.column_transformer_.fit(X, y)
         self.n_features_in_ = X.shape[1]
 
         if verbose >= 1:
             logger.info(
-                "fit complete: %d numerical (%s) + %d categorical (%s) feature(s) "
-                "-> %d output columns in %.3fs",
+                "fit complete: %d numerical (%s) + %d categorical (%s) feature(s) -> %d output columns in %.3fs",
                 len(numerical_features),
                 numerical_method,
                 len(categorical_features),
@@ -505,9 +491,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             Transformed dataset in the specified output format.
         """
 
-        return self.fit(X, y, embeddings=embeddings).transform(
-            X, embeddings, return_array
-        )
+        return self.fit(X, y, embeddings=embeddings).transform(X, embeddings, return_array)
 
     def get_feature_names_out(self, input_features=None):
         """
@@ -718,13 +702,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """Build aligned, human-readable rows describing the fitted feature layout."""
         rows = []
         for feat, info in numerical_info.items():
-            rows.append(
-                (str(feat), "numerical", str(info["preprocessing"]), info["dimension"], info["categories"])
-            )
+            rows.append((str(feat), "numerical", str(info["preprocessing"]), info["dimension"], info["categories"]))
         for feat, info in categorical_info.items():
-            rows.append(
-                (str(feat), "categorical", str(info["preprocessing"]), info["dimension"], info["categories"])
-            )
+            rows.append((str(feat), "categorical", str(info["preprocessing"]), info["dimension"], info["categories"]))
         for feat, info in embedding_info.items():
             rows.append((str(feat), "embedding", "-", info["dimension"], info["categories"]))
         if not rows:
@@ -733,28 +713,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         feat_w = max(len("feature"), *(len(r[0]) for r in rows))
         kind_w = max(len("kind"), *(len(r[1]) for r in rows))
         pipe_w = max(len("pipeline"), *(len(r[2]) for r in rows))
-        header = (
-            f"{'feature':<{feat_w}}  {'kind':<{kind_w}}  "
-            f"{'pipeline':<{pipe_w}}  {'dim':>4}  {'cats':>5}"
-        )
+        header = f"{'feature':<{feat_w}}  {'kind':<{kind_w}}  {'pipeline':<{pipe_w}}  {'dim':>4}  {'cats':>5}"
         lines = [header, "-" * len(header)]
         for feat, kind, pipe, dim, cats in rows:
             dim_s = "-" if dim is None else str(dim)
             cats_s = "-" if cats is None else str(cats)
-            lines.append(
-                f"{feat:<{feat_w}}  {kind:<{kind_w}}  "
-                f"{pipe:<{pipe_w}}  {dim_s:>4}  {cats_s:>5}"
-            )
+            lines.append(f"{feat:<{feat_w}}  {kind:<{kind_w}}  {pipe:<{pipe_w}}  {dim_s:>4}  {cats_s:>5}")
         return lines
 
     def _log_internal_decisions(self):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
         for name, transformer, _columns in self.column_transformer_.transformers_:
-            last_step = (
-                transformer.steps[-1][1]
-                if hasattr(transformer, "steps")
-                else transformer
-            )
+            last_step = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
             for attr in (
                 "thresholds_",
                 "knots_",
@@ -764,4 +734,3 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             ):
                 if hasattr(last_step, attr):
                     logger.debug("%s.%s = %r", name, attr, getattr(last_step, attr))
-

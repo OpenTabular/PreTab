@@ -39,6 +39,7 @@ def _numerical_transformer(pre, feature):
 
 # --- exposure & round-trip ------------------------------------------------- #
 
+
 def test_new_params_defaults_and_get_params():
     pre = Preprocessor()
     assert pre.random_state is None
@@ -58,6 +59,7 @@ def test_clone_preserves_new_params():
 
 # --- random_state forwarding ----------------------------------------------- #
 
+
 @pytest.mark.parametrize("method", ["ple", "rbf"])
 def test_random_state_forwarded_when_set(data, method):
     X, y = data
@@ -68,14 +70,10 @@ def test_random_state_forwarded_when_set(data, method):
 def test_unset_random_state_preserves_component_defaults(data):
     X, y = data
     # PLE keeps its own default seed (51) when the Preprocessor seed is unset.
-    ple = _numerical_transformer(
-        Preprocessor(numerical_method="ple").fit(X, y), "a"
-    )
+    ple = _numerical_transformer(Preprocessor(numerical_method="ple").fit(X, y), "a")
     assert ple.random_state == 51
     # Feature maps stay unseeded (None) when the Preprocessor seed is unset.
-    rbf = _numerical_transformer(
-        Preprocessor(numerical_method="rbf").fit(X, y), "a"
-    )
+    rbf = _numerical_transformer(Preprocessor(numerical_method="rbf").fit(X, y), "a")
     assert rbf.random_state is None
 
 
@@ -90,6 +88,7 @@ def test_fixed_random_state_makes_fit_reproducible(data, method):
 
 
 # --- handle_missing policy ------------------------------------------------- #
+
 
 def test_handle_missing_forwarded_to_ple(data):
     X, y = data
@@ -120,9 +119,10 @@ def test_handle_missing_error_rejects_nan(data):
 
 # --- transformer / helper level seeding ------------------------------------ #
 
+
 def test_rbf_transformer_seeded_centers_reproducible(data):
     X, y = data
     r1 = RBFExpansionTransformer(output_dim=5, target_aware=True, random_state=3).fit(X.values, y.values)
     r2 = RBFExpansionTransformer(output_dim=5, target_aware=True, random_state=3).fit(X.values, y.values)
-    for a, b in zip(r1.centers_, r2.centers_):
+    for a, b in zip(r1.centers_, r2.centers_, strict=True):
         np.testing.assert_array_equal(a, b)

@@ -95,9 +95,7 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
             The concatenated embeddings for each text input.
         """
         if getattr(self, "model_", None) is None:
-            raise PretabConfigError(
-                "Model is not initialized. Call `fit` before `transform`."
-            )
+            raise PretabConfigError("Model is not initialized. Call `fit` before `transform`.")
 
         # Normalise to a 2D array of strings so each column is encoded on its own
         # and the row count is preserved (a flat encode would return
@@ -107,8 +105,5 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
             arr = arr.reshape(-1, 1)
         arr = arr.astype(str)
 
-        column_embeddings = [
-            self.model_.encode(arr[:, i].tolist(), convert_to_numpy=True)
-            for i in range(arr.shape[1])
-        ]
+        column_embeddings = [self.model_.encode(arr[:, i].tolist(), convert_to_numpy=True) for i in range(arr.shape[1])]
         return np.hstack(column_embeddings)

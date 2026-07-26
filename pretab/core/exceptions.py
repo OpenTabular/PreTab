@@ -106,6 +106,4 @@ def invalid_param_error(estimator, param, value, constraint, valid=None):
 
 def insufficient_samples_error(n_rows, min_required, reason):
     """Build an :class:`InsufficientSamplesError` with a consistent message."""
-    return InsufficientSamplesError(
-        f"Got {n_rows} row(s) but at least {min_required} are required for {reason}."
-    )
+    return InsufficientSamplesError(f"Got {n_rows} row(s) but at least {min_required} are required for {reason}.")

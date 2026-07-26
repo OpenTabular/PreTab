@@ -94,12 +94,10 @@ class AdaptiveResolutionMixin:
             )
         if ceil is not None and hi > ceil:
             raise InvalidParamError(
-                f"max_output_dim should be <= {ceil}, got {hi}.\n"
-                f"Fix: lower max_output_dim to at most {ceil}."
+                f"max_output_dim should be <= {ceil}, got {hi}.\nFix: lower max_output_dim to at most {ceil}."
             )
         if lo > hi:
             raise IncompatibleParamsError(
-                "min_output_dim must be <= max_output_dim "
-                f"(got min_output_dim={lo}, max_output_dim={hi})."
+                f"min_output_dim must be <= max_output_dim (got min_output_dim={lo}, max_output_dim={hi})."
             )
         return lo, hi

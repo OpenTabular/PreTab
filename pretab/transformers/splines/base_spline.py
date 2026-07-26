@@ -226,7 +226,9 @@ class BaseSplineTransformer(BasePreTabTransformer):
         if self.knot_locations is not None:
             expected_knots = self._basis_to_knots(n_basis)
             if not self.adaptive and len(self.knot_locations) != expected_knots:
-                raise IncompatibleParamsError("knot_locations length must match output_dim - degree - 1 when adaptive=False")
+                raise IncompatibleParamsError(
+                    "knot_locations length must match output_dim - degree - 1 when adaptive=False"
+                )
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
         elif selector is not None:
             selected = selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)

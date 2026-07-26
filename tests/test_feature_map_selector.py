@@ -59,9 +59,7 @@ def test_adaptive_target_path_clamps_within_window(Cls, data):
 def test_centers_match_cart_location_selector(Cls, data):
     X, y = data
     t = Cls(output_dim=5, target_aware=True, task="regression").fit(X, y)
-    expected = CARTLocationSelector().select(
-        X[:, 0], y, task="regression", min_count=5, max_count=5
-    )
+    expected = CARTLocationSelector().select(X[:, 0], y, task="regression", min_count=5, max_count=5)
     np.testing.assert_array_equal(t.centers_[0], expected)
 
 
@@ -84,9 +82,7 @@ def test_invalid_selector_raises(data):
 def test_quantile_path_ignores_selector(data):
     """The unsupervised quantile path yields exactly ``output_dim`` centers."""
     X, _ = data
-    t = RBFExpansionTransformer(
-        output_dim=7, target_aware=False, placement_strategy="quantile"
-    ).fit(X)
+    t = RBFExpansionTransformer(output_dim=7, target_aware=False, placement_strategy="quantile").fit(X)
     assert all(len(c) == 7 for c in t.centers_)
 
 

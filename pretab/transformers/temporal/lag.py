@@ -58,7 +58,7 @@ class LagFeatureTransformer(BasePreTabTransformer):
         if n_samples <= self.n_lags:
             raise InsufficientSamplesError("n_lags must be smaller than the number of samples.")
 
-        lagged = [X[self.n_lags - i: -i or None] for i in range(1, self.n_lags + 1)]
+        lagged = [X[self.n_lags - i : -i or None] for i in range(1, self.n_lags + 1)]
         return np.hstack(lagged)
 
     def _output_sizes(self) -> list[int]:

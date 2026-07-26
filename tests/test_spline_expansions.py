@@ -118,9 +118,7 @@ def test_ispline_shape_multi_feature():
 
 def test_spline_with_cart_knot_selector(data):
     X, y = data
-    transformer = BSplineTransformer(
-        output_dim=8, include_bias=False, target_aware=True, placement_strategy="cart"
-    )
+    transformer = BSplineTransformer(output_dim=8, include_bias=False, target_aware=True, placement_strategy="cart")
     Xt = transformer.fit_transform(X, y)
     assert Xt.shape == (200, 8)
     assert np.isfinite(Xt).all()

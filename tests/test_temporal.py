@@ -49,9 +49,7 @@ def test_lag_default_single_lag():
 def test_lag_feature_names():
     X = np.arange(6).reshape(-1, 1)
     transformer = LagFeatureTransformer(n_lags=2).fit(X)
-    np.testing.assert_array_equal(
-        transformer.get_feature_names_out(["t"]), ["t_lag0", "t_lag1"]
-    )
+    np.testing.assert_array_equal(transformer.get_feature_names_out(["t"]), ["t_lag0", "t_lag1"])
 
 
 # --------------------------------------------------------------------------- #
@@ -78,9 +76,7 @@ def test_rolling_min_max_columns():
 def test_rolling_feature_names():
     X = np.arange(10).reshape(-1, 1).astype(float)
     transformer = RollingStatsTransformer(window_size=3, stats=("mean", "std")).fit(X)
-    np.testing.assert_array_equal(
-        transformer.get_feature_names_out(["t"]), ["t_roll0", "t_roll1"]
-    )
+    np.testing.assert_array_equal(transformer.get_feature_names_out(["t"]), ["t_roll0", "t_roll1"])
 
 
 # --------------------------------------------------------------------------- #
@@ -114,6 +110,4 @@ def test_cyclic_requires_period():
 def test_cyclic_feature_names():
     X = np.array([[0], [6], [12], [18]])
     transformer = CyclicalTimeTransformer(period=24).fit(X)
-    np.testing.assert_array_equal(
-        transformer.get_feature_names_out(["hour"]), ["hour_cyclic0", "hour_cyclic1"]
-    )
+    np.testing.assert_array_equal(transformer.get_feature_names_out(["hour"]), ["hour_cyclic0", "hour_cyclic1"])

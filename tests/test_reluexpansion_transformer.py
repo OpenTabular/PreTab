@@ -1,7 +1,9 @@
+import warnings
+
 import numpy as np
 import pytest
-import warnings
 from sklearn.utils.validation import check_is_fitted
+
 from pretab.transformers import ReLUExpansionTransformer
 
 
@@ -21,9 +23,7 @@ def y_regression():
 
 
 def test_relu_uniform_single_feature(X_single_feature):
-    transformer = ReLUExpansionTransformer(
-        output_dim=4, target_aware=False, placement_strategy="uniform"
-    )
+    transformer = ReLUExpansionTransformer(output_dim=4, target_aware=False, placement_strategy="uniform")
     transformer.fit(X_single_feature)
     Xt = transformer.transform(X_single_feature)
 
@@ -32,9 +32,7 @@ def test_relu_uniform_single_feature(X_single_feature):
 
 
 def test_relu_quantile_multi_feature(X_multi_feature):
-    transformer = ReLUExpansionTransformer(
-        output_dim=5, target_aware=False, placement_strategy="quantile"
-    )
+    transformer = ReLUExpansionTransformer(output_dim=5, target_aware=False, placement_strategy="quantile")
     transformer.fit(X_multi_feature)
     Xt = transformer.transform(X_multi_feature)
 
@@ -63,7 +61,7 @@ def test_relu_invalid_task():
 
 def test_relu_missing_y_tree(X_single_feature):
     transformer = ReLUExpansionTransformer(target_aware=True)
-    with pytest.raises(ValueError, match="Target variable.*must be provided"):
+    with pytest.raises(ValueError, match=r"Target variable.*must be provided"):
         transformer.fit(X_single_feature)
 
 

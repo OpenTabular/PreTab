@@ -164,7 +164,9 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
         if self.target_aware:
             selector = build_knot_selector(
-                self.placement_strategy, degree=self.degree, spline_type="bspline",
+                self.placement_strategy,
+                degree=self.degree,
+                spline_type="bspline",
                 random_state=self.random_state,
             )
             strategy = "uniform"
@@ -172,9 +174,7 @@ class CubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
             selector = None
             strategy = self.placement_strategy
 
-        min_interior, max_interior = self._adaptive_interior_bounds(
-            output_dim, selector, floor=3, offset=3
-        )
+        min_interior, max_interior = self._adaptive_interior_bounds(output_dim, selector, floor=3, offset=3)
 
         self.knots_ = []
         self.designs_ = []

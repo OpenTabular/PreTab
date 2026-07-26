@@ -54,9 +54,7 @@ def test_resolve_under_min_calls_supplement():
         calls["args"] = (current.copy(), target)
         return np.array([1.0, 2.0, 3.0])
 
-    out = resolve_locations(
-        np.array([5.0]), min_count=3, max_count=8, supplement=supplement
-    )
+    out = resolve_locations(np.array([5.0]), min_count=3, max_count=8, supplement=supplement)
     np.testing.assert_array_equal(out, [1.0, 2.0, 3.0])
     assert calls["args"][1] == 3
 

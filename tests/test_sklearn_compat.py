@@ -52,14 +52,8 @@ SENTINEL = (
     "check_parameters_default_constructible rejects. Closing this needs an alias "
     "redesign that drops sentinel defaults."
 )
-REQUIRES_Y_NONE = (
-    "Supervised transformer does not yet raise a clear message when y=None is "
-    "passed to fit."
-)
-DTYPE = (
-    "Numeric encoder casts to float output and does not accept/preserve object "
-    "dtype input."
-)
+REQUIRES_Y_NONE = "Supervised transformer does not yet raise a clear message when y=None is passed to fit."
+DTYPE = "Numeric encoder casts to float output and does not accept/preserve object dtype input."
 
 # --- near-conformant tier: (estimator, expected_failed_checks) ------------- #
 
@@ -131,8 +125,7 @@ DEFERRED = [
         ThinPlateSplineTransformer(),
         id="ThinPlateSplineTransformer",
         marks=pytest.mark.xfail(
-            reason="Univariate-only (single input feature); incompatible with the "
-            "multi-feature transformer checks.",
+            reason="Univariate-only (single input feature); incompatible with the multi-feature transformer checks.",
             strict=True,
         ),
     ),
@@ -203,8 +196,7 @@ DEFERRED = [
         OneHotFromOrdinalTransformer(),
         id="OneHotFromOrdinalTransformer",
         marks=pytest.mark.xfail(
-            reason="Categorical one-hot encoder; expects integer-coded input and "
-            "does not use numeric validate_data.",
+            reason="Categorical one-hot encoder; expects integer-coded input and does not use numeric validate_data.",
             strict=True,
         ),
     ),

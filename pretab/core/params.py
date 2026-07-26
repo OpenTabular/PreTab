@@ -74,13 +74,9 @@ def validate_placement(target_aware: bool, placement_strategy: str) -> None:
     :class:`~pretab.core.exceptions.InvalidParamError` (a ``ValueError``) otherwise.
     """
     if target_aware and placement_strategy not in TARGET_AWARE_STRATEGIES:
-        raise InvalidParamError(
-            "When target_aware=True, placement_strategy must be 'cart' or 'lightgbm'."
-        )
+        raise InvalidParamError("When target_aware=True, placement_strategy must be 'cart' or 'lightgbm'.")
     if not target_aware and placement_strategy not in UNSUPERVISED_STRATEGIES:
-        raise InvalidParamError(
-            "When target_aware=False, placement_strategy must be 'uniform' or 'quantile'."
-        )
+        raise InvalidParamError("When target_aware=False, placement_strategy must be 'uniform' or 'quantile'.")
 
 
 # §8.3 canonical vocabulary: the family-neutral name for each shared concept.
@@ -143,9 +139,7 @@ class AliasResolverMixin:
         if is_set(canon_val):
             if set_aliases:
                 names = ", ".join(repr(alias) for alias, _ in set_aliases)
-                raise InvalidParamError(
-                    f"Set {canonical!r} or its legacy alias(es) {names}, not both."
-                )
+                raise InvalidParamError(f"Set {canonical!r} or its legacy alias(es) {names}, not both.")
             return canon_val
 
         if not set_aliases:
@@ -159,8 +153,7 @@ class AliasResolverMixin:
 
         alias, value = set_aliases[0]
         warnings.warn(
-            f"{alias!r} is deprecated and will be removed in a future release; "
-            f"use {canonical!r} instead.",
+            f"{alias!r} is deprecated and will be removed in a future release; use {canonical!r} instead.",
             FutureWarning,
             stacklevel=3,
         )
