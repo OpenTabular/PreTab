@@ -11,9 +11,12 @@ from .feature_maps import (
     TanhExpansionTransformer,
 )
 from .numerical import (
+    FourierFeatureTransformer,
     NumericBinningTransformer,
+    NystroemFeaturesTransformer,
     PeriodicEncodingTransformer,
     PLETransformer,
+    RandomFourierFeaturesTransformer,
 )
 from .splines import (
     BSplineTransformer,
@@ -30,17 +33,20 @@ __all__ = [
     "BSplineTransformer",
     "ContinuousOrdinalTransformer",
     "CubicRegressionSplineTransformer",
+    "FourierFeatureTransformer",
     "ISplineTransformer",
     "LanguageEmbeddingTransformer",
     "MSplineTransformer",
     "NaturalCubicSplineTransformer",
     "NoTransformer",
     "NumericBinningTransformer",
+    "NystroemFeaturesTransformer",
     "OneHotFromOrdinalTransformer",
     "PLETransformer",
     "PSplineTransformer",
     "PeriodicEncodingTransformer",
     "RBFExpansionTransformer",
+    "RandomFourierFeaturesTransformer",
     "ReLUExpansionTransformer",
     "SigmoidExpansionTransformer",
     "TanhExpansionTransformer",

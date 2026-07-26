@@ -20,6 +20,8 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Feat
 
+- **transformers**: add `FourierFeatureTransformer` (deterministic sine/cosine feature map with `harmonic` / `log_spaced` / `random` frequencies), selectable as the `"fourier"` numerical method
+- **transformers**: add `RandomFourierFeaturesTransformer` and `NystroemFeaturesTransformer` — standalone multivariate kernel-approximation feature maps (`"rff"` / `"nystroem"`)
 - **binning**: make `NumericBinningTransformer` a stateful, multi-feature encoder with learned `bin_edges_` and `encode` (`ordinal` / `onehot` / `soft`) plus `placement_strategy` (`uniform` / `quantile`) options
 - **transformers**: add `harmonics` and `include_original` options to `PeriodicEncodingTransformer` for multi-harmonic periodic encodings
 - update default output_dim

@@ -38,6 +38,11 @@ from ..transformers.feature_maps.relu import ReLUExpansionTransformer
 from ..transformers.feature_maps.sigmoid import SigmoidExpansionTransformer
 from ..transformers.feature_maps.tanh import TanhExpansionTransformer
 from ..transformers.numerical.binning import NumericBinningTransformer
+from ..transformers.numerical.fourier import FourierFeatureTransformer
+from ..transformers.numerical.kernel_approx import (
+    NystroemFeaturesTransformer,
+    RandomFourierFeaturesTransformer,
+)
 from ..transformers.numerical.piecewise import PLETransformer
 from ..transformers.splines.b_spline import BSplineTransformer
 from ..transformers.splines.cubic_regression import CubicRegressionSplineTransformer
@@ -223,6 +228,12 @@ _SPECS: tuple[TransformerSpec, ...] = (
         ("output_dim", "scale", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
         **_BOTH_MODE,
     ),
+    # --- numerical: deterministic Fourier feature map (univariate, unsupervised) ---
+    _spec(
+        "fourier",
+        FourierFeatureTransformer,
+        ("n_frequencies", "frequency_strategy", "include_original", "random_state"),
+    ),
     # --- numerical: freely-placed knot splines (optional target-aware, adaptive) ---
     _spec(
         "cubicspline",
@@ -256,6 +267,21 @@ _SPECS: tuple[TransformerSpec, ...] = (
         "tprs",
         ThinPlateSplineTransformer,
         ("n_components", "landmark_strategy", "rank_strategy", "random_state"),
+        arity="multivariate",
+        preprocessor_compatible=False,
+    ),
+    # --- numerical: kernel-approximation feature maps (multivariate, standalone) ---
+    _spec(
+        "rff",
+        RandomFourierFeaturesTransformer,
+        ("n_components", "gamma", "random_state"),
+        arity="multivariate",
+        preprocessor_compatible=False,
+    ),
+    _spec(
+        "nystroem",
+        NystroemFeaturesTransformer,
+        ("n_components", "kernel", "gamma", "degree", "coef0", "random_state"),
         arity="multivariate",
         preprocessor_compatible=False,
     ),
@@ -397,6 +423,11 @@ NUMERICAL_ALIASES = {
     "tensorproductspline": "tensorspline",
     "thinplate": "tprs",
     "thinplatespline": "tprs",
+    "fourierfeatures": "fourier",
+    "randomfourier": "rff",
+    "randomfourierfeatures": "rff",
+    "rbfsampler": "rff",
+    "nystrom": "nystroem",
     "passthrough": "none",
     "identity": "none",
     "raw": "none",

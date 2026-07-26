@@ -41,6 +41,8 @@ FIXED_WIDTH = {
     "polynomial": 4,
     # binning collapses to a single integer-coded column
     "custombin": 1,
+    # deterministic Fourier map: 2 * default n_frequencies (5) sine/cosine columns
+    "fourier": 10,
     # width-driven expansions -> exactly output_dim
     "ple": OUTPUT_DIM,
     "rbf": OUTPUT_DIM,
