@@ -1,9 +1,12 @@
+import hashlib
+import json
+import os
 import time
 import warnings
 
 import numpy as np
 from scipy import sparse as sp
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.utils._set_output import _get_output_config
 from sklearn.utils.validation import check_is_fitted
 
@@ -17,9 +20,17 @@ from .compose.inspection import (
     get_output_slices,
 )
 from .compose.output import compute_output_report, format_output, to_dataframe_output
+from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
 from .core.logging import configure_logging, get_logger
 from .core.policy import RepresentationPolicy, apply_constant_policy
-from .exceptions import ConfigWarning, OutputBudgetError, PretabDataError, invalid_param_error
+from .exceptions import (
+    ConfigWarning,
+    FrozenRepresentationError,
+    OutputBudgetError,
+    PretabDataError,
+    PretabSerializationError,
+    invalid_param_error,
+)
 
 logger = get_logger(__name__)
 
@@ -772,3 +783,178 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             ):
                 if hasattr(last_step, attr):
                     logger.debug("%s.%s = %r", name, attr, getattr(last_step, attr))
+
+    # --- Portable serialization (P9.1) ---
+    def to_spec(self, path=None) -> dict:
+        """Serialize the fitted preprocessor to a portable, versioned spec.
+
+        Produces a self-describing JSON-compatible dictionary (schema version,
+        PreTab / numpy / scipy / scikit-learn versions, resolved parameters, a
+        per-representation summary, the output-column order, and the encoded
+        fitted state) that reconstructs this estimator bit-for-bit via
+        :meth:`from_spec`. Unlike :mod:`pickle`, loading a spec never executes
+        estimator code and only imports an allow-listed set of library modules.
+
+        Parameters
+        ----------
+        path : str, os.PathLike, or None, default=None
+            When given, the spec is also written to this path as UTF-8 JSON.
+
+        Returns
+        -------
+        dict
+            The spec dictionary (always returned, whether or not ``path`` is set).
+        """
+        check_is_fitted(self)
+        spec = preprocessor_to_spec(self)
+        if path is not None:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(spec, handle, indent=2)
+        return spec
+
+    @classmethod
+    def from_spec(cls, source) -> "Preprocessor":
+        """Reconstruct a fitted preprocessor from a spec created by :meth:`to_spec`.
+
+        Parameters
+        ----------
+        source : str, os.PathLike, or dict
+            A path to a JSON spec file, or the spec dictionary itself.
+
+        Returns
+        -------
+        Preprocessor
+            A fitted preprocessor equivalent to the one that produced the spec;
+            ``transform`` reproduces the original output bit-for-bit.
+        """
+        if isinstance(source, dict):
+            data = source
+        elif isinstance(source, (str, os.PathLike)):
+            with open(source, encoding="utf-8") as handle:
+                data = json.load(handle)
+        else:
+            raise PretabSerializationError("from_spec expects a spec dict or a path to a JSON spec file.")
+        obj = preprocessor_from_spec(data)
+        if not isinstance(obj, cls):
+            raise PretabSerializationError(f"Spec reconstructed a {type(obj).__name__}, expected {cls.__name__}.")
+        return obj
+
+    # --- Fingerprint & reproducibility (P9.2) ---
+    def _canonical_spec(self) -> dict:
+        """Deterministic subset of the spec used for fingerprinting."""
+        spec = preprocessor_to_spec(self)
+        return {
+            "schema_version": spec["schema_version"],
+            "pretab_version": spec["pretab_version"],
+            "library_versions": spec["library_versions"],
+            "feature_names_out": spec["feature_names_out"],
+            "state": spec["state"],
+        }
+
+    @property
+    def fingerprint_(self) -> str:
+        """Stable SHA-256 digest identifying this fitted preprocessor.
+
+        Fitted attribute. Computed over a canonical JSON view of the resolved
+        configuration, dependency versions, output-column order, random seeds, and
+        the fitted state (knot / center / bin locations, scaler statistics, encoder
+        categories). The digest is deterministic across processes and machines, so
+        two preprocessors share a fingerprint iff they transform identically.
+        """
+        check_is_fitted(self)
+        canonical = json.dumps(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def reproducibility_report(self) -> dict:
+        """Return a machine-readable reproducibility summary for this fitted preprocessor.
+
+        Returns
+        -------
+        dict
+            Fingerprint, schema / library versions, random seed, output dtype and
+            format, input/output widths, and the per-feature representation
+            families -- everything needed to audit or reproduce the fit.
+        """
+        check_is_fitted(self)
+        spec = preprocessor_to_spec(self)
+        representations = {
+            entry["columns"][0]: entry.get("family") for entry in spec["representations"] if entry.get("columns")
+        }
+        return {
+            "fingerprint": self.fingerprint_,
+            "schema_version": SCHEMA_VERSION,
+            "pretab_version": spec["pretab_version"],
+            "library_versions": spec["library_versions"],
+            "random_state": self.random_state,
+            "output_format": self.output_format,
+            "dtype": None if self.dtype is None else str(self.dtype),
+            "n_features_in": int(self.n_features_in_),
+            "n_output_features": len(spec["feature_names_out"]),
+            "representations": representations,
+        }
+
+    # --- Immutable lifecycle (P9.3) ---
+    @property
+    def lifecycle_state_(self) -> str:
+        """Current lifecycle state: ``UNFITTED``, ``FITTED``, ``FROZEN``, or ``STALE``."""
+        try:
+            check_is_fitted(self)
+        except Exception:
+            return "UNFITTED"
+        if getattr(self, "_frozen", False):
+            return "FROZEN"
+        if getattr(self, "_stale_reason", None) is not None:
+            return "STALE"
+        return "FITTED"
+
+    def is_frozen(self) -> bool:
+        """Return whether this preprocessor has been frozen against mutation."""
+        return bool(getattr(self, "_frozen", False))
+
+    def freeze(self) -> "Preprocessor":
+        """Freeze the fitted preprocessor, blocking further ``set_params`` mutation.
+
+        Returns ``self`` for chaining. A frozen preprocessor is intended as an
+        immutable deployment artifact; use :meth:`clone_unfitted` or :meth:`refit`
+        to obtain a fresh, mutable estimator.
+        """
+        check_is_fitted(self)
+        self._frozen = True
+        return self
+
+    def mark_stale(self, reason: str) -> "Preprocessor":
+        """Mark this fitted preprocessor as stale (its inputs/assumptions changed).
+
+        Records ``reason`` and flips :attr:`lifecycle_state_` to ``STALE`` (unless
+        already ``FROZEN``). Purely advisory: it does not alter the fitted state.
+        Returns ``self`` for chaining.
+        """
+        check_is_fitted(self)
+        self._stale_reason = reason
+        return self
+
+    @property
+    def stale_reason_(self):
+        """The reason recorded by :meth:`mark_stale`, or ``None``."""
+        return getattr(self, "_stale_reason", None)
+
+    def clone_unfitted(self) -> "Preprocessor":
+        """Return a fresh, unfitted, mutable copy carrying the same constructor params."""
+        return clone(self)
+
+    def refit(self, X, y=None, embeddings=None) -> "Preprocessor":
+        """Fit a fresh copy on new data and return it, leaving ``self`` untouched.
+
+        Enables re-fitting a frozen or deployed preprocessor without mutating the
+        original: returns a new, unfrozen, fitted :class:`Preprocessor`.
+        """
+        return self.clone_unfitted().fit(X, y, embeddings=embeddings)
+
+    def set_params(self, **params):
+        """Set parameters, refusing to mutate a frozen preprocessor."""
+        if params and self.is_frozen():
+            raise FrozenRepresentationError(
+                f"Cannot set_params({', '.join(sorted(params))}) on a frozen {type(self).__name__}. "
+                "Use clone_unfitted() for a mutable copy, or refit() to fit fresh data."
+            )
+        return super().set_params(**params)

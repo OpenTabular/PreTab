@@ -17,6 +17,7 @@ __all__ = [
     "ConfigWarning",
     "DataWarning",
     "EmptyDataError",
+    "FrozenRepresentationError",
     "IncompatibleParamsError",
     "InsufficientSamplesError",
     "InvalidParamError",
@@ -27,6 +28,7 @@ __all__ = [
     "PretabDataError",
     "PretabError",
     "PretabNotFittedError",
+    "PretabSerializationError",
     "PretabWarning",
     "insufficient_samples_error",
     "invalid_param_error",
@@ -91,6 +93,17 @@ class OptionalDependencyError(PretabError, ImportError):
 class OutputBudgetError(PretabError, ValueError):
     """The fitted preprocessor would exceed a configured output budget
     (``max_output_features`` / ``max_features_per_input`` / ``max_dense_memory``)."""
+
+
+class PretabSerializationError(PretabError, ValueError):
+    """A representation spec could not be serialized or reconstructed
+    (unsupported value, unknown class, or incompatible ``schema_version``)."""
+
+
+class FrozenRepresentationError(PretabError):
+    """A mutating operation (e.g. ``set_params``) was attempted on a frozen
+    preprocessor. Call :meth:`~pretab.preprocessor.Preprocessor.clone_unfitted`
+    to obtain a fresh, mutable copy."""
 
 
 # --- Message factories ---
