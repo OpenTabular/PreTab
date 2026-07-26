@@ -14,7 +14,7 @@ import numpy as np
 
 from ...core.base import BasePreTabTransformer
 from ...core.knots import generate_internal_knots, select_knots, spanning_knots
-from ...exceptions import IncompatibleParamsError
+from ...exceptions import IncompatibleParamsError, PretabDataError
 
 
 class SplineBasisMixin(BasePreTabTransformer):
@@ -49,6 +49,29 @@ class SplineBasisMixin(BasePreTabTransformer):
         """Number of output columns contributed by each input feature."""
         return [int(n) for n in self.n_basis_]
 
+    def _finite_column(self, x, y):
+        """Drop NaN samples from one feature (aligning ``y``) before knot placement.
+
+        Knots are placed from the finite values only, so a partially missing
+        feature no longer poisons ``min`` / ``max`` / quantile knots with ``NaN``;
+        the missing rows are still expanded to ``NaN`` basis rows at transform time
+        (the "propagate" contract). A fully missing feature cannot yield knots and
+        raises a :class:`~pretab.exceptions.PretabDataError`.
+        """
+        x = np.asarray(x, dtype=float)
+        finite = ~np.isnan(x)
+        if not finite.any():
+            raise PretabDataError("Feature has only NaN values; a spline basis cannot be placed.")
+        if not finite.all():
+            x = x[finite]
+            y = np.asarray(y)[finite] if y is not None else y
+        if x.size > 1 and np.ptp(x) == 0:
+            raise PretabDataError(
+                f"Feature is constant (all values equal {float(x[0])!r}); "
+                "a spline basis cannot be constructed on a zero-range feature."
+            )
+        return x, y
+
     def _place_spanning_knots(self, x, y, n_basis, strategy, selector, task, min_interior=None, max_interior=None):
         """Return a spanning knot vector (endpoints included) for one feature.
 
@@ -60,7 +83,7 @@ class SplineBasisMixin(BasePreTabTransformer):
         adaptive selector path) the number of interior knots is clamped into that
         window before bracketing.
         """
-        x = np.asarray(x)
+        x, y = self._finite_column(x, y)
         if selector is not None:
             interior = self._place_interior_knots(
                 x, y, n_basis - 2, strategy, selector, task, min_interior, max_interior
@@ -85,7 +108,7 @@ class SplineBasisMixin(BasePreTabTransformer):
         ``n_interior`` knots are placed with
         :func:`pretab.core.knots.generate_internal_knots`.
         """
-        x = np.asarray(x)
+        x, y = self._finite_column(x, y)
         if selector is not None:
             if y is None:
                 raise IncompatibleParamsError("A knot selector requires y during fit for target-aware knot placement.")
@@ -158,7 +181,7 @@ class SplineBasisMixin(BasePreTabTransformer):
         adaptive selector path ``min_interior`` / ``max_interior`` clamp the
         interior-knot count.
         """
-        x = np.asarray(x)
+        x, y = self._finite_column(x, y)
         n_interior = output_dim - degree - 1
         interior = self._place_interior_knots(x, y, n_interior, strategy, selector, task, min_interior, max_interior)
         x_min, x_max = x.min(), x.max()

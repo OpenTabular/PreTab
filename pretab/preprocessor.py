@@ -15,6 +15,7 @@ from .compose.inspection import (
 )
 from .compose.output import format_output
 from .core.logging import configure_logging, get_logger
+from .core.policy import RepresentationPolicy, apply_constant_policy
 
 logger = get_logger(__name__)
 
@@ -124,6 +125,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         If True, append a binary missing-value indicator column for each imputed feature (via the
         imputer's ``add_indicator``; a standalone ``MissingIndicator`` is used when imputation is
         disabled). Applies to both numerical and categorical pipelines.
+    policy : RepresentationPolicy or dict or None, default=None
+        Central edge-case policy (see :class:`~pretab.RepresentationPolicy`) governing how
+        constant columns, out-of-range values, missing values, and non-finite inputs are
+        handled. ``None`` uses the default policy, which reproduces the library's historical
+        behaviour. Pass a mapping such as ``{"constant": "error"}`` to tighten a single axis.
     verbose : int, default=0
         Verbosity level controlling ``fit``-time logging, applied through the shared
         ``"pretab"`` logger so a single setting on this entry point governs the whole
@@ -238,6 +244,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         numerical_imputation="median",
         categorical_imputation="most_frequent",
         add_missing_indicator=False,
+        policy=None,
         verbose=0,
     ):
         """
@@ -265,6 +272,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.numerical_imputation = numerical_imputation
         self.categorical_imputation = categorical_imputation
         self.add_missing_indicator = add_missing_indicator
+        self.policy = policy
         self.verbose = verbose
 
     def fit(self, X, y=None, embeddings=None):
@@ -331,6 +339,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             treat_all_integers_as_numerical=self.treat_all_integers_as_numerical,
             estimator_name=type(self).__name__,
         )
+
+        self.policy_ = RepresentationPolicy.resolve(self.policy)
+        self.numerical_features_ = list(numerical_features)
+        self.categorical_features_ = list(categorical_features)
+        if numerical_features and self.policy_.constant != "allow":
+            numeric_values = X[numerical_features].to_numpy(dtype=np.float64, na_value=np.nan)
+            apply_constant_policy(numeric_values, self.policy_, estimator=self)
 
         self.column_transformer_ = build_column_transformer(config, numerical_features, categorical_features)
         self.column_transformer_.fit(X, y)

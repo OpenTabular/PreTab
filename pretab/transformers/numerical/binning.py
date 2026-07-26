@@ -104,6 +104,17 @@ class NumericBinningTransformer(
                 ) from exc
         else:
             X = X.astype(np.float64, copy=False)
+        if np.isinf(X).any():
+            raise PretabDataError(
+                "NumericBinningTransformer received infinite values, which cannot be "
+                "placed into finite bins. Clean or clip the input before binning."
+            )
+        if np.isnan(X).any():
+            raise PretabDataError(
+                "NumericBinningTransformer received missing values (NaN), which cannot be "
+                "binned. Impute missing values (e.g. via the Preprocessor pipeline or a "
+                "SimpleImputer) before binning."
+            )
         if reset:
             self.n_features_in_ = X.shape[1]
         elif X.shape[1] != self.n_features_in_:

@@ -113,7 +113,11 @@ class BaseCenterExpansion(BasePreTabTransformer):
         else:
             min_centers = max_centers = n_centers
         y_place = y if self.target_aware else None
-        self.centers_ = [adapter.get_centers(X[:, i], y_place, min_centers, max_centers) for i in range(X.shape[1])]
+        self.centers_ = []
+        for i in range(X.shape[1]):
+            if np.isnan(X[:, i]).all():
+                raise PretabDataError(f"Feature at index {i} has only NaN values")
+            self.centers_.append(adapter.get_centers(X[:, i], y_place, min_centers, max_centers))
         return self
 
     def transform(self, X):

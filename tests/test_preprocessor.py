@@ -117,6 +117,7 @@ EXPECTED_PARAMS = {
     "numerical_imputation",
     "categorical_imputation",
     "add_missing_indicator",
+    "policy",
     "verbose",
 }
 

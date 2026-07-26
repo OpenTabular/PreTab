@@ -288,6 +288,11 @@ class BaseSplineTransformer(BasePreTabTransformer):
             xi_valid = xi[valid_mask]
             if xi_valid.size == 0:
                 raise PretabDataError(f"Feature at index {i} has only NaN values")
+            if xi_valid.size > 1 and np.ptp(xi_valid) == 0:
+                raise PretabDataError(
+                    f"Feature at index {i} is constant (all values equal {float(xi_valid[0])!r}); "
+                    "a spline basis cannot be constructed on a zero-range feature."
+                )
             yi_valid = y_arr[valid_mask] if y_arr is not None else None
             self.knots_.append(
                 self._column_knots(xi_valid, yi_valid, n_basis, strategy, selector, min_basis_req, max_basis_req)
