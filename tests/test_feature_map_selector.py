@@ -15,8 +15,8 @@ import numpy as np
 import pytest
 from sklearn.base import clone
 
-from pretab.core.exceptions import InvalidParamError
 from pretab.core.selectors import CARTLocationSelector
+from pretab.exceptions import InvalidParamError
 from pretab.transformers import (
     RBFExpansionTransformer,
     ReLUExpansionTransformer,

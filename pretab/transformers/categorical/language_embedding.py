@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from ...core.exceptions import OptionalDependencyError, PretabConfigError
+from ...exceptions import OptionalDependencyError, PretabConfigError
 
 
 class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):

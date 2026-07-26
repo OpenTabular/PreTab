@@ -1,13 +1,15 @@
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder
 
-from ..core.exceptions import invalid_param_error
-from ..core.params import UNSET
-from ..transformers.binning import CustomBinTransformer
-from ..transformers.embeddings import LanguageEmbeddingTransformer
-from ..transformers.encoders.continuous_ordinal import ContinuousOrdinalTransformer
+from ..core.parameters import UNSET
+from ..exceptions import invalid_param_error
+from ..transformers.categorical.language_embedding import (
+    LanguageEmbeddingTransformer,
+)
+from ..transformers.categorical.legacy import OneHotFromOrdinalTransformer
+from ..transformers.categorical.ordinal import ContinuousOrdinalTransformer
 from ..transformers.encoders.floats import NoTransformer, ToFloatTransformer
-from ..transformers.onehot import OneHotFromOrdinalTransformer
+from ..transformers.numerical.binning import CustomBinTransformer
 from .registry import CATEGORICAL_ALIASES, CATEGORICAL_METHODS, resolve_method
 
 

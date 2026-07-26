@@ -13,8 +13,8 @@ transformer only has to implement its own basis math.
 import numpy as np
 
 from ...core.base import BasePreTabTransformer
-from ...core.exceptions import IncompatibleParamsError
 from ...core.knots import generate_internal_knots, select_knots, spanning_knots
+from ...exceptions import IncompatibleParamsError
 
 
 class SplineBasisMixin(BasePreTabTransformer):

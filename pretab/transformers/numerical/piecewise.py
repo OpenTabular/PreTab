@@ -14,14 +14,14 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
-from ...core.exceptions import (
+from ...core.parameters import UNSET, AliasResolverMixin
+from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
+from ...exceptions import (
     DataWarning,
     EmptyDataError,
     InvalidParamError,
     PretabDataError,
 )
-from ...core.params import UNSET, AliasResolverMixin
-from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
 
 
 class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMixin, BaseEstimator):
@@ -48,7 +48,7 @@ class PLETransformer(AdaptiveResolutionMixin, AliasResolverMixin, TransformerMix
         inherently target-aware, so only the supervised selectors apply.
         ``"cart"`` fits a single decision tree (always available); ``"lightgbm"``
         fits a gradient-boosted ensemble and requires the optional ``lightgbm``
-        dependency (``pip install pretab[knots]``).
+        dependency (``pip install pretab[lightgbm]``).
     task : {"regression", "classification"}, default="regression"
         Whether to fit a ``DecisionTreeRegressor`` or ``DecisionTreeClassifier``
         to locate the split thresholds.

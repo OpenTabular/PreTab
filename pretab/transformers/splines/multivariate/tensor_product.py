@@ -2,9 +2,9 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.exceptions import InvalidParamError
-from ...core.params import UNSET
-from .mixins import SplineBasisMixin
+from ....core.parameters import UNSET
+from ....exceptions import InvalidParamError
+from ..mixins import SplineBasisMixin
 
 
 def bspline_basis(x, knots, degree, i):
@@ -65,7 +65,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
         .. note::
            The tensor-product spline is a penalized (difference-penalty) spline
-           per marginal, exactly like :class:`~pretab.transformers.splines.pspline.PSplineTransformer`,
+           per marginal, exactly like :class:`~pretab.transformers.splines.p_spline.PSplineTransformer`,
            so it assumes **equally-spaced** knots and is *unsupervised-only*:
            target-aware placement does not apply and only ``"uniform"`` /
            ``"quantile"`` spacing is accepted.

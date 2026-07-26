@@ -4,8 +4,8 @@ from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.exceptions import InvalidParamError, PretabDataError
-from .mixins import SplineBasisMixin
+from ....exceptions import InvalidParamError, PretabDataError
+from ..mixins import SplineBasisMixin
 
 
 class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):

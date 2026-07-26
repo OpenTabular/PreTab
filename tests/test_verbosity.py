@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from pretab import Preprocessor, PretabWarning, configure_logging, set_verbosity
-from pretab.core.exceptions import ConfigWarning, DataWarning
+from pretab.exceptions import ConfigWarning, DataWarning
 from pretab.transformers import PLETransformer
 
 

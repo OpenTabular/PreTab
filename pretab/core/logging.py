@@ -8,7 +8,7 @@ application (such as DeepTab) keeps full control of handlers and levels. Use
 
 import logging
 
-from .exceptions import PretabWarning  # re-exported for convenience
+from ..exceptions import PretabWarning  # re-exported for convenience
 
 __all__ = [
     "PretabWarning",

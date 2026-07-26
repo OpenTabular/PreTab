@@ -24,7 +24,7 @@ from __future__ import annotations
 import warnings
 from typing import Any, ClassVar
 
-from .exceptions import InvalidParamError
+from ..exceptions import InvalidParamError
 
 
 class _Unset:
@@ -71,7 +71,7 @@ def validate_placement(target_aware: bool, placement_strategy: str) -> None:
     When ``target_aware`` is True the strategy must name a target-aware selector
     (``"cart"`` or ``"lightgbm"``); when False it must name an unsupervised
     spacing rule (``"uniform"`` or ``"quantile"``). Raises
-    :class:`~pretab.core.exceptions.InvalidParamError` (a ``ValueError``) otherwise.
+    :class:`~pretab.exceptions.InvalidParamError` (a ``ValueError``) otherwise.
     """
     if target_aware and placement_strategy not in TARGET_AWARE_STRATEGIES:
         raise InvalidParamError("When target_aware=True, placement_strategy must be 'cart' or 'lightgbm'.")
@@ -107,7 +107,7 @@ class AliasResolverMixin:
     effective value: an explicit canonical value wins, an explicit legacy alias
     is honoured with a ``FutureWarning``, and setting both a canonical and one
     of its aliases -- or two conflicting aliases -- raises
-    :class:`~pretab.core.exceptions.InvalidParamError`.
+    :class:`~pretab.exceptions.InvalidParamError`.
     """
 
     _param_aliases: ClassVar[dict[str, str]] = {}

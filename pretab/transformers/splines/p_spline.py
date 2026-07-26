@@ -2,8 +2,8 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.exceptions import InvalidParamError
-from ...core.params import UNSET
+from ...core.parameters import UNSET
+from ...exceptions import InvalidParamError
 from .mixins import SplineBasisMixin
 
 

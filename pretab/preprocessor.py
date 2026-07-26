@@ -7,12 +7,12 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
-from .core.exceptions import (
+from .core.logging import configure_logging, get_logger
+from .core.parameters import validate_placement
+from .exceptions import (
     IncompatibleParamsError,
     invalid_param_error,
 )
-from .core.logging import configure_logging, get_logger
-from .core.params import validate_placement
 from .pipeline import (
     get_categorical_transformer_steps,
     get_numerical_transformer_steps,

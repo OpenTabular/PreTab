@@ -3,7 +3,7 @@ import warnings
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
-from ..core.exceptions import ConfigWarning, invalid_param_error
+from ..exceptions import ConfigWarning, invalid_param_error
 from .registry import NUMERICAL_ALIASES, NUMERICAL_METHODS, resolve_method
 
 # Spline basis expansions that share the target-aware knot API.

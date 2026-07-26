@@ -1,18 +1,20 @@
-from .binning import CustomBinTransformer
-from .embeddings import LanguageEmbeddingTransformer
-from .encoders import (
+from .categorical import (
     ContinuousOrdinalTransformer,
-    NoTransformer,
-    ToFloatTransformer,
+    LanguageEmbeddingTransformer,
+    OneHotFromOrdinalTransformer,
 )
+from .encoders import NoTransformer, ToFloatTransformer
 from .feature_maps import (
     RBFExpansionTransformer,
     ReLUExpansionTransformer,
     SigmoidExpansionTransformer,
     TanhExpansionTransformer,
 )
-from .onehot import OneHotFromOrdinalTransformer
-from .ple import PLETransformer
+from .numerical import (
+    CustomBinTransformer,
+    CyclicalTimeTransformer,
+    PLETransformer,
+)
 from .splines import (
     BSplineTransformer,
     CubicSplineTransformer,
@@ -24,7 +26,6 @@ from .splines import (
     ThinPlateSplineTransformer,
 )
 from .temporal import (
-    CyclicalTimeTransformer,
     LagFeatureTransformer,
     RollingStatsTransformer,
 )

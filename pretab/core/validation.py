@@ -12,7 +12,7 @@ from typing import Literal
 import numpy as np
 from sklearn.utils.validation import check_array
 
-from .exceptions import DataWarning, PretabDataError
+from ..exceptions import DataWarning, PretabDataError
 
 __all__ = ["validate_2d_allow_nan"]
 

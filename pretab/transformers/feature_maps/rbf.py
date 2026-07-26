@@ -1,7 +1,7 @@
 import numpy as np
 
-from ...core.params import UNSET
-from ._base import BaseCenterExpansion
+from ...core.parameters import UNSET
+from .base import BaseCenterExpansion
 
 
 class RBFExpansionTransformer(BaseCenterExpansion):

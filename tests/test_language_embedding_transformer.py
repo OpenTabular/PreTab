@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from sklearn.base import clone
 
-from pretab.core.exceptions import OptionalDependencyError, PretabConfigError
+from pretab.exceptions import OptionalDependencyError, PretabConfigError
 from pretab.transformers import LanguageEmbeddingTransformer
 
 

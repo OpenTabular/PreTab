@@ -7,7 +7,7 @@ output is preserved) and that they are actually wired through ``fit``.
 import numpy as np
 import pytest
 
-from pretab.core.exceptions import IncompatibleParamsError
+from pretab.exceptions import IncompatibleParamsError
 from pretab.transformers import (
     CubicSplineTransformer,
     NaturalCubicSplineTransformer,

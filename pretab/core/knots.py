@@ -14,7 +14,7 @@ helpers leaves knot positions numerically unchanged.
 
 import numpy as np
 
-from .exceptions import invalid_param_error
+from ..exceptions import invalid_param_error
 
 __all__ = [
     "basis_to_knots",

@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
-from ...core.exceptions import PretabDataError
+from ...exceptions import PretabDataError
 
 
 class CyclicalTimeTransformer(BasePreTabTransformer):

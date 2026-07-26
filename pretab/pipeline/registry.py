@@ -20,21 +20,25 @@ from sklearn.preprocessing import (
     StandardScaler,
 )
 
-from ..transformers.binning.binning import CustomBinTransformer
 from ..transformers.encoders.floats import NoTransformer
 from ..transformers.feature_maps.rbf import RBFExpansionTransformer
 from ..transformers.feature_maps.relu import ReLUExpansionTransformer
 from ..transformers.feature_maps.sigmoid import SigmoidExpansionTransformer
 from ..transformers.feature_maps.tanh import TanhExpansionTransformer
-from ..transformers.ple.ple import PLETransformer
-from ..transformers.splines.bspline import BSplineTransformer
-from ..transformers.splines.cubic import CubicSplineTransformer
-from ..transformers.splines.integrated_spline import ISplineTransformer
-from ..transformers.splines.mspline import MSplineTransformer
+from ..transformers.numerical.binning import CustomBinTransformer
+from ..transformers.numerical.piecewise import PLETransformer
+from ..transformers.splines.b_spline import BSplineTransformer
+from ..transformers.splines.cubic_regression import CubicSplineTransformer
+from ..transformers.splines.i_spline import ISplineTransformer
+from ..transformers.splines.m_spline import MSplineTransformer
+from ..transformers.splines.multivariate.tensor_product import (
+    TensorProductSplineTransformer,
+)
+from ..transformers.splines.multivariate.thin_plate import (
+    ThinPlateSplineTransformer,
+)
 from ..transformers.splines.natural_cubic import NaturalCubicSplineTransformer
-from ..transformers.splines.pspline import PSplineTransformer
-from ..transformers.splines.tensor_product import TensorProductSplineTransformer
-from ..transformers.splines.thinplate_spline import ThinPlateSplineTransformer
+from ..transformers.splines.p_spline import PSplineTransformer
 
 __all__ = [
     "CATEGORICAL_ALIASES",

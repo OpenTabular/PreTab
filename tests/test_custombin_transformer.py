@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from pretab.core.exceptions import InsufficientSamplesError, PretabDataError
+from pretab.exceptions import InsufficientSamplesError, PretabDataError
 from pretab.transformers import CustomBinTransformer
 
 

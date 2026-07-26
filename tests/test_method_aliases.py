@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab.core.exceptions import InvalidParamError
+from pretab.exceptions import InvalidParamError
 from pretab.pipeline.registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,

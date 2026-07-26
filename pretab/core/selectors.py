@@ -12,7 +12,7 @@ Two strategies are provided:
 - :class:`CARTLocationSelector` fits a single decision tree and needs only
   scikit-learn, so it is always available.
 - :class:`LightGBMLocationSelector` fits a gradient boosted ensemble and requires
-  the optional ``lightgbm`` dependency (``pip install pretab[knots]``).
+  the optional ``lightgbm`` dependency (``pip install pretab[lightgbm]``).
 
 Both share the :class:`BaseLocationSelector` template, which handles input
 validation, small-sample quantile fallbacks, minimum spacing, and topping up or
@@ -25,7 +25,7 @@ from typing import Literal
 import numpy as np
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
-from .exceptions import IncompatibleParamsError, OptionalDependencyError
+from ..exceptions import IncompatibleParamsError, OptionalDependencyError
 from .knots import quantile_knots
 
 Task = Literal["regression", "classification"]
@@ -274,7 +274,7 @@ class LightGBMLocationSelector(BaseLocationSelector):
     tends to find informative locations that a single tree can miss.
 
     Requires the optional ``lightgbm`` dependency, installable with
-    ``pip install pretab[knots]``.
+    ``pip install pretab[lightgbm]``.
 
     Parameters
     ----------
@@ -317,7 +317,7 @@ class LightGBMLocationSelector(BaseLocationSelector):
         except ImportError as exc:
             raise OptionalDependencyError(
                 "LightGBMLocationSelector requires the optional 'lightgbm' dependency. "
-                "Install it with: pip install pretab[knots]"
+                "Install it with: pip install pretab[lightgbm]"
             ) from exc
         return lgb
 

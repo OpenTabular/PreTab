@@ -19,7 +19,7 @@ Error paths (insufficient samples, unsupported stat) are covered in
 import numpy as np
 import pytest
 
-from pretab.core.exceptions import PretabDataError
+from pretab.exceptions import PretabDataError
 from pretab.transformers import (
     CyclicalTimeTransformer,
     LagFeatureTransformer,

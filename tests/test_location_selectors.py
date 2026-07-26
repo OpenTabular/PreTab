@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-from pretab.core.exceptions import IncompatibleParamsError
 from pretab.core.selectors import (
     BaseLocationSelector,
     CARTLocationSelector,
     LightGBMLocationSelector,
 )
+from pretab.exceptions import IncompatibleParamsError
 from pretab.transformers.splines.knot_selectors import (
     CARTKnotSelector,
     LightGBMKnotSelector,

@@ -2,8 +2,8 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.exceptions import InvalidParamError
-from ...core.params import UNSET, validate_placement
+from ...core.parameters import UNSET, validate_placement
+from ...exceptions import InvalidParamError
 from .knot_selectors import build_knot_selector
 from .mixins import SplineBasisMixin
 

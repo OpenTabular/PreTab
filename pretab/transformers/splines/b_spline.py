@@ -10,7 +10,7 @@ from typing import Literal
 import numpy as np
 from scipy.interpolate import BSpline
 
-from ...core.params import UNSET
+from ...core.parameters import UNSET
 from .base_spline import BaseSplineTransformer
 
 

@@ -5,9 +5,7 @@ The ``core`` package holds reusable *math + scikit-learn-contract* primitives
 user-facing transformers. It never defines user-facing transformers itself.
 """
 
-from .adaptive import AdaptiveResolutionMixin
-from .base import BasePreTabTransformer
-from .exceptions import (
+from ..exceptions import (
     ConfigWarning,
     DataWarning,
     EmptyDataError,
@@ -23,6 +21,8 @@ from .exceptions import (
     insufficient_samples_error,
     invalid_param_error,
 )
+from .adaptive import AdaptiveResolutionMixin
+from .base import BasePreTabTransformer
 from .knots import (
     basis_to_knots,
     generate_internal_knots,
@@ -33,7 +33,7 @@ from .knots import (
 )
 from .locations import resolve_locations, trim_to_count
 from .logging import get_logger
-from .params import CANONICAL_PARAMS, UNSET, AliasResolverMixin, is_set
+from .parameters import CANONICAL_PARAMS, UNSET, AliasResolverMixin, is_set
 from .selectors import (
     BaseLocationSelector,
     CARTLocationSelector,

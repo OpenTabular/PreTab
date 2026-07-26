@@ -21,11 +21,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab.core.exceptions import PretabDataError
+from pretab.exceptions import PretabDataError
 from pretab.preprocessor import Preprocessor
-from pretab.transformers.splines.bspline import BSplineTransformer
-from pretab.transformers.splines.integrated_spline import ISplineTransformer
-from pretab.transformers.splines.mspline import MSplineTransformer
+from pretab.transformers.splines.b_spline import BSplineTransformer
+from pretab.transformers.splines.i_spline import ISplineTransformer
+from pretab.transformers.splines.m_spline import MSplineTransformer
 
 OUTPUT_DIM = 6
 

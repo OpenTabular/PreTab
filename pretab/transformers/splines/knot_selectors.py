@@ -10,7 +10,7 @@ Two strategies are provided:
 - :class:`CARTKnotSelector` uses a single decision tree and needs only
   scikit-learn, so it is always available.
 - :class:`LightGBMKnotSelector` uses a gradient boosted ensemble and requires the
-  optional ``lightgbm`` dependency (``pip install pretab[knots]``).
+  optional ``lightgbm`` dependency (``pip install pretab[lightgbm]``).
 
 Both are thin, spline-aware adapters over the degree-agnostic count-based
 selectors in :mod:`pretab.core.selectors`. The adapter converts a number of
@@ -24,9 +24,9 @@ from typing import Literal
 
 import numpy as np
 
-from ...core.exceptions import IncompatibleParamsError, invalid_param_error
 from ...core.knots import basis_to_knots
 from ...core.selectors import CARTLocationSelector, LightGBMLocationSelector
+from ...exceptions import IncompatibleParamsError, invalid_param_error
 
 
 class BaseKnotSelector(ABC):
@@ -169,7 +169,7 @@ class LightGBMKnotSelector(BaseKnotSelector):
     tends to find informative knots that a single tree can miss.
 
     Requires the optional ``lightgbm`` dependency, installable with
-    ``pip install pretab[knots]``.
+    ``pip install pretab[lightgbm]``.
 
     Parameters
     ----------

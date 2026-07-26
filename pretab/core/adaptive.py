@@ -14,7 +14,7 @@ resolution and its validation so no family reimplements it. Families call
 family-specific floor (and optional ceiling) on the count.
 """
 
-from .exceptions import IncompatibleParamsError, InvalidParamError
+from ..exceptions import IncompatibleParamsError, InvalidParamError
 
 __all__ = ["AdaptiveResolutionMixin"]
 

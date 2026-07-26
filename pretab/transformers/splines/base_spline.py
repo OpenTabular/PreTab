@@ -20,11 +20,6 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
-from ...core.exceptions import (
-    IncompatibleParamsError,
-    InvalidParamError,
-    PretabDataError,
-)
 from ...core.knots import (
     basis_to_knots,
     generate_internal_knots,
@@ -32,7 +27,12 @@ from ...core.knots import (
     select_knots,
     uniform_knots,
 )
-from ...core.params import UNSET, validate_placement
+from ...core.parameters import UNSET, validate_placement
+from ...exceptions import (
+    IncompatibleParamsError,
+    InvalidParamError,
+    PretabDataError,
+)
 from .knot_selectors import BaseKnotSelector, build_knot_selector
 
 

@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
-from ...core.exceptions import InsufficientSamplesError, invalid_param_error
+from ...exceptions import InsufficientSamplesError, invalid_param_error
 
 
 class RollingStatsTransformer(BasePreTabTransformer):

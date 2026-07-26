@@ -2,7 +2,7 @@
 
 These tests lock two guarantees:
 
-1. Every migrated raise site emits a *typed* ``core.exceptions`` class.
+1. Every migrated raise site emits a *typed* ``pretab.exceptions`` class.
 2. The typed classes stay back-compatible: config/data errors remain
    ``ValueError`` subclasses and optional-dependency errors remain
    ``ImportError`` subclasses, so pre-existing ``pytest.raises(ValueError)``
@@ -16,7 +16,8 @@ from sklearn.exceptions import NotFittedError
 
 from pretab import Preprocessor, PretabWarning
 from pretab.core.adaptive import AdaptiveResolutionMixin
-from pretab.core.exceptions import (
+from pretab.core.knots import generate_internal_knots
+from pretab.exceptions import (
     ConfigWarning,
     DataWarning,
     EmptyDataError,
@@ -31,7 +32,6 @@ from pretab.core.exceptions import (
     insufficient_samples_error,
     invalid_param_error,
 )
-from pretab.core.knots import generate_internal_knots
 from pretab.transformers import (
     BSplineTransformer,
     LagFeatureTransformer,

@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from ...core.exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
-from ...core.params import UNSET, AliasResolverMixin
+from ...core.parameters import UNSET, AliasResolverMixin
+from ...exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 
 
 class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
@@ -44,7 +44,7 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
 
     The input must be numeric: binning is performed with :func:`pandas.cut`, so
     string / categorical data cannot be processed and raises a
-    :class:`~pretab.core.exceptions.PretabDataError`. Encode such columns with a
+    :class:`~pretab.exceptions.PretabDataError`. Encode such columns with a
     categorical method (e.g. ``"int"`` or ``"one-hot"``) before binning.
 
     Examples

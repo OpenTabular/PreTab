@@ -11,7 +11,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from .adaptive import AdaptiveResolutionMixin
-from .params import AliasResolverMixin
+from .parameters import AliasResolverMixin
 from .validation import validate_2d_allow_nan
 
 __all__ = ["BasePreTabTransformer"]
