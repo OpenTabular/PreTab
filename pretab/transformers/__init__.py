@@ -5,18 +5,18 @@ from .categorical import (
 )
 from .encoders import NoTransformer, ToFloatTransformer
 from .feature_maps import (
+    FourierFeatureTransformer,
+    NystroemFeaturesTransformer,
+    RandomFourierFeaturesTransformer,
     RBFExpansionTransformer,
     ReLUExpansionTransformer,
     SigmoidExpansionTransformer,
     TanhExpansionTransformer,
 )
 from .numerical import (
-    FourierFeatureTransformer,
     NumericBinningTransformer,
-    NystroemFeaturesTransformer,
     PeriodicEncodingTransformer,
     PLETransformer,
-    RandomFourierFeaturesTransformer,
 )
 from .splines import (
     BSplineTransformer,

@@ -33,16 +33,16 @@ from ..transformers.categorical.language_embedding import (
 from ..transformers.categorical.legacy import OneHotFromOrdinalTransformer
 from ..transformers.categorical.ordinal import ContinuousOrdinalTransformer
 from ..transformers.encoders.floats import NoTransformer
+from ..transformers.feature_maps.fourier import FourierFeatureTransformer
+from ..transformers.feature_maps.kernel_approx import (
+    NystroemFeaturesTransformer,
+    RandomFourierFeaturesTransformer,
+)
 from ..transformers.feature_maps.rbf import RBFExpansionTransformer
 from ..transformers.feature_maps.relu import ReLUExpansionTransformer
 from ..transformers.feature_maps.sigmoid import SigmoidExpansionTransformer
 from ..transformers.feature_maps.tanh import TanhExpansionTransformer
 from ..transformers.numerical.binning import NumericBinningTransformer
-from ..transformers.numerical.fourier import FourierFeatureTransformer
-from ..transformers.numerical.kernel_approx import (
-    NystroemFeaturesTransformer,
-    RandomFourierFeaturesTransformer,
-)
 from ..transformers.numerical.piecewise import PLETransformer
 from ..transformers.splines.b_spline import BSplineTransformer
 from ..transformers.splines.cubic_regression import CubicRegressionSplineTransformer
