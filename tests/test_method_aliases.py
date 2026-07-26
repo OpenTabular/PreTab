@@ -2,14 +2,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab.exceptions import InvalidParamError
-from pretab.pipeline.registry import (
+from pretab.compose.registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
     NUMERICAL_ALIASES,
     NUMERICAL_METHODS,
     resolve_method,
 )
+from pretab.exceptions import InvalidParamError
 from pretab.preprocessor import Preprocessor
 
 

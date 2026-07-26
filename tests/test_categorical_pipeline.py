@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from sklearn.pipeline import Pipeline
 
-from pretab.pipeline import get_categorical_transformer_steps
+from pretab.compose.factory import get_categorical_transformer_steps
 
 
 def _build(method, **kwargs):

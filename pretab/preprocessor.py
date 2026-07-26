@@ -1,22 +1,19 @@
 import time
 
 import numpy as np
-import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
+from .compose.config import PreprocessorConfig
+from .compose.factory import build_column_transformer
+from .compose.feature_detection import detect_column_types, to_dataframe
+from .compose.inspection import (
+    build_feature_info,
+    build_transformer_summary,
+    get_output_slices,
+)
+from .compose.output import format_output
 from .core.logging import configure_logging, get_logger
-from .core.parameters import validate_placement
-from .exceptions import (
-    IncompatibleParamsError,
-    invalid_param_error,
-)
-from .pipeline import (
-    get_categorical_transformer_steps,
-    get_numerical_transformer_steps,
-)
 
 logger = get_logger(__name__)
 
@@ -259,57 +256,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.handle_missing = handle_missing
         self.verbose = verbose
 
-    def _detect_column_types(self, X):
-        """
-        Detects categorical and numerical features in the input data.
-
-        Parameters
-        ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
-            The input data to analyze.
-
-        Returns
-        -------
-        numerical_features : list of str
-            Column names detected as numerical features.
-        categorical_features : list of str
-            Column names detected as categorical features.
-        """
-
-        categorical_features = []
-        numerical_features = []
-
-        if isinstance(X, dict):
-            X = pd.DataFrame(X)
-        elif isinstance(X, np.ndarray):
-            X = pd.DataFrame(X, columns=[f"feature_{i}" for i in range(X.shape[1])])
-
-        for col in X.columns:
-            num_unique_values = X[col].nunique()
-            total_samples = len(X[col])
-
-            if self.treat_all_integers_as_numerical and X[col].dtype.kind == "i":
-                numerical_features.append(col)
-            else:
-                if isinstance(self.cat_cutoff, float):
-                    cutoff_condition = (num_unique_values / total_samples) < self.cat_cutoff
-                elif isinstance(self.cat_cutoff, int):
-                    cutoff_condition = num_unique_values < self.cat_cutoff
-                else:
-                    raise invalid_param_error(
-                        type(self).__name__,
-                        "cat_cutoff",
-                        self.cat_cutoff,
-                        "must be a float (unique-ratio cutoff) or an int (absolute unique-count cutoff)",
-                    )
-
-                if X[col].dtype.kind not in "iufc" or (X[col].dtype.kind == "i" and cutoff_condition):
-                    categorical_features.append(col)
-                else:
-                    numerical_features.append(col)
-
-        return numerical_features, categorical_features
-
     def fit(self, X, y=None, embeddings=None):
         """
         Fit the preprocessor to the input data and target labels.
@@ -334,16 +280,27 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             configure_logging(verbose)
         start_time = time.perf_counter()
 
-        validate_placement(self.target_aware, self.placement_strategy)
+        config = PreprocessorConfig.from_params(
+            numerical_method=self.numerical_method,
+            categorical_method=self.categorical_method,
+            feature_preprocessing=self.feature_preprocessing,
+            output_dim=self.output_dim,
+            degree=self.degree,
+            target_aware=self.target_aware,
+            placement_strategy=self.placement_strategy,
+            task=self.task,
+            adaptive=self.adaptive,
+            min_output_dim=self.min_output_dim,
+            max_output_dim=self.max_output_dim,
+            random_state=self.random_state,
+            scaling=self.scaling,
+            cat_cutoff=self.cat_cutoff,
+            treat_all_integers_as_numerical=self.treat_all_integers_as_numerical,
+            handle_missing=self.handle_missing,
+            verbose=self.verbose,
+        )
 
-        if isinstance(X, dict):
-            X = pd.DataFrame(X)
-        elif isinstance(X, np.ndarray):
-            X = pd.DataFrame(X, columns=[f"feature_{i}" for i in range(X.shape[1])])
-
-        numerical_method = self.numerical_method.lower() if self.numerical_method is not None else "none"
-        categorical_method = self.categorical_method.lower() if self.categorical_method is not None else "none"
-        feature_preprocessing = self.feature_preprocessing or {}
+        X = to_dataframe(X)
 
         self.embeddings_ = False
         self.embedding_dimensions_ = {}
@@ -355,39 +312,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 for i, e in enumerate(embeddings):
                     self.embedding_dimensions_[f"embedding_{i + 1}"] = e.shape[1]
 
-        numerical_features, categorical_features = self._detect_column_types(X)
-        transformers = []
+        numerical_features, categorical_features = detect_column_types(
+            X,
+            cat_cutoff=self.cat_cutoff,
+            treat_all_integers_as_numerical=self.treat_all_integers_as_numerical,
+            estimator_name=type(self).__name__,
+        )
 
-        for feature in numerical_features:
-            method = feature_preprocessing.get(feature, numerical_method)
-            # Forward ``random_state`` only when the user set one, so unset keeps
-            # each transformer's own default seed (PLE / selectors = 51, others
-            # unseeded) and a set value pins every stochastic method globally.
-            seed_kwargs = {} if self.random_state is None else {"random_state": self.random_state}
-            steps = get_numerical_transformer_steps(
-                method=method,
-                task=self.task,
-                target_aware=self.target_aware,
-                add_imputer=self.handle_missing != "error",
-                imputer_strategy="mean",
-                output_dim=self.output_dim,
-                adaptive=self.adaptive,
-                min_output_dim=self.min_output_dim if self.adaptive else None,
-                max_output_dim=self.max_output_dim if self.adaptive else None,
-                degree=self.degree,
-                scaling=self.scaling,
-                placement_strategy=self.placement_strategy,
-                handle_missing=self.handle_missing,
-                **seed_kwargs,
-            )
-            transformers.append((f"num_{feature}", Pipeline(steps), [feature]))
-
-        for feature in categorical_features:
-            method = feature_preprocessing.get(feature, categorical_method)
-            steps = get_categorical_transformer_steps(method, output_dim=self.output_dim)
-            transformers.append((f"cat_{feature}", Pipeline(steps), [feature]))
-
-        self.column_transformer_ = ColumnTransformer(transformers=transformers, remainder="passthrough")
+        self.column_transformer_ = build_column_transformer(config, numerical_features, categorical_features)
         self.column_transformer_.fit(X, y)
         self.n_features_in_ = X.shape[1]
 
@@ -395,15 +327,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             logger.info(
                 "fit complete: %d numerical (%s) + %d categorical (%s) feature(s) -> %d output columns in %.3fs",
                 len(numerical_features),
-                numerical_method,
+                config.numerical_method,
                 len(categorical_features),
-                categorical_method,
+                config.categorical_method,
                 len(self.get_feature_names_out()),
                 time.perf_counter() - start_time,
             )
         if verbose >= 2:
             info = self.get_feature_info(verbose=False)
-            for line in self._feature_table_lines(*info):
+            for line in build_transformer_summary(*info):
                 logger.debug(line)
         if verbose >= 3:
             self._log_internal_decisions()
@@ -431,44 +363,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         check_is_fitted(self)
 
-        if isinstance(X, dict):
-            X = pd.DataFrame(X)
-        elif isinstance(X, np.ndarray):
-            X = pd.DataFrame(X, columns=[f"feature_{i}" for i in range(X.shape[1])])
-        else:
-            X = X.copy()
+        X = to_dataframe(X, copy=True)
 
         transformed_X = self.column_transformer_.transform(X)
 
-        if return_array:
-            return transformed_X
-
-        transformed_dict = {}
-        start = 0
-        for name, transformer, columns in self.column_transformer_.transformers_:
-            if transformer == "drop":
-                continue
-            if hasattr(transformer, "transform"):
-                width = transformer.transform(X[columns]).shape[1]
-            else:
-                width = 1
-            transformed_dict[name] = transformed_X[:, start : start + width]
-            start += width
-
-        if embeddings is not None:
-            if not self.embeddings_:
-                raise IncompatibleParamsError(
-                    "Embeddings were not expected, but were provided.\n"
-                    "Fix: configure an embedding feature in feature_preprocessing before "
-                    "passing embeddings to transform, or omit the embeddings argument."
-                )
-            if isinstance(embeddings, np.ndarray):
-                transformed_dict["embedding_1"] = embeddings.astype(np.float32)
-            elif isinstance(embeddings, list):
-                for idx, e in enumerate(embeddings):
-                    transformed_dict[f"embedding_{idx + 1}"] = e.astype(np.float32)
-
-        return transformed_dict
+        slices = None if return_array else get_output_slices(self.column_transformer_, X)
+        return format_output(
+            transformed_X,
+            return_array=return_array,
+            slices=slices,
+            embeddings=embeddings,
+            embeddings_expected=self.embeddings_,
+        )
 
     def fit_transform(self, X, y=None, embeddings=None, return_array=False):
         """
@@ -585,111 +491,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         check_is_fitted(self)
 
-        numerical_feature_info = {}
-        categorical_feature_info = {}
-
-        embedding_feature_info = (
-            {
-                key: {"preprocessing": None, "dimension": dim, "categories": None}
-                for key, dim in self.embedding_dimensions_.items()
-            }
-            if self.embeddings_
-            else {}
+        numerical_feature_info, categorical_feature_info, embedding_feature_info = build_feature_info(
+            self.column_transformer_,
+            embeddings=self.embeddings_,
+            embedding_dimensions=self.embedding_dimensions_,
         )
-
-        for (
-            name,
-            transformer_pipeline,
-            columns,
-        ) in self.column_transformer_.transformers_:
-            steps = [step[0] for step in transformer_pipeline.steps]
-
-            for feature_name in columns:
-                preprocessing_type = " -> ".join(steps)
-                dimension = None
-                categories = None
-
-                if "discretizer" in steps or any(
-                    step in steps
-                    for step in [
-                        "standardization",
-                        "minmax",
-                        "quantile",
-                        "polynomial",
-                        "splines",
-                        "box-cox",
-                    ]
-                ):
-                    last_step = transformer_pipeline.steps[-1][1]
-                    if hasattr(last_step, "transform"):
-                        dummy_input = np.zeros((1, 1)) + 1e-05
-                        try:
-                            transformed_feature = last_step.transform(dummy_input)
-                            dimension = transformed_feature.shape[1]
-                        except (ValueError, TypeError, AttributeError, IndexError) as exc:
-                            logger.debug(
-                                "Could not introspect output width of %r: %s",
-                                feature_name,
-                                exc,
-                            )
-                            dimension = None
-                    numerical_feature_info[feature_name] = {
-                        "preprocessing": preprocessing_type,
-                        "dimension": dimension,
-                        "categories": None,
-                    }
-
-                elif "continuous_ordinal" in steps:
-                    step = transformer_pipeline.named_steps["continuous_ordinal"]
-                    categories = len(step.mapping_[columns.index(feature_name)])
-                    dimension = 1
-                    categorical_feature_info[feature_name] = {
-                        "preprocessing": preprocessing_type,
-                        "dimension": dimension,
-                        "categories": categories,
-                    }
-
-                elif "onehot" in steps:
-                    step = transformer_pipeline.named_steps["onehot"]
-                    if hasattr(step, "categories_"):
-                        categories = sum(len(cat) for cat in step.categories_)
-                        dimension = categories
-                    categorical_feature_info[feature_name] = {
-                        "preprocessing": preprocessing_type,
-                        "dimension": dimension,
-                        "categories": categories,
-                    }
-
-                else:
-                    last_step = transformer_pipeline.steps[-1][1]
-                    if hasattr(last_step, "transform"):
-                        dummy_input = np.zeros((1, 1))
-                        try:
-                            transformed_feature = last_step.transform(dummy_input)
-                            dimension = transformed_feature.shape[1]
-                        except (ValueError, TypeError, AttributeError, IndexError) as exc:
-                            logger.debug(
-                                "Could not introspect output width of %r: %s",
-                                feature_name,
-                                exc,
-                            )
-                            dimension = None
-                    if "cat" in name:
-                        categorical_feature_info[feature_name] = {
-                            "preprocessing": preprocessing_type,
-                            "dimension": dimension,
-                            "categories": None,
-                        }
-                    else:
-                        numerical_feature_info[feature_name] = {
-                            "preprocessing": preprocessing_type,
-                            "dimension": dimension,
-                            "categories": None,
-                        }
 
         if verbose:
             configure_logging(1)
-            for line in self._feature_table_lines(
+            for line in build_transformer_summary(
                 numerical_feature_info,
                 categorical_feature_info,
                 embedding_feature_info,
@@ -697,29 +507,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 logger.info(line)
 
         return numerical_feature_info, categorical_feature_info, embedding_feature_info
-
-    def _feature_table_lines(self, numerical_info, categorical_info, embedding_info):
-        """Build aligned, human-readable rows describing the fitted feature layout."""
-        rows = []
-        for feat, info in numerical_info.items():
-            rows.append((str(feat), "numerical", str(info["preprocessing"]), info["dimension"], info["categories"]))
-        for feat, info in categorical_info.items():
-            rows.append((str(feat), "categorical", str(info["preprocessing"]), info["dimension"], info["categories"]))
-        for feat, info in embedding_info.items():
-            rows.append((str(feat), "embedding", "-", info["dimension"], info["categories"]))
-        if not rows:
-            return []
-
-        feat_w = max(len("feature"), *(len(r[0]) for r in rows))
-        kind_w = max(len("kind"), *(len(r[1]) for r in rows))
-        pipe_w = max(len("pipeline"), *(len(r[2]) for r in rows))
-        header = f"{'feature':<{feat_w}}  {'kind':<{kind_w}}  {'pipeline':<{pipe_w}}  {'dim':>4}  {'cats':>5}"
-        lines = [header, "-" * len(header)]
-        for feat, kind, pipe, dim, cats in rows:
-            dim_s = "-" if dim is None else str(dim)
-            cats_s = "-" if cats is None else str(cats)
-            lines.append(f"{feat:<{feat_w}}  {kind:<{kind_w}}  {pipe:<{pipe_w}}  {dim_s:>4}  {cats_s:>5}")
-        return lines
 
     def _log_internal_decisions(self):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
