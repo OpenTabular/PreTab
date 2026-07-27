@@ -128,9 +128,18 @@ def get_numerical_transformer_steps(
         "minmax": ("minmax", MinMaxScaler(feature_range=(-1, 1))),
     }
 
-    # Add optional scaling step only if not already part of method
+    # Add optional scaling step only if not already part of method. An
+    # unrecognized name used to fall through the membership test below and
+    # silently produce an unscaled pipeline, so a typo disabled scaling instead
+    # of reporting it -- unlike ``method``, which is validated a few lines down.
     if scaling is not None:
         scaling = resolve_method(scaling, NUMERICAL_METHODS, NUMERICAL_ALIASES)
+        if scaling not in scalers and scaling != "none":
+            raise invalid_param_error(
+                "get_numerical_transformer_steps", "scaling", scaling,
+                "must name a scaler, or be None / 'none' to disable scaling",
+                valid={*scalers, "none"},
+            )
     if scaling in scalers and scaling != method:
         steps.append(scalers[scaling])
 

@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from pretab.core.exceptions import InvalidParamError
+from pretab.pipeline import get_numerical_transformer_steps
 from pretab.pipeline.registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
@@ -144,3 +145,45 @@ def test_unknown_method_still_raises(sample_data):
     X, y = sample_data
     with pytest.raises(InvalidParamError):
         Preprocessor(numerical_method="definitely-not-a-method").fit_transform(X, y)
+
+
+# --------------------------------------------------------------------------- #
+# An unrecognized ``scaling`` value must raise, not silently disable scaling.
+#
+# ``resolve_method`` returns the input lowercased when it recognizes nothing, so
+# the membership test just failed and the pipeline came out unscaled -- unlike
+# ``method``, which is validated explicitly.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("scaling", ["not_a_scaler", "minmaxx", "standardisation"])
+def test_unknown_scaling_raises(scaling):
+    with pytest.raises(InvalidParamError, match="scaling"):
+        get_numerical_transformer_steps("ple", scaling=scaling)
+
+
+@pytest.mark.parametrize(
+    ("scaling", "expected"),
+    [
+        ("minmax", "minmax"),
+        ("MinMax", "minmax"),
+        ("min-max", "minmax"),
+        ("zscore", "scaler"),
+        ("standardization", "scaler"),
+    ],
+)
+def test_known_scaling_still_adds_its_step(scaling, expected):
+    steps = [name for name, _ in get_numerical_transformer_steps("ple", scaling=scaling)]
+    assert expected in steps
+
+
+@pytest.mark.parametrize("scaling", [None, "none", "passthrough"])
+def test_scaling_can_still_be_disabled(scaling):
+    steps = [name for name, _ in get_numerical_transformer_steps("ple", scaling=scaling)]
+    assert steps == ["imputer", "ple"]
+
+
+def test_unknown_scaling_raises_through_the_preprocessor():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=50)})
+
+    with pytest.raises(InvalidParamError, match="scaling"):
+        Preprocessor(scaling="minmaxx").fit(frame, rng.normal(size=50))
