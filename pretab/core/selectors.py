@@ -26,7 +26,7 @@ import numpy as np
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from .exceptions import IncompatibleParamsError, OptionalDependencyError
-from .knots import quantile_knots
+from .knots import quantile_knots, select_knots
 
 Task = Literal["regression", "classification"]
 
@@ -148,13 +148,30 @@ class BaseLocationSelector(ABC):
         return spaced
 
     def _supplement(self, existing: list[float], x: np.ndarray, target_count: int) -> list[float]:
-        """Top up an under-filled location set with quantile locations."""
-        if target_count - len(existing) <= 0:
-            return existing
+        """Top up an under-filled location set with quantile locations.
 
-        quantile_candidates = quantile_knots(x, target_count)
-        all_locations = set(existing) | set(quantile_candidates.tolist())
-        return sorted(all_locations)[:target_count]
+        The locations already selected are always kept; only the shortfall is
+        filled, and the quantile candidates used to fill it are down-sampled by
+        even spacing so they stay spread across the range.
+
+        Merging both sets and truncating with ``sorted(...)[:target_count]``
+        instead always discarded the *largest* values. Since
+        :func:`~pretab.core.knots.quantile_knots` already returns
+        ``target_count`` candidates, the merged set always overflowed by exactly
+        ``len(existing)``, so the truncation reliably threw away the data-driven
+        locations the selector had just found whenever they sat above the median.
+        """
+        missing = target_count - len(existing)
+        if missing <= 0:
+            return sorted(existing)
+
+        current = set(existing)
+        candidates = np.asarray(
+            [c for c in quantile_knots(x, target_count).tolist() if c not in current]
+        )
+        if len(candidates) > missing:
+            candidates = select_knots(candidates, missing)
+        return sorted(current | set(candidates.tolist()))
 
 
 class CARTLocationSelector(BaseLocationSelector):

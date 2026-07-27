@@ -79,6 +79,57 @@ def test_cart_handles_nan_rows(data):
     assert np.isfinite(locations).all()
 
 
+# --------------------------------------------------------------------------- #
+# Supplementing an under-filled set must not discard the selected locations.
+#
+# ``quantile_knots`` already returns ``target_count`` candidates, so merging and
+# truncating with ``sorted(...)[:target_count]`` always dropped the largest
+# entries -- i.e. the tree-selected locations whenever they sat above the median.
+# --------------------------------------------------------------------------- #
+def test_supplement_keeps_every_existing_location():
+    x = np.linspace(0, 10, 500).reshape(-1, 1)
+    selector = CARTLocationSelector()
+
+    supplemented = selector._supplement([9.5, 9.7], x, 5)
+
+    assert 9.5 in supplemented
+    assert 9.7 in supplemented
+    assert len(supplemented) == 5
+    assert supplemented == sorted(supplemented)
+
+
+def test_supplement_fills_only_the_shortfall():
+    x = np.linspace(0, 10, 500).reshape(-1, 1)
+    selector = CARTLocationSelector()
+    existing = [1.0, 2.0, 3.0]
+
+    supplemented = selector._supplement(list(existing), x, 6)
+
+    assert set(existing).issubset(supplemented)
+    assert len(supplemented) == 6
+
+
+def test_supplement_is_a_noop_when_already_full():
+    x = np.linspace(0, 10, 500).reshape(-1, 1)
+    selector = CARTLocationSelector()
+
+    assert selector._supplement([2.0, 4.0, 6.0], x, 3) == [2.0, 4.0, 6.0]
+
+
+def test_supplement_spreads_the_added_candidates():
+    # A single existing location must not cause the fill-ins to bunch at one end.
+    x = np.linspace(0, 10, 500).reshape(-1, 1)
+    selector = CARTLocationSelector()
+
+    supplemented = selector._supplement([5.0], x, 4)
+
+    assert 5.0 in supplemented
+    assert min(supplemented) < 4.0
+    assert max(supplemented) > 6.0
+
+
+
+
 def test_cart_matches_knot_adapter(data):
     X, y = data
     adapter = CARTKnotSelector(max_basis_functions=12, degree=3)
