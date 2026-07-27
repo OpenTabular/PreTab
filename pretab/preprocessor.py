@@ -9,6 +9,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from .core.exceptions import (
     IncompatibleParamsError,
+    PretabDataError,
     invalid_param_error,
 )
 from .core.logging import configure_logging, get_logger
@@ -360,11 +361,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.embedding_dimensions_ = {}
         if embeddings is not None:
             self.embeddings_ = True
-            if isinstance(embeddings, np.ndarray):
-                self.embedding_dimensions_["embedding_1"] = embeddings.shape[1]
-            elif isinstance(embeddings, list):
-                for i, e in enumerate(embeddings):
-                    self.embedding_dimensions_[f"embedding_{i + 1}"] = e.shape[1]
+            for i, e in enumerate(self._as_embedding_list(embeddings)):
+                self.embedding_dimensions_[f"embedding_{i + 1}"] = e.shape[1]
 
         numerical_features, categorical_features = self._detect_column_types(X)
         transformers = []
@@ -476,13 +474,52 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                     "Fix: configure an embedding feature in feature_preprocessing before "
                     "passing embeddings to transform, or omit the embeddings argument."
                 )
-            if isinstance(embeddings, np.ndarray):
-                transformed_dict["embedding_1"] = embeddings.astype(np.float32)
-            elif isinstance(embeddings, list):
-                for idx, e in enumerate(embeddings):
-                    transformed_dict[f"embedding_{idx + 1}"] = e.astype(np.float32)
+            for idx, e in enumerate(self._validated_embeddings(embeddings, len(X))):
+                transformed_dict[f"embedding_{idx + 1}"] = e.astype(np.float32)
 
         return transformed_dict
+
+    @staticmethod
+    def _as_embedding_list(embeddings) -> list:
+        """Normalize a single array or a list of arrays to a list of arrays."""
+        if isinstance(embeddings, np.ndarray):
+            return [embeddings]
+        return list(embeddings)
+
+    def _validated_embeddings(self, embeddings, n_samples: int) -> list:
+        """Check supplied embeddings against what ``fit`` recorded.
+
+        ``fit`` stores ``embedding_dimensions_`` but nothing used to read it back,
+        so a mismatched array was accepted silently -- including one with the
+        wrong number of rows, which produced a result dict whose blocks had
+        different heights.
+        """
+        arrays = self._as_embedding_list(embeddings)
+        expected = list(self.embedding_dimensions_.items())
+
+        if len(arrays) != len(expected):
+            raise PretabDataError(
+                f"Expected {len(expected)} embedding array(s) as seen during fit, "
+                f"got {len(arrays)}."
+            )
+
+        for idx, (array, (name, dim)) in enumerate(zip(arrays, expected, strict=True)):
+            array = np.asarray(array)
+            if array.ndim != 2:
+                raise PretabDataError(
+                    f"{name} must be a 2D array, got {array.ndim} dimension(s)."
+                )
+            if array.shape[1] != dim:
+                raise PretabDataError(
+                    f"{name} has {array.shape[1]} columns, but {dim} were seen during fit."
+                )
+            if array.shape[0] != n_samples:
+                raise PretabDataError(
+                    f"{name} has {array.shape[0]} rows, but X has {n_samples}."
+                )
+            arrays[idx] = array
+
+        return arrays
 
     def fit_transform(self, X, y=None, embeddings=None, return_array=False):
         """
