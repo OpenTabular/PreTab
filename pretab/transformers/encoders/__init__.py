@@ -5,10 +5,11 @@ models can consume: ordinal integer encoding, a float cast, and a pass-through.
 """
 
 from .continuous_ordinal import ContinuousOrdinalTransformer
-from .floats import NoTransformer, ToFloatTransformer
+from .floats import NoTransformer, RaiseOnNaNTransformer, ToFloatTransformer
 
 __all__ = [
     "ContinuousOrdinalTransformer",
     "NoTransformer",
+    "RaiseOnNaNTransformer",
     "ToFloatTransformer",
 ]

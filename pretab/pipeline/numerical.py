@@ -4,6 +4,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..core.exceptions import ConfigWarning, invalid_param_error
+from ..transformers.encoders.floats import RaiseOnNaNTransformer
 from .registry import NUMERICAL_ALIASES, NUMERICAL_METHODS, resolve_method
 
 # Spline basis expansions that share the target-aware knot API.
@@ -121,6 +122,13 @@ def get_numerical_transformer_steps(
     if add_imputer:
         imputer_kwargs = imputer_kwargs or {}
         steps.append(("imputer", SimpleImputer(strategy=imputer_strategy, **imputer_kwargs)))
+    else:
+        # ``handle_missing="error"`` drops the imputer. Enforce the policy here so
+        # every method rejects NaN, rather than leaving it to whether the chosen
+        # transformer happens to notice: the scikit-learn scalers ignore missing
+        # values by design and the PreTab families declare ``allow_nan``, so only
+        # PLE used to raise and everything else emitted NaN silently.
+        steps.append(("nan_check", RaiseOnNaNTransformer()))
 
     # Define scalers that could be added independently
     scalers = {

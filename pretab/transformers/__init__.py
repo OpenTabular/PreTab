@@ -3,6 +3,7 @@ from .embeddings import LanguageEmbeddingTransformer
 from .encoders import (
     ContinuousOrdinalTransformer,
     NoTransformer,
+    RaiseOnNaNTransformer,
     ToFloatTransformer,
 )
 from .feature_maps import (
@@ -45,6 +46,7 @@ __all__ = [
     "PLETransformer",
     "PSplineTransformer",
     "RBFExpansionTransformer",
+    "RaiseOnNaNTransformer",
     "ReLUExpansionTransformer",
     "RollingStatsTransformer",
     "SigmoidExpansionTransformer",

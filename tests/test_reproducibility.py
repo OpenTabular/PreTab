@@ -11,6 +11,8 @@ import pandas as pd
 import pytest
 from sklearn.base import clone
 
+from pretab.core.exceptions import PretabDataError
+from pretab.pipeline import get_numerical_transformer_steps
 from pretab.preprocessor import Preprocessor
 from pretab.transformers import RBFExpansionTransformer
 
@@ -116,6 +118,67 @@ def test_handle_missing_error_rejects_nan(data):
     pre = Preprocessor(numerical_method="ple", handle_missing="error")
     with pytest.raises(ValueError):
         pre.fit(X, y)
+
+
+# The "error" policy must hold for *every* numerical method, not just PLE.
+#
+# ``handle_missing`` only ever dropped the imputer and was forwarded to PLE
+# alone, so the guarantee depended on whether the chosen transformer happened to
+# notice NaN. The scikit-learn scalers ignore missing values by design and the
+# PreTab families declare ``allow_nan``, so everything except PLE silently
+# emitted a NaN-contaminated matrix -- and the unsupervised feature maps were
+# worse still, because ``np.percentile`` over a NaN column makes every center NaN.
+@pytest.mark.parametrize(
+    "method",
+    ["minmax", "standardization", "robust", "quantile", "rbf", "relu", "tanh",
+     "cubicspline", "pspline", "tprs", "none", "ple"],
+)
+def test_handle_missing_error_rejects_nan_for_every_method(data, method):
+    X, y = data
+    X = X.copy()
+    X.iloc[0, 0] = np.nan
+
+    with pytest.raises(ValueError):
+        Preprocessor(numerical_method=method, handle_missing="error").fit(X, y)
+
+
+@pytest.mark.parametrize("method", ["minmax", "rbf", "cubicspline"])
+def test_handle_missing_median_still_imputes_for_every_method(data, method):
+    X, y = data
+    X = X.copy()
+    X.iloc[0, 0] = np.nan
+
+    out = Preprocessor(numerical_method=method, handle_missing="median").fit(X, y).transform(
+        X, return_array=True
+    )
+    assert isinstance(out, np.ndarray)
+    assert np.isfinite(out).all()
+
+
+def test_handle_missing_error_raises_a_pretab_error_naming_the_option(data):
+    X, y = data
+    X = X.copy()
+    X.iloc[0, 0] = np.nan
+
+    with pytest.raises(PretabDataError, match="handle_missing='error'"):
+        Preprocessor(numerical_method="minmax", handle_missing="error").fit(X, y)
+
+
+def test_nan_check_step_only_present_when_erroring():
+    erroring = [name for name, _ in get_numerical_transformer_steps("minmax", add_imputer=False)]
+    imputing = [name for name, _ in get_numerical_transformer_steps("minmax", add_imputer=True)]
+
+    assert "nan_check" in erroring and "imputer" not in erroring
+    assert "imputer" in imputing and "nan_check" not in imputing
+
+
+def test_handle_missing_error_still_transforms_clean_data(data):
+    X, y = data
+    out = Preprocessor(numerical_method="rbf", handle_missing="error").fit(X, y).transform(
+        X, return_array=True
+    )
+    assert isinstance(out, np.ndarray)
+    assert np.isfinite(out).all()
 
 
 # --- transformer / helper level seeding ------------------------------------ #
