@@ -49,6 +49,11 @@ def get_categorical_transformer_steps(
             bin_kwargs.setdefault("output_dim", output_dim)
         steps.append(("custombin", CustomBinTransformer(**bin_kwargs)))
     elif method == "onehot_from_ordinal":
+        # ``OneHotFromOrdinalTransformer`` expects integer codes; the Preprocessor
+        # hands it raw column values, which are usually strings. Encode first so
+        # the method matches its documented "integer codes then one-hot"
+        # behaviour instead of dying in ``np.max(...).astype(int)``.
+        steps.append(("continuous_ordinal", ContinuousOrdinalTransformer()))
         steps.append(("onehot_from_ordinal", OneHotFromOrdinalTransformer()))
     else:
         raise invalid_param_error(

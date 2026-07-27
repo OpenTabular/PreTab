@@ -77,7 +77,7 @@ preprocessor = Preprocessor(
 | --------------------- | ------------------------------ | ----- |
 | `int`                 | `ContinuousOrdinalTransformer` | Integer/ordinal encoding (default) |
 | `one-hot`             | `OneHotEncoder`                | One-hot encoding |
-| `onehot_from_ordinal` | `OneHotFromOrdinalTransformer` | One-hot from pre-encoded ordinals |
+| `onehot_from_ordinal` | `ContinuousOrdinalTransformer` -> `OneHotFromOrdinalTransformer` | Integer codes, then one-hot (reserves column `0` for unseen categories) |
 | `pretrained`          | `LanguageEmbeddingTransformer` | Pretrained language embeddings |
 | `custombin`           | `CustomBinTransformer`         | Binning of categorical codes |
 | `none`                | `NoTransformer`                | Pass-through |
