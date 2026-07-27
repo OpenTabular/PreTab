@@ -48,7 +48,7 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
 
     Attributes
     ----------
-    landmarks_ : ndarray of shape (n_landmarks, n_features_in_)
+    landmarks_ : ndarray of shape (n_landmarks, n_features)
         The landmark points used to build the TPS kernel.
     components_ : ndarray of shape (n_landmarks, n_components)
         The linear map from a data-to-landmark kernel row to the reduced basis.
@@ -76,6 +76,8 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
     - The radial kernel depends on the input dimension: :math:`r^3` for ``d=1``,
       :math:`r^2\log r` for ``d=2``, and the biharmonic kernel :math:`r` for
       ``d>=3``.
+    - The construction follows the thin-plate spline theory of Wahba [1]_ and the
+      low-rank thin-plate regression spline of Wood [2]_.
 
     References
     ----------
