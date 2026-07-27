@@ -84,3 +84,24 @@ class RollingStatsTransformer(BasePreTabTransformer):
 
     def _output_sizes(self) -> list[int]:
         return [len(self.stats)] * self.n_features_in_
+
+    def get_feature_names_out(self, input_features=None):
+        """Return output names in the stat-major order ``transform`` produces.
+
+        ``transform`` hstacks one ``(n_rows, n_features)`` block per statistic,
+        so the columns run ``mean_f0, mean_f1, ..., std_f0, ...``. The inherited
+        feature-major default would label them the other way round. The
+        ``roll{j}`` suffix scheme is unchanged, so single-feature output is
+        byte-identical; ``j`` indexes ``self.stats``.
+        """
+        check_is_fitted(self, "n_features_in_")
+        if input_features is None:
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        return np.asarray(
+            [
+                f"{feature}_roll{j}"
+                for j in range(len(self.stats))
+                for feature in input_features
+            ],
+            dtype=object,
+        )

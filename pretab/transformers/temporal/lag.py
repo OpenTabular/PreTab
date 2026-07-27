@@ -63,3 +63,23 @@ class LagFeatureTransformer(BasePreTabTransformer):
 
     def _output_sizes(self) -> list[int]:
         return [self.n_lags] * self.n_features_in_
+
+    def get_feature_names_out(self, input_features=None):
+        """Return output names in the lag-major order ``transform`` produces.
+
+        ``transform`` hstacks one ``(n_rows, n_features)`` block per lag, so the
+        columns run ``lag1_f0, lag1_f1, ..., lag2_f0, ...``. The inherited
+        feature-major default would label them the other way round, mislabelling
+        every column but the first and last for multi-feature input.
+        """
+        check_is_fitted(self, "n_features_in_")
+        if input_features is None:
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        return np.asarray(
+            [
+                f"{feature}_lag{lag}"
+                for lag in range(self.n_lags)
+                for feature in input_features
+            ],
+            dtype=object,
+        )
