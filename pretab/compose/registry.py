@@ -68,6 +68,7 @@ __all__ = [
     "get_spec",
     "numerical_method_names",
     "placement_strategies_for",
+    "register_spec",
     "resolve_method",
     "supports_adaptive_resolution",
     "supports_target_aware",
@@ -123,6 +124,12 @@ class TransformerSpec:
     optional_dependency : str or None
         The optional extra that must be installed for the method to run
         (``pip install pretab[<extra>]``), or ``None`` when always available.
+    periodic : bool
+        Whether the representation encodes a periodic signal (e.g. the Fourier
+        feature map). Surfaced through :func:`pretab.list_representations`.
+    sparse_output : bool
+        Whether the method can emit a sparse matrix (e.g. one-hot). Surfaced
+        through :func:`pretab.list_representations`.
     """
 
     name: str
@@ -135,6 +142,8 @@ class TransformerSpec:
     supports_adaptive_resolution: bool = False
     preprocessor_compatible: bool = True
     optional_dependency: str | None = None
+    periodic: bool = False
+    sparse_output: bool = False
 
     @property
     def is_numerical(self) -> bool:
@@ -243,6 +252,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
         "fourier",
         FourierFeatureTransformer,
         ("n_frequencies", "frequency_strategy", "include_original", "random_state"),
+        periodic=True,
     ),
     # --- numerical: freely-placed knot splines (optional target-aware, adaptive) ---
     _spec(
@@ -318,7 +328,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
     _spec("none", NoTransformer, feature_kind=frozenset({NUMERICAL, CATEGORICAL})),
     # --- categorical-only methods ---
     _spec("int", ContinuousOrdinalTransformer, feature_kind=frozenset({CATEGORICAL})),
-    _spec("one-hot", OneHotEncoder, feature_kind=frozenset({CATEGORICAL})),
+    _spec("one-hot", OneHotEncoder, feature_kind=frozenset({CATEGORICAL}), sparse_output=True),
     _spec("onehot_from_ordinal", OneHotFromOrdinalTransformer, feature_kind=frozenset({CATEGORICAL})),
     _spec(
         "pretrained",
@@ -355,7 +365,10 @@ NUMERICAL_METHODS: dict[str, tuple[type, list[str]]] = {
     for name, spec in TRANSFORMER_REGISTRY.items()
     if spec.is_numerical and spec.preprocessor_compatible
 }
-CATEGORICAL_METHODS: frozenset[str] = categorical_method_names()
+# Mutable so :func:`pretab.register_representation` can extend the categorical
+# whitelist in place and have the config / factory layers (which import this
+# name) observe the addition immediately.
+CATEGORICAL_METHODS: set[str] = set(categorical_method_names())
 
 
 def get_spec(method: str) -> TransformerSpec:
@@ -392,6 +405,45 @@ def supports_target_aware(method: str) -> bool:
     resolved = resolve_method(method, TRANSFORMER_REGISTRY, NUMERICAL_ALIASES)
     spec = TRANSFORMER_REGISTRY.get(resolved)
     return bool(spec and spec.target_aware_capable)
+
+
+def register_spec(spec: TransformerSpec, *, override: bool = False) -> TransformerSpec:
+    """Insert a :class:`TransformerSpec` into the live registry.
+
+    Updates the registry and the derived ``NUMERICAL_METHODS`` /
+    ``CATEGORICAL_METHODS`` views in place, so the config and factory layers
+    (which import those names) immediately observe the new method. This backs the
+    public :func:`pretab.register_representation`.
+
+    Parameters
+    ----------
+    spec : TransformerSpec
+        The capability record to register.
+    override : bool, default=False
+        Whether replacing an already-registered name is allowed.
+
+    Raises
+    ------
+    TypeError
+        If ``spec`` is not a :class:`TransformerSpec`.
+    ValueError
+        If ``spec.name`` is already registered and ``override`` is False.
+    """
+    if not isinstance(spec, TransformerSpec):
+        raise TypeError(f"expected a TransformerSpec, got {type(spec).__name__}")
+    if spec.name in TRANSFORMER_REGISTRY and not override:
+        raise ValueError(
+            f"method {spec.name!r} is already registered; pass override=True to replace it."
+        )
+    # Drop any stale derived-view entries before re-inserting (supports override).
+    NUMERICAL_METHODS.pop(spec.name, None)
+    CATEGORICAL_METHODS.discard(spec.name)
+    TRANSFORMER_REGISTRY[spec.name] = spec
+    if spec.is_numerical and spec.preprocessor_compatible:
+        NUMERICAL_METHODS[spec.name] = (spec.transformer_cls, list(spec.allowed_args))
+    if spec.is_categorical:
+        CATEGORICAL_METHODS.add(spec.name)
+    return spec
 
 
 # ---------------------------------------------------------------------------

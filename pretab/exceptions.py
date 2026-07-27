@@ -30,6 +30,7 @@ __all__ = [
     "PretabNotFittedError",
     "PretabSerializationError",
     "PretabWarning",
+    "RepresentationConformanceError",
     "insufficient_samples_error",
     "invalid_param_error",
 ]
@@ -104,6 +105,13 @@ class FrozenRepresentationError(PretabError):
     """A mutating operation (e.g. ``set_params``) was attempted on a frozen
     preprocessor. Call :meth:`~pretab.preprocessor.Preprocessor.clone_unfitted`
     to obtain a fresh, mutable copy."""
+
+
+class RepresentationConformanceError(PretabError, AssertionError):
+    """A representation class failed a :func:`pretab.check_representation` check.
+
+    Inherits ``AssertionError`` so a failed conformance check also surfaces
+    naturally when :func:`~pretab.check_representation` is called from a test."""
 
 
 # --- Message factories ---

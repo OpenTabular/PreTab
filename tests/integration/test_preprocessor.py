@@ -126,6 +126,7 @@ EXPECTED_PARAMS = {
     "output_format",
     "dtype",
     "verbose",
+    "preset",
 }
 
 

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pretab-chebyshev"
+version = "0.1.0"
+description = "Example PreTab extension: a Chebyshev polynomial feature representation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pretab",
+    "numpy",
+    "scikit-learn",
+]
+
+# This is what makes the representation auto-discoverable. Once this package is
+# installed, ``pretab.load_entry_point_representations()`` finds and registers
+# the class advertised here under the ``pretab.representations`` group.
+[project.entry-points."pretab.representations"]
+chebyshev = "pretab_chebyshev:ChebyshevRepresentation"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

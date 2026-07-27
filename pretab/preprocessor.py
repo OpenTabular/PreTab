@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import json
 import os
 import time
@@ -33,6 +34,31 @@ from .exceptions import (
 )
 
 logger = get_logger(__name__)
+
+#: Named parameter bundles exposed through ``Preprocessor(preset=...)``. Each
+#: preset supplies values only for the listed parameters; any parameter the caller
+#: sets explicitly (i.e. away from its ``__init__`` default) overrides the preset.
+PRESETS = {
+    "standard": {
+        "numerical_method": "ple",
+        "categorical_method": "int",
+        "output_dim": 7,
+        "adaptive": False,
+    },
+    "expanded": {
+        "numerical_method": "ple",
+        "categorical_method": "one-hot",
+        "output_dim": 16,
+        "adaptive": False,
+    },
+    "adaptive": {
+        "numerical_method": "ple",
+        "categorical_method": "int",
+        "adaptive": True,
+        "min_output_dim": 5,
+        "max_output_dim": 16,
+    },
+}
 
 
 class Preprocessor(TransformerMixin, BaseEstimator):
@@ -204,6 +230,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         (e.g. DeepTab) can pass it straight through ``Preprocessor(**kwargs)``. PreTab never
         configures the root logger or attaches a handler when the host already owns one, so
         ``verbose=0`` keeps PreTab silent under a host's own logging.
+    preset : {"standard", "expanded", "adaptive"} or None, default=None
+        Optional named configuration bundle applied as a transparent alias. A preset only
+        fills in parameters left at their defaults; any parameter set explicitly always wins.
+        ``"standard"`` is the PLE + integer-code baseline, ``"expanded"`` widens the
+        numerical basis and one-hot encodes categoricals, and ``"adaptive"`` sizes each
+        feature's width from the data. Call :meth:`get_resolved_config` to see the effective
+        parameters. ``None`` (default) uses the individual parameters unchanged.
 
     Attributes
     ----------
@@ -316,6 +349,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         output_format="dense",
         dtype=None,
         verbose=0,
+        preset=None,
     ):
         """
         Initialize the Preprocessor with various transformation options for tabular data.
@@ -351,6 +385,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.output_format = output_format
         self.dtype = dtype
         self.verbose = verbose
+        self.preset = preset
 
     def fit(self, X, y=None, embeddings=None):
         """
@@ -376,27 +411,28 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             configure_logging(verbose)
         start_time = time.perf_counter()
 
+        resolved = self._resolved_params()
         config = PreprocessorConfig.from_params(
-            numerical_method=self.numerical_method,
-            categorical_method=self.categorical_method,
-            feature_preprocessing=self.feature_preprocessing,
-            output_dim=self.output_dim,
-            degree=self.degree,
-            target_aware=self.target_aware,
-            placement_strategy=self.placement_strategy,
-            task=self.task,
-            adaptive=self.adaptive,
-            min_output_dim=self.min_output_dim,
-            max_output_dim=self.max_output_dim,
-            random_state=self.random_state,
-            scaling=self.scaling,
-            cat_cutoff=self.cat_cutoff,
-            treat_all_integers_as_numerical=self.treat_all_integers_as_numerical,
-            numerical_imputation=self.numerical_imputation,
-            categorical_imputation=self.categorical_imputation,
-            add_missing_indicator=self.add_missing_indicator,
-            missing_policy=self.missing_policy,
-            verbose=self.verbose,
+            numerical_method=resolved["numerical_method"],
+            categorical_method=resolved["categorical_method"],
+            feature_preprocessing=resolved["feature_preprocessing"],
+            output_dim=resolved["output_dim"],
+            degree=resolved["degree"],
+            target_aware=resolved["target_aware"],
+            placement_strategy=resolved["placement_strategy"],
+            task=resolved["task"],
+            adaptive=resolved["adaptive"],
+            min_output_dim=resolved["min_output_dim"],
+            max_output_dim=resolved["max_output_dim"],
+            random_state=resolved["random_state"],
+            scaling=resolved["scaling"],
+            cat_cutoff=resolved["cat_cutoff"],
+            treat_all_integers_as_numerical=resolved["treat_all_integers_as_numerical"],
+            numerical_imputation=resolved["numerical_imputation"],
+            categorical_imputation=resolved["categorical_imputation"],
+            add_missing_indicator=resolved["add_missing_indicator"],
+            missing_policy=resolved["missing_policy"],
+            verbose=resolved["verbose"],
         )
 
         X = to_dataframe(X)
@@ -416,8 +452,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         numerical_features, categorical_features = detect_column_types(
             X,
-            cat_cutoff=self.cat_cutoff,
-            treat_all_integers_as_numerical=self.treat_all_integers_as_numerical,
+            cat_cutoff=resolved["cat_cutoff"],
+            treat_all_integers_as_numerical=resolved["treat_all_integers_as_numerical"],
             estimator_name=type(self).__name__,
         )
 
@@ -537,6 +573,59 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
 
         return self.fit(X, y, embeddings=embeddings).transform(X, embeddings, return_array)
+
+    @classmethod
+    def _param_defaults(cls):
+        """Return the ``__init__`` parameter defaults, keyed by name."""
+        signature = inspect.signature(cls.__init__)
+        return {
+            name: parameter.default
+            for name, parameter in signature.parameters.items()
+            if parameter.default is not inspect.Parameter.empty
+        }
+
+    def _resolved_params(self):
+        """Return the effective parameters after expanding ``preset``.
+
+        A preset fills in only the parameters left at their ``__init__`` default;
+        explicitly-set parameters always take precedence. The ``preset`` key is
+        dropped from the returned mapping.
+        """
+        params = self.get_params(deep=False)
+        preset = params.pop("preset", None)
+        if preset is None:
+            return params
+        if preset not in PRESETS:
+            raise invalid_param_error(
+                type(self).__name__,
+                "preset",
+                preset,
+                "must be one of " + ", ".join(repr(name) for name in sorted(PRESETS)),
+                valid=set(PRESETS),
+            )
+        defaults = self._param_defaults()
+        resolved = dict(params)
+        for key, preset_value in PRESETS[preset].items():
+            if key in defaults and params.get(key) == defaults[key]:
+                resolved[key] = preset_value
+        return resolved
+
+    def get_resolved_config(self):
+        """Return the effective parameter mapping after ``preset`` expansion.
+
+        When ``preset`` is set, its bundled values fill in every parameter the
+        caller left at its default while explicitly-set parameters win; the
+        ``preset`` key itself is removed. When ``preset`` is ``None`` this is simply
+        :meth:`get_params` without the ``preset`` entry. The returned dict is the
+        configuration ``fit`` builds from, so it makes a preset's effect inspectable
+        before fitting.
+
+        Returns
+        -------
+        dict
+            The resolved parameter mapping.
+        """
+        return self._resolved_params()
 
     def get_feature_names_out(self, input_features=None):
         """

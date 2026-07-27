@@ -10,10 +10,19 @@ from .exceptions import (
     OutputBudgetError,
     PretabSerializationError,
     PretabWarning,
+    RepresentationConformanceError,
+)
+from .extension import (
+    BaseRepresentation,
+    check_representation,
+    list_representations,
+    load_entry_point_representations,
+    register_representation,
 )
 from .preprocessor import Preprocessor
 
 __all__ = [
+    "BaseRepresentation",
     "CrossFittedTransformer",
     "FeatureLineage",
     "FrozenRepresentationError",
@@ -22,10 +31,15 @@ __all__ = [
     "Preprocessor",
     "PretabSerializationError",
     "PretabWarning",
+    "RepresentationConformanceError",
     "RepresentationPolicy",
     "RepresentationSearchCV",
     "RepresentationSpec",
     "__version__",
+    "check_representation",
     "configure_logging",
+    "list_representations",
+    "load_entry_point_representations",
+    "register_representation",
     "set_verbosity",
 ]
