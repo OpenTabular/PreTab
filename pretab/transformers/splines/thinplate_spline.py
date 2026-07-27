@@ -120,6 +120,8 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
         K = self._tps_kernel(r)
 
         ZTZ_inv = np.linalg.pinv(Z.T @ Z)
+        # Cached so ``transform`` does not redo the pseudo-inverse on every call.
+        self._ztz_inv_ = ZTZ_inv
         P = np.eye(n) - Z @ ZTZ_inv @ Z.T
         KP = P @ K @ P
 
@@ -149,9 +151,11 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
         K_new = self._tps_kernel(r_new)
 
         Z = self.Z_
-        ZTZ_inv = np.linalg.pinv(Z.T @ Z)
-        P_new = np.eye(Z.shape[0]) - Z @ ZTZ_inv @ Z.T
-        K_new_proj = K_new @ P_new
+        # ``P = I - Z (Z'Z)^-1 Z'`` is n_train x n_train, so materializing it (and
+        # the identity it is built from) cost O(n_train^2) memory on every call --
+        # 250 MB to transform ten rows against an 8k-row fit. Distributing the
+        # product avoids it entirely: K_new @ P == K_new - (K_new @ Z) (Z'Z)^-1 Z'.
+        K_new_proj = K_new - (K_new @ Z) @ self._ztz_inv_ @ Z.T
 
         out = K_new_proj @ self.basis_
         if self.include_bias:
