@@ -2,6 +2,8 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ...core.exceptions import PretabDataError
+
 
 class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
     """Encode categorical features as continuous integer values.
@@ -45,15 +47,27 @@ class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
         self : object
             Fitted transformer.
         """
+        # Coerce to a 2D object array first. Iterating ``X.T`` directly yields
+        # the *column labels* of the transpose for a DataFrame -- i.e. the
+        # original row index -- which silently produced one mapping per row.
+        X = self._as_2d(X)
         # Fit should determine the mapping from original categories to sequential integers starting from 0
         self.mapping_ = [
-            {category: i + 1 for i, category in enumerate(np.unique(col))}
-            for col in X.T
+            {category: i + 1 for i, category in enumerate(np.unique(X[:, j]))}
+            for j in range(X.shape[1])
         ]
         for mapping in self.mapping_:
             mapping[None] = 0  # Assign 0 to unknown values
         self.n_features_in_ = len(self.mapping_)
         return self
+
+    @staticmethod
+    def _as_2d(X) -> np.ndarray:
+        """Return ``X`` as a 2D object ndarray, accepting frames, arrays and lists."""
+        array = np.asarray(X, dtype=object)
+        if array.ndim == 1:
+            array = array.reshape(-1, 1)
+        return array
 
     def transform(self, X):
         """Apply the learned category-to-integer mapping.
@@ -69,13 +83,19 @@ class ContinuousOrdinalTransformer(TransformerMixin, BaseEstimator):
             The transformed data with integer values.
         """
         check_is_fitted(self, "mapping_")
-        # Transform the categories to their mapped integer values
-        X_transformed = np.array(
-            [
-                [self.mapping_[col].get(value, 0) for col, value in enumerate(row)]
-                for row in X
-            ]
-        )
+        # As in ``fit``: iterating a DataFrame directly yields column *names*,
+        # not rows. Normalize first, then index by position.
+        X = self._as_2d(X)
+        if X.shape[1] != len(self.mapping_):
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} "
+                f"is expecting {len(self.mapping_)} features as input."
+            )
+        # Allocating up front keeps the output 2D even for zero rows, where the
+        # comprehension used to collapse to shape ``(0,)``.
+        X_transformed = np.zeros(X.shape, dtype=int)
+        for col, mapping in enumerate(self.mapping_):
+            X_transformed[:, col] = [mapping.get(value, 0) for value in X[:, col]]
         return X_transformed
 
     def get_feature_names_out(self, input_features=None):
