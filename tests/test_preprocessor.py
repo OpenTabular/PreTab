@@ -1,10 +1,13 @@
-import pytest
+from typing import cast
+
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 from sklearn.utils.validation import check_is_fitted
-from pretab.preprocessor import Preprocessor  # Adjust the import as needed
+
+from pretab.preprocessor import Preprocessor
 
 
 @pytest.fixture
@@ -254,3 +257,68 @@ def test_output_dims_and_total_before_fit_raise():
     with pytest.raises(NotFittedError):
         _ = Preprocessor().total_output_dim_
 
+
+
+# --------------------------------------------------------------------------- #
+# The dict form of ``transform`` must not re-run the pipelines.
+#
+# Widths used to be measured by calling ``transformer.transform(X[columns])``
+# again for every block, transforming the whole frame a second time.
+# ``column_transformer_.output_indices_`` already records the exact slices.
+# --------------------------------------------------------------------------- #
+def _fitted_preprocessor():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {
+            "a": rng.normal(size=200),
+            "b": rng.normal(size=200),
+            "c": rng.choice(["x", "y", "z"], size=200),
+        }
+    )
+    y = rng.normal(size=200)
+    return Preprocessor(numerical_method="rbf", categorical_method="one-hot").fit(frame, y), frame
+
+
+def test_dict_transform_calls_each_pipeline_once():
+    pre, frame = _fitted_preprocessor()
+    calls: dict[str, int] = {}
+
+    for name, pipe, _cols in pre.column_transformer_.transformers_:
+        original = pipe.transform
+
+        def counting(Z, _name=name, _original=original):
+            calls[_name] = calls.get(_name, 0) + 1
+            return _original(Z)
+
+        pipe.transform = counting
+
+    pre.transform(frame)
+
+    assert calls and set(calls.values()) == {1}
+
+
+def test_dict_blocks_reassemble_the_stacked_array():
+    pre, frame = _fitted_preprocessor()
+
+    blocks = cast("dict[str, np.ndarray]", pre.transform(frame))
+    stacked = cast("np.ndarray", pre.transform(frame, return_array=True))
+
+    np.testing.assert_allclose(
+        np.hstack([blocks[name] for name in blocks]).astype(float), stacked.astype(float)
+    )
+
+
+def test_dict_block_widths_match_output_dims():
+    pre, frame = _fitted_preprocessor()
+
+    blocks = cast("dict[str, np.ndarray]", pre.transform(frame))
+    widths = {name.split("_", 1)[1]: block.shape[1] for name, block in blocks.items()}
+
+    assert widths == pre.output_dims_
+    assert sum(widths.values()) == len(pre.get_feature_names_out())
+
+
+def test_dict_keys_cover_every_input_feature():
+    pre, frame = _fitted_preprocessor()
+
+    assert sorted(pre.transform(frame)) == ["cat_c", "num_a", "num_b"]

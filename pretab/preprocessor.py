@@ -457,17 +457,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if return_array:
             return transformed_X
 
+        # ``output_indices_`` already records the exact output slice each
+        # transformer occupies, so the blocks can be sliced straight out of the
+        # stacked array. Re-running ``transformer.transform`` here just to read
+        # ``.shape[1]`` transformed the whole frame a second time, roughly
+        # doubling the cost of the default (dict) path.
+        output_indices = self.column_transformer_.output_indices_
         transformed_dict = {}
-        start = 0
-        for name, transformer, columns in self.column_transformer_.transformers_:
-            if transformer == "drop":
+        for name, _transformer, _columns in self.column_transformer_.transformers_:
+            span = output_indices[name]
+            if span.stop - span.start == 0:
                 continue
-            if hasattr(transformer, "transform"):
-                width = transformer.transform(X[columns]).shape[1]
-            else:
-                width = 1
-            transformed_dict[name] = transformed_X[:, start : start + width]
-            start += width
+            transformed_dict[name] = transformed_X[:, span]
 
         if embeddings is not None:
             if not self.embeddings_:
