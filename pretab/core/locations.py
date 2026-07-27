@@ -80,9 +80,25 @@ def resolve_locations(
         Sorted locations whose count lies in ``[min_count, max_count]`` (subject
         to the number of distinct candidates the supplement can provide).
     """
-    locs = np.sort(np.asarray(locations, dtype=float))
-    if dedupe:
-        locs = np.unique(locs)
+    locs = np.asarray(locations, dtype=float)
+    if importance is None:
+        locs = np.sort(locs)
+        if dedupe:
+            locs = np.unique(locs)
+    else:
+        # ``importance[i]`` describes ``locations[i]``, so it has to be carried
+        # through the same reordering. Sorting (or de-duplicating) ``locs`` on its
+        # own silently left the two misaligned and trimmed the wrong entries.
+        importance = np.asarray(importance)
+        if len(importance) != len(locs):
+            raise ValueError(
+                f"importance has {len(importance)} entries but locations has {len(locs)}."
+            )
+        order = np.argsort(locs, kind="stable")
+        locs, importance = locs[order], importance[order]
+        if dedupe:
+            locs, first = np.unique(locs, return_index=True)
+            importance = importance[first]
     if len(locs) > max_count:
         locs = trim_to_count(locs, max_count, importance)
     if len(locs) < min_count and supplement is not None:

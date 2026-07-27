@@ -11,6 +11,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from .adaptive import AdaptiveResolutionMixin
+from .exceptions import InvalidParamError
 from .params import AliasResolverMixin
 from .validation import validate_2d_allow_nan
 
@@ -46,10 +47,23 @@ class BasePreTabTransformer(AdaptiveResolutionMixin, AliasResolverMixin, Transfo
         raise NotImplementedError
 
     def get_feature_names_out(self, input_features=None):
-        """Return output feature names of the form ``{feature}_{suffix}{j}``."""
+        """Return output feature names of the form ``{feature}_{suffix}{j}``.
+
+        Raises
+        ------
+        pretab.core.exceptions.InvalidParamError
+            If ``input_features`` is given but does not have one entry per input
+            feature. ``strict=False`` on the zip used to truncate silently,
+            returning a short name array for a wrong-length argument.
+        """
         check_is_fitted(self, "n_features_in_")
         if input_features is None:
             input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        elif len(input_features) != self.n_features_in_:
+            raise InvalidParamError(
+                f"input_features has {len(input_features)} entries, but "
+                f"{type(self).__name__} was fitted on {self.n_features_in_} features."
+            )
         suffix = self._feature_suffix()
         names = []
         for feature, n_cols in zip(input_features, self._output_sizes(), strict=False):

@@ -73,7 +73,10 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         self : object
             Fitted transformer.
         """
-        self.n_features_in_ = X.shape[1] if len(X.shape) > 1 else 1
+        # ``transform`` already normalizes via ``np.asarray``; do the same here so
+        # a plain list works (``X.shape`` raised ``AttributeError`` on one).
+        arr = np.asarray(X)
+        self.n_features_in_ = arr.shape[1] if arr.ndim > 1 else 1
         self.model_ = self._resolve_model()
         return self
 
