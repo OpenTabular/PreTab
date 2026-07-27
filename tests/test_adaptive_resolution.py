@@ -254,3 +254,43 @@ def test_preprocessor_adaptive_rbf_within_window(frame):
     out = pre.fit_transform(X, y, return_array=True)
     assert isinstance(out, np.ndarray)
     assert 2 * 3 <= out.shape[1] <= 2 * 9
+
+
+# --------------------------------------------------------------------------- #
+# The floor error must name the parameter the caller actually set.
+#
+# ``lo`` is ``output_dim`` on the non-adaptive branch, but the message always
+# said "min_output_dim" -- a knob the user had not touched, and one that is
+# ignored entirely when ``adaptive`` is False.
+# --------------------------------------------------------------------------- #
+def test_floor_error_names_output_dim_when_not_adaptive():
+    from pretab.core.exceptions import InvalidParamError
+
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=50)})
+
+    with pytest.raises(InvalidParamError, match="output_dim must be >= 1, got 0"):
+        Preprocessor(numerical_method="ple", output_dim=0).fit(frame, rng.normal(size=50))
+
+
+def test_floor_error_does_not_mention_min_output_dim_when_not_adaptive():
+    from pretab.core.exceptions import InvalidParamError
+
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=50)})
+
+    with pytest.raises(InvalidParamError) as excinfo:
+        Preprocessor(numerical_method="ple", output_dim=0).fit(frame, rng.normal(size=50))
+
+    assert "min_output_dim" not in str(excinfo.value)
+
+
+def test_floor_error_names_min_output_dim_when_it_was_set():
+    from pretab.core.exceptions import InvalidParamError
+    from pretab.transformers import PLETransformer
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(50, 1))
+
+    with pytest.raises(InvalidParamError, match="min_output_dim must be >= 1"):
+        PLETransformer(output_dim=5, adaptive=True, min_output_dim=0).fit(X, rng.normal(size=50))

@@ -88,9 +88,14 @@ class AdaptiveResolutionMixin:
 
         label = floor_label if floor_label is not None else str(floor)
         if lo < floor:
+            # ``lo`` is ``output_dim`` on the non-adaptive branch and whenever no
+            # explicit ``min_output_dim`` was supplied, so naming the parameter
+            # unconditionally pointed users at a knob they had not set -- and one
+            # that is ignored when ``adaptive`` is False.
+            name = "min_output_dim" if self.adaptive and min_req is not None else "output_dim"
             raise InvalidParamError(
-                f"min_output_dim must be >= {label}, got {lo}.\n"
-                "Fix: raise min_output_dim to at least the family minimum."
+                f"{name} must be >= {label}, got {lo}.\n"
+                f"Fix: raise {name} to at least the family minimum."
             )
         if ceil is not None and hi > ceil:
             raise InvalidParamError(
