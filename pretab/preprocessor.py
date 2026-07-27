@@ -9,6 +9,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from .core.exceptions import (
     IncompatibleParamsError,
+    PretabDataError,
     invalid_param_error,
 )
 from .core.logging import configure_logging, get_logger
@@ -284,6 +285,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             X = pd.DataFrame(X)
         elif isinstance(X, np.ndarray):
             X = pd.DataFrame(X, columns=[f"feature_{i}" for i in range(X.shape[1])])
+
+        # ``X[col]`` returns a DataFrame rather than a Series for a duplicated
+        # label, so the dtype inspection below fails with an opaque
+        # ``AttributeError``. The ColumnTransformer this builds also keys its
+        # transformers by column name, so duplicates could not be routed even if
+        # detection coped with them.
+        duplicated = X.columns[X.columns.duplicated()].unique().tolist()
+        if duplicated:
+            raise PretabDataError(
+                f"Duplicate column names are not supported: {duplicated}.\n"
+                "Fix: rename the columns so every name is unique."
+            )
 
         for col in X.columns:
             num_unique_values = X[col].nunique()

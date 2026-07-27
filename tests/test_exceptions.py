@@ -249,3 +249,36 @@ def test_preprocessor_unknown_categorical_method():
     with pytest.raises(InvalidParamError) as exc:
         Preprocessor(categorical_method="bogus").fit(df, y)
     assert isinstance(exc.value, ValueError)
+
+
+# --------------------------------------------------------------------------- #
+# Duplicate column names must fail with a clear, actionable error.
+#
+# ``X[col]`` returns a DataFrame rather than a Series for a duplicated label, so
+# detection died on ``.dtype`` with an opaque AttributeError from pandas.
+# --------------------------------------------------------------------------- #
+def test_duplicate_column_names_raise_a_clear_error():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(np.column_stack([rng.normal(size=50)] * 2), columns=pd.Index(["a", "a"]))
+
+    with pytest.raises(PretabDataError, match=r"Duplicate column names are not supported: \['a'\]"):
+        Preprocessor(numerical_method="minmax").fit(frame, rng.normal(size=50))
+
+
+def test_duplicate_column_names_lists_every_offender():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(rng.normal(size=(50, 4)), columns=pd.Index(["a", "a", "b", "b"]))
+
+    with pytest.raises(PretabDataError) as excinfo:
+        Preprocessor(numerical_method="minmax").fit(frame, rng.normal(size=50))
+
+    assert "'a'" in str(excinfo.value) and "'b'" in str(excinfo.value)
+
+
+def test_unique_column_names_are_unaffected():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(rng.normal(size=(50, 2)), columns=pd.Index(["a", "b"]))
+
+    pre = Preprocessor(numerical_method="minmax").fit(frame, rng.normal(size=50))
+
+    assert sorted(pre.output_dims_) == ["a", "b"]
