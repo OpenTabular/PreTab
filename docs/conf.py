@@ -166,6 +166,11 @@ myst_substitutions = {
     "version": release,
 }
 
+# Auto-generate anchor slugs for headings (h1-h3) so in-page and cross-page
+# links such as ``choosing_a_method.md#when-basis-expansion-does-not-help``
+# resolve under the strict (-W) build.
+myst_heading_anchors = 3
+
 # -- Options for todo --------------------------------------------------------
 
 todo_include_todos = False
