@@ -7,7 +7,7 @@ The **standalone transformers**, on the other hand, return plain arrays and foll
 work with `cross_val_score`, `GridSearchCV`, and every other `sklearn` utility.
 
 This tutorial builds the regression task from the
-[end-to-end example](../getting_started/end_to_end.md) as a single, self-contained
+[nonlinear regression tutorial](nonlinear_regression.md) as a single, self-contained
 `Pipeline`.
 
 ## Build the pipeline
@@ -111,12 +111,12 @@ Every pretab transformer participates in the search grid just like a native `skl
 
 - **Standalone transformers** (this page) compose inside one `Pipeline` and integrate with
   cross-validation and grid search. Reach for them when you want a single estimator object.
-- **The `Preprocessor`** (the [end-to-end example](../getting_started/end_to_end.md)) reads
+- **The `Preprocessor`** (the [nonlinear regression tutorial](nonlinear_regression.md)) reads
   a `DataFrame`, detects feature types automatically, and configures every column from a
   single config. Reach for it when you want per-column strategies without wiring each one by
   hand.
 
 ## Next steps
 
-- Browse every transformer in the [API Reference](../api/index.rst).
-- Review the available strategy strings in the [User Guide](../user_guide/preprocessing.md).
+- Browse every transformer in the [API reference](../api/index.rst).
+- Review the method catalogue in the [representations overview](../representations/overview.md).
