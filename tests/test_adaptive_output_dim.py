@@ -56,8 +56,7 @@ FIXED_WIDTH = {
     "tprs": OUTPUT_DIM,
     "mspline": OUTPUT_DIM,
     "ispline": OUTPUT_DIM,
-    # B-spline defaults to include_bias=True -> output_dim + 1
-    "bspline": OUTPUT_DIM + 1,
+    "bspline": OUTPUT_DIM,
 }
 
 # Families that honor the adaptive window when driven through the Preprocessor.

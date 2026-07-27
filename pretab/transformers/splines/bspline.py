@@ -24,7 +24,15 @@ class BSplineTransformer(BaseSplineTransformer):
     is expanded column by column and the results are stacked horizontally.
 
     See :class:`~pretab.transformers.splines.base_spline.BaseSplineTransformer`
-    for the full parameter description. ``include_bias`` defaults to True here.
+    for the full parameter description.
+
+    .. note::
+       ``include_bias`` defaults to ``False``. A B-spline basis over a clamped
+       knot vector is a partition of unity -- every row sums to 1 -- so an
+       extra intercept column is an exact linear combination of the basis and
+       makes the design matrix singular. Set it to ``True`` only if a
+       downstream model needs the explicit column and tolerates the
+       collinearity.
 
     Examples
     --------
@@ -32,14 +40,14 @@ class BSplineTransformer(BaseSplineTransformer):
     >>> from pretab.transformers import BSplineTransformer
     >>> X = np.linspace(0, 1, 50).reshape(-1, 1)
     >>> BSplineTransformer(output_dim=8).fit_transform(X).shape
-    (50, 9)
+    (50, 8)
     """
 
     def __init__(
         self,
         output_dim=UNSET,
         degree: int = 3,
-        include_bias: bool = True,
+        include_bias: bool = False,
         knot_locations: np.ndarray | None = None,
         target_aware: bool = False,
         placement_strategy: str = "quantile",

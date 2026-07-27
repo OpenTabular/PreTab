@@ -132,3 +132,46 @@ def test_spline_penalty_matrix_symmetric(data):
     P = transformer.get_penalty_matrix()
     assert P.shape[0] == P.shape[1]
     assert np.allclose(P, P.T, atol=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# A partition-of-unity basis must not carry a redundant intercept column.
+#
+# ``BSplineTransformer`` used to default to ``include_bias=True``. A B-spline
+# basis over a clamped knot vector sums to 1 on every row, so the prepended
+# column of ones is an exact linear combination of the rest and the design
+# matrix is singular (condition number ~1e15).
+# --------------------------------------------------------------------------- #
+def test_bspline_default_design_is_full_rank():
+    X = np.linspace(0, 1, 200).reshape(-1, 1)
+
+    design = BSplineTransformer(output_dim=8).fit_transform(X)
+
+    assert design.shape[1] == 8
+    assert np.linalg.matrix_rank(design) == design.shape[1]
+    assert np.linalg.cond(design) < 1e6
+
+
+def test_bspline_basis_is_a_partition_of_unity():
+    # This is *why* the bias column is redundant; pin it so the reasoning holds.
+    X = np.linspace(0, 1, 200).reshape(-1, 1)
+
+    design = BSplineTransformer(output_dim=8).fit_transform(X)
+
+    np.testing.assert_allclose(design.sum(axis=1), 1.0)
+
+
+def test_bspline_include_bias_still_available_opt_in():
+    X = np.linspace(0, 1, 200).reshape(-1, 1)
+
+    design = BSplineTransformer(output_dim=8, include_bias=True).fit_transform(X)
+
+    assert design.shape[1] == 9
+    np.testing.assert_allclose(design[:, 0], 1.0)
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+def test_bmi_splines_default_to_exactly_output_dim(cls):
+    X = np.linspace(0, 1, 200).reshape(-1, 1)
+
+    assert cls(output_dim=7).fit_transform(X).shape[1] == 7

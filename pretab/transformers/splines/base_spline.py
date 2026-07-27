@@ -123,7 +123,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
     >>> from pretab.transformers import BSplineTransformer
     >>> X = np.linspace(0, 1, 50).reshape(-1, 1)
     >>> BSplineTransformer(output_dim=8).fit_transform(X).shape
-    (50, 9)
+    (50, 8)
     """
 
     def __init__(
