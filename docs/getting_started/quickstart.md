@@ -1,16 +1,23 @@
 # Quickstart
 
-This page walks through the two ways to use pretab:
+This page fits your first representation in a few minutes. It covers the two ways to use
+PreTab: the high-level `Preprocessor` that builds a full pipeline from a config, and the
+individual transformers that behave like any other scikit-learn step.
 
-1. the high-level `Preprocessor` (`pretab.preprocessor.Preprocessor`), which builds a full
-   scikit-learn pipeline from a config, and
-2. the individual transformers, which behave like any other `sklearn` transformer.
+## Install
 
-## Using the `Preprocessor`
+```bash
+pip install pretab
+```
 
-The `Preprocessor` detects feature types automatically and applies per-feature
-preprocessing. It returns either a dictionary of feature blocks (default) or a single
-stacked array.
+See [Installation](installation.md) for optional extras such as language embeddings and
+LightGBM-based placement.
+
+## Fit a `Preprocessor`
+
+The `Preprocessor` inspects a `DataFrame`, decides which columns are numerical and which are
+categorical, and applies a strategy per column. It returns a dictionary of feature blocks by
+default, or a single stacked array on request.
 
 ```python
 import numpy as np
@@ -18,87 +25,113 @@ import pandas as pd
 
 from pretab import Preprocessor
 
-# Simulated tabular dataset
+rng = np.random.default_rng(0)
 df = pd.DataFrame({
-    "age": np.random.randint(18, 65, size=100),
-    "income": np.random.normal(60000, 15000, size=100).astype(int),
-    "job": np.random.choice(["nurse", "engineer", "scientist", "teacher"], size=100),
-    "city": np.random.choice(["Berlin", "Munich", "Hamburg", "Cologne"], size=100),
-    "experience": np.random.randint(0, 40, size=100),
+    "age": rng.integers(18, 65, size=200),
+    "income": rng.normal(60_000, 15_000, size=200).astype(int),
+    "experience": rng.integers(0, 40, size=200),
+    "job": rng.choice(["nurse", "engineer", "scientist", "teacher"], size=200),
+    "city": rng.choice(["Berlin", "Munich", "Hamburg", "Cologne"], size=200),
 })
-y = np.random.randn(100, 1)
+y = np.sin(df["age"] / 10) + df["income"] / 1e5 + rng.normal(0, 0.1, size=200)
 
-# Optional per-feature preprocessing config
 config = {
-    "age": "ple",
-    "income": "rbf",
-    "experience": "quantile",
+    "age": "ple",              # supervised piecewise-linear encoding
+    "income": "rbf",           # radial basis feature map
+    "experience": "naturalspline",
     "job": "one-hot",
-    "city": "none",
+    "city": "int",             # integer (ordinal) codes
 }
+pre = Preprocessor(feature_preprocessing=config, task="regression", random_state=0)
 
-preprocessor = Preprocessor(feature_preprocessing=config, task="regression")
-
-# Fit and transform into a dictionary of feature arrays
-X_dict = preprocessor.fit_transform(df, y)
-
-# ... or get a single stacked array instead
-X_array = preprocessor.transform(df, return_array=True)
-
-# Inspect the resolved feature metadata
-preprocessor.get_feature_info(verbose=True)
+# Fit and transform into a dict of feature blocks
+X_dict = pre.fit_transform(df, y)
+{k: v.shape for k, v in X_dict.items()}
 ```
 
 ```{tip}
-When no per-feature config is provided, the `Preprocessor` falls back to the global
-`numerical_method` and `categorical_method` strategies. See the
-[User Guide](../user_guide/preprocessing.md) for the full list of options.
+When no per-feature config is given, the `Preprocessor` falls back to its global
+`numerical_method` (default `"ple"`) and `categorical_method` (default `"int"`). See
+[Configuration](../core_concepts/configuration.md) for every knob.
 ```
 
-## Using individual transformers
+Ask for a single stacked matrix instead when you feed a plain estimator:
 
-Every transformer follows the standard `sklearn` `fit` / `transform` API, so it can be
-dropped into a `Pipeline` or `ColumnTransformer`.
+```python
+X = pre.transform(df, return_array=True)   # one ndarray, one row per sample
+```
+
+## Inspect what was built
+
+Every fitted representation is self-describing. Read the resolved layout, or trace each
+output column back to its source.
+
+```python
+pre.get_feature_info(verbose=True)   # human-readable table of per-feature pipelines
+
+lineage = pre.get_feature_lineage()  # one record per output column
+lineage[0]
+```
+
+The lineage covers every output column, and the names line up with `get_feature_names_out`.
+See [Outputs and inspection](../core_concepts/outputs_and_inspection.md) for the full
+contract.
+
+## Use a transformer on its own
+
+Every strategy is also importable from `pretab.transformers` and follows the scikit-learn
+API, so it drops into a `Pipeline` or `ColumnTransformer`.
 
 ```python
 import numpy as np
 
 from pretab.transformers import PLETransformer
 
-x = np.random.randn(100, 1)
-y = np.random.randn(100, 1)
+x = np.random.randn(200, 1)
+y = np.random.randn(200)
 
 x_ple = PLETransformer(output_dim=15, task="regression").fit_transform(x, y)
-assert x_ple.shape[1] == 15
+x_ple.shape[1]   # number of piecewise-linear bins
 ```
 
 ```{note}
-`PLETransformer` is supervised: it uses the target `y` during `fit` to place its bin
-edges. Always pass `y` when fitting it, or any pipeline that includes it.
+`PLETransformer` is supervised: it reads the target `y` during `fit` to place its bin edges.
+Always pass `y` when fitting it, or any pipeline that contains it. See
+[Target awareness](../core_concepts/target_awareness.md).
 ```
 
-For spline transformers, the penalty matrix can be extracted with
-`get_penalty_matrix()`:
+Spline families that carry a smoothness penalty expose it through `get_penalty_matrix()`:
+
+```python
+import numpy as np
+
+from pretab.transformers import NaturalCubicSplineTransformer
+
+x = np.random.randn(200, 1)
+spline = NaturalCubicSplineTransformer(output_dim=8)
+spline.fit_transform(x)
+
+penalty = spline.get_penalty_matrix()   # second-difference penalty for GAM-style fitting
+```
+
+The multivariate thin-plate spline models several columns jointly and is sized by
+`n_components` rather than `output_dim`:
 
 ```python
 import numpy as np
 
 from pretab.transformers import ThinPlateSplineTransformer
 
-x = np.random.randn(100, 1)
-
-tp = ThinPlateSplineTransformer(output_dim=15)
-x_tp = tp.fit_transform(x)
-assert x_tp.shape[1] == 15
-
+x = np.random.randn(200, 2)              # two input columns, modelled together
+tp = ThinPlateSplineTransformer(n_components=10)
+features = tp.fit_transform(x)
 penalty = tp.get_penalty_matrix()
 ```
 
 ## Next steps
 
-- See pretab feed a real model, baseline vs. pretab, in the
-  [end-to-end example](end_to_end.md).
-- Work through a [classification tutorial](../tutorials/classification.md) or an
-  [sklearn Pipeline tutorial](../tutorials/sklearn_pipeline.md).
-- Learn about the available strategies in the [User Guide](../user_guide/preprocessing.md).
-- Browse every class in the [API Reference](../api/index.rst).
+- See PreTab lift a linear model, baseline versus PreTab, in the
+  [non-linear regression tutorial](../tutorials/nonlinear_regression.md).
+- Decide between the two surfaces in [Choosing an interface](choosing_an_interface.md).
+- Browse every method in [Representations](../representations/overview.md).
+- Learn the shared ideas in [Core concepts](../core_concepts/feature_representation.md).
