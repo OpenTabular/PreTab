@@ -3,6 +3,7 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_is_fitted
 
 from ...core.exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 from ...core.params import UNSET, AliasResolverMixin
@@ -144,14 +145,17 @@ class CustomBinTransformer(AliasResolverMixin, TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        input_features : list of str
-            The names of the input features.
+        input_features : list of str or None
+            The names of the input features. When ``None``, names of the form
+            ``x0, x1, ...`` are generated, matching the rest of the package and
+            scikit-learn's contract that the call works with no arguments.
 
         Returns
         -------
-        input_features : ndarray of shape (n_features,)
+        feature_names : ndarray of shape (n_features,)
             The names of the output features after transformation.
         """
+        check_is_fitted(self, "n_features_in_")
         if input_features is None:
-            raise InvalidParamError("input_features must be specified")
-        return input_features
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        return np.asarray(input_features, dtype=object)

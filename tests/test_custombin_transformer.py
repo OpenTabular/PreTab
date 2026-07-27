@@ -69,13 +69,47 @@ def test_custom_bin_transformer_feature_names_out():
     transformer = CustomBinTransformer(output_dim=3)
     transformer.fit(np.array([[0.2]]))
     names = transformer.get_feature_names_out(["feature1"])
-    assert names == ["feature1"]
+    assert isinstance(names, np.ndarray)
+    assert list(names) == ["feature1"]
 
 
-def test_custom_bin_transformer_feature_names_out_raises():
-    transformer = CustomBinTransformer(output_dim=3)
-    with pytest.raises(ValueError):
-        transformer.get_feature_names_out()
+def test_custom_bin_transformer_feature_names_out_before_fit_raises():
+    from sklearn.exceptions import NotFittedError
+
+    with pytest.raises(NotFittedError):
+        CustomBinTransformer(output_dim=3).get_feature_names_out()
+
+
+# --------------------------------------------------------------------------- #
+# ``get_feature_names_out()`` must work with no arguments and return an ndarray.
+#
+# It used to raise without ``input_features`` and return a plain list with them,
+# which broke ``Pipeline.get_feature_names_out()``. The same fix was already
+# applied to NoTransformer / ToFloatTransformer / ContinuousOrdinalTransformer.
+# --------------------------------------------------------------------------- #
+def test_feature_names_out_defaults_to_generated_names():
+    transformer = CustomBinTransformer(output_dim=3).fit(np.linspace(0, 1, 10).reshape(-1, 1))
+
+    names = transformer.get_feature_names_out()
+
+    assert isinstance(names, np.ndarray)
+    assert list(names) == ["x0"]
+
+
+def test_feature_names_out_works_inside_a_pipeline():
+    from sklearn.pipeline import Pipeline
+
+    X = np.linspace(0, 1, 20).reshape(-1, 1)
+    pipe = Pipeline([("bin", CustomBinTransformer(output_dim=4))]).fit(X)
+
+    assert list(np.asarray(pipe.get_feature_names_out())) == ["x0"]
+
+
+def test_feature_names_out_length_matches_transform_width():
+    transformer = CustomBinTransformer(output_dim=4).fit(np.linspace(0, 1, 20).reshape(-1, 1))
+
+    width = transformer.transform(np.linspace(0, 1, 20).reshape(-1, 1)).shape[1]
+    assert len(transformer.get_feature_names_out()) == width
 
 
 def test_custom_bin_transformer_is_sklearn_compatible():
