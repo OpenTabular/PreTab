@@ -133,16 +133,29 @@ class BaseLocationSelector(ABC):
         raise NotImplementedError
 
     def _enforce_spacing(self, split_points: list[float], x: np.ndarray) -> list[float]:
-        """Drop locations closer than ``min_location_spacing`` of the range."""
+        """Drop locations closer than ``min_location_spacing`` of the range.
+
+        The distance test runs against *every* location kept so far rather than
+        only the most recent one, which makes the filter independent of the
+        order in which candidates arrive. That matters because subclasses
+        deliberately order their candidates differently -- location order for a
+        single tree, gain-descending order for a boosted ensemble -- and an
+        order-sensitive test silently dropped every candidate positioned below
+        the previously kept one, collapsing a gain-ranked set into a small
+        clustered subsequence.
+
+        For already-ascending input (the single-tree path) this is equivalent to
+        comparing against the last kept location, so that behaviour is unchanged.
+        """
         if len(split_points) <= 1:
             return split_points
 
         x_range = float(x.max() - x.min())
         min_distance = self.min_location_spacing * x_range
 
-        spaced = [split_points[0]]
+        spaced: list[float] = [split_points[0]]
         for point in split_points[1:]:
-            if point - spaced[-1] >= min_distance:
+            if all(abs(point - kept) >= min_distance for kept in spaced):
                 spaced.append(point)
 
         return spaced
