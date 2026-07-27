@@ -3,23 +3,14 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.exceptions import InvalidParamError
+from ...core.knots import bspline_basis
 from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
-
-def bspline_basis(x, knots, degree, i):
-    if degree == 0:
-        return np.where((x >= knots[i]) & (x < knots[i + 1]), 1.0, 0.0)
-    else:
-        denom1 = knots[i + degree] - knots[i]
-        denom2 = knots[i + degree + 1] - knots[i + 1]
-
-        term1 = 0.0 if denom1 == 0 else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
-        term2 = (
-            0.0 if denom2 == 0 else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1)
-        )
-
-        return term1 + term2
+# ``bspline_basis`` used to be defined here and in ``tensor_product``; the two
+# copies are now a single implementation in ``pretab.core.knots``, re-exported
+# under the original name so existing imports keep working.
+__all__ = ["PSplineTransformer", "bspline_basis"]
 
 
 class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
@@ -194,7 +185,11 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
         all_basis = []
         for i in range(X.shape[1]):
-            x = X[:, i]
+            # Clip into the fitted range so values outside it evaluate on the
+            # boundary rather than falling off every knot span and producing an
+            # all-zero row. Matches BaseSplineTransformer.transform.
+            knots = self.knots_[i]
+            x = np.clip(X[:, i], knots[0], knots[-1])
             nb = len(self.knots_[i]) - self.degree - 1
             basis = np.zeros((len(x), nb))
             for j in range(nb):

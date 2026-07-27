@@ -18,12 +18,72 @@ from .exceptions import invalid_param_error
 
 __all__ = [
     "basis_to_knots",
+    "bspline_basis",
     "generate_internal_knots",
     "quantile_knots",
     "select_knots",
     "spanning_knots",
     "uniform_knots",
 ]
+
+
+def _last_positive_span(knots: np.ndarray) -> int:
+    """Index of the final knot span with non-zero width, or ``-1`` if none.
+
+    A clamped knot vector repeats its boundary knots ``degree + 1`` times, so
+    the trailing spans are degenerate (``knots[j] == knots[j + 1]``). The span
+    that actually reaches the right boundary is the last one with positive
+    width.
+    """
+    for j in range(len(knots) - 2, -1, -1):
+        if knots[j] < knots[j + 1]:
+            return j
+    return -1
+
+
+def bspline_basis(x: np.ndarray, knots: np.ndarray, degree: int, i: int) -> np.ndarray:
+    """Evaluate the ``i``-th B-spline basis function of ``degree`` over ``knots``.
+
+    Standard Cox-de Boor recursion, with one deliberate departure: the final
+    knot span of non-zero width is treated as **closed** rather than half-open.
+    Under the usual ``[k_j, k_{j+1})`` convention the largest value in the data
+    belongs to no span, so every basis function evaluates to zero there and the
+    row loses all of its signal. Closing that span keeps the basis a partition
+    of unity across the whole fitted range, right endpoint included.
+
+    Parameters
+    ----------
+    x : ndarray
+        Points at which to evaluate the basis function.
+    knots : ndarray
+        Full (padded) knot vector.
+    degree : int
+        Degree of the basis function.
+    i : int
+        Index of the basis function.
+    """
+    return _bspline_basis(x, knots, degree, i, _last_positive_span(knots))
+
+
+def _bspline_basis(x: np.ndarray, knots: np.ndarray, degree: int, i: int, last: int) -> np.ndarray:
+    """Cox-de Boor recursion with ``last`` naming the span to treat as closed."""
+    if degree == 0:
+        if i == last:
+            return ((knots[i] <= x) & (x <= knots[i + 1])).astype(float)
+        return ((knots[i] <= x) & (x < knots[i + 1])).astype(float)
+
+    denom1 = knots[i + degree] - knots[i]
+    denom2 = knots[i + degree + 1] - knots[i + 1]
+    # A zero denominator marks a degenerate span from a repeated boundary knot;
+    # its contribution is zero by convention.
+    zero = np.zeros_like(x, dtype=float)
+    term1 = zero if denom1 == 0 else (x - knots[i]) / denom1 * _bspline_basis(x, knots, degree - 1, i, last)
+    term2 = (
+        zero
+        if denom2 == 0
+        else (knots[i + degree + 1] - x) / denom2 * _bspline_basis(x, knots, degree - 1, i + 1, last)
+    )
+    return term1 + term2
 
 
 def basis_to_knots(n_basis: int, degree: int) -> int:

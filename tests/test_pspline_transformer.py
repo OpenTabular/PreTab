@@ -81,3 +81,36 @@ def test_pspline_transform_requires_fit():
         transformer.transform(np.random.rand(5, 1))
     with pytest.raises(NotFittedError):
         transformer.get_penalty_matrix()
+
+
+# --------------------------------------------------------------------------- #
+# The B-spline basis must cover the whole fitted range, right endpoint included.
+#
+# The degree-0 recursion base used a half-open span, so the largest observed
+# value belonged to no span and its entire row evaluated to zero.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("degree", [1, 2, 3])
+def test_pspline_is_partition_of_unity_including_max(degree):
+    X = np.linspace(0, 1, 30).reshape(-1, 1)
+    Xt = PSplineTransformer(output_dim=8, degree=degree).fit_transform(X)
+
+    np.testing.assert_allclose(Xt.sum(axis=1), 1.0)
+
+
+def test_pspline_max_row_is_not_all_zero():
+    X = np.linspace(0, 1, 30).reshape(-1, 1)
+    Xt = PSplineTransformer(output_dim=8).fit_transform(X)
+
+    assert np.abs(Xt[-1]).sum() > 0
+
+
+def test_pspline_clips_out_of_range_input():
+    X = np.linspace(0, 1, 30).reshape(-1, 1)
+    transformer = PSplineTransformer(output_dim=8).fit(X)
+
+    out = transformer.transform(np.array([[-0.5], [0.5], [1.5]]))
+
+    # Out-of-range values evaluate on the boundary instead of vanishing.
+    np.testing.assert_allclose(out.sum(axis=1), 1.0)
+    np.testing.assert_allclose(out[0], transformer.transform(np.array([[0.0]]))[0])
+    np.testing.assert_allclose(out[2], transformer.transform(np.array([[1.0]]))[0])

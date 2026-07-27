@@ -71,3 +71,38 @@ def test_tensorproduct_transform_requires_fit():
     transformer = TensorProductSplineTransformer()
     with pytest.raises(NotFittedError):
         transformer.transform(np.random.rand(5, 2))
+
+
+# --------------------------------------------------------------------------- #
+# Same endpoint guarantee as the p-spline: both families share one basis
+# implementation in ``pretab.core.knots``.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("degree", [1, 2, 3])
+def test_tensorproduct_is_partition_of_unity_including_max(degree):
+    X = np.linspace(0, 1, 30).reshape(-1, 1)
+    Xt = TensorProductSplineTransformer(output_dim=8, degree=degree).fit_transform(X)
+
+    np.testing.assert_allclose(Xt.sum(axis=1), 1.0)
+
+
+def test_tensorproduct_max_row_is_not_all_zero():
+    X = np.linspace(0, 1, 30).reshape(-1, 1)
+    Xt = TensorProductSplineTransformer(output_dim=8).fit_transform(X)
+
+    assert np.abs(Xt[-1]).sum() > 0
+
+
+def test_tensorproduct_clips_out_of_range_input():
+    X = np.linspace(0, 1, 30).reshape(-1, 1)
+    transformer = TensorProductSplineTransformer(output_dim=8).fit(X)
+
+    out = transformer.transform(np.array([[-0.5], [0.5], [1.5]]))
+
+    np.testing.assert_allclose(out.sum(axis=1), 1.0)
+
+
+def test_tensorproduct_multivariate_still_products_the_marginals():
+    rng = np.random.default_rng(0)
+    transformer = TensorProductSplineTransformer(output_dim=5).fit(rng.random((20, 2)))
+
+    assert transformer.transform(rng.random((7, 2))).shape == (7, 25)

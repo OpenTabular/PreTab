@@ -3,21 +3,14 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.exceptions import InvalidParamError
+from ...core.knots import bspline_basis
 from ...core.params import UNSET
 from .mixins import SplineBasisMixin
 
-
-def bspline_basis(x, knots, degree, i):
-    if degree == 0:
-        return ((knots[i] <= x) & (x < knots[i + 1])).astype(float)
-    else:
-        denom1 = knots[i + degree] - knots[i]
-        denom2 = knots[i + degree + 1] - knots[i + 1]
-        term1 = 0.0 if denom1 == 0 else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
-        term2 = (
-            0.0 if denom2 == 0 else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1)
-        )
-        return term1 + term2
+# ``bspline_basis`` used to be defined here and in ``pspline``; the two copies
+# are now a single implementation in ``pretab.core.knots``, re-exported under
+# the original name so existing imports keep working.
+__all__ = ["TensorProductSplineTransformer", "bspline_basis"]
 
 
 class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
@@ -226,7 +219,11 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
         bases = []
         for d in range(self.dim_):
-            basis = self._basis_matrix(X[:, d], self.knots_[d])
+            # Clip into the fitted range so values outside it evaluate on the
+            # boundary rather than falling off every knot span and producing an
+            # all-zero marginal (which would zero the whole tensor product).
+            knots = self.knots_[d]
+            basis = self._basis_matrix(np.clip(X[:, d], knots[0], knots[-1]), knots)
             bases.append(basis)
 
         n_samples = X.shape[0]
