@@ -11,6 +11,45 @@ from .core.exceptions import (
     IncompatibleParamsError,
     invalid_param_error,
 )
+
+
+def _validate_embeddings(embeddings, embedding_dimensions_, X_shape, context):
+    """Validate embeddings against fitted dimensions and row count."""
+    if embeddings is None:
+        return
+    if isinstance(embeddings, dict):
+        items = embeddings.items()
+    else:
+        items = list(enumerate(embeddings, 1))
+    expected_keys = list(embedding_dimensions_.keys())
+    actual_keys = [k if isinstance(k, str) else f'embedding_{k}' for k, _ in items]
+    if actual_keys != expected_keys:
+        missing = set(expected_keys) - set(actual_keys)
+        extra = set(actual_keys) - set(expected_keys)
+        msg = f"Embedding count/keys mismatch in transform: expected {expected_keys}, got {actual_keys}"
+        if missing:
+            msg += f" missing {sorted(missing)}"
+        if extra:
+            msg += f" extra {sorted(extra)}"
+        raise IncompatibleParamsError(msg, context)
+    for key, arr in items:
+        if not hasattr(arr, 'shape') or len(arr.shape) != 2:
+            raise IncompatibleParamsError(
+                f"Embedding '{key}' must be a 2D array with shape (n_samples, n_features)",
+                context
+            )
+        expected_width = embedding_dimensions_[key]
+        if arr.shape[1] != expected_width:
+            raise IncompatibleParamsError(
+                f"Embedding '{key}' width {arr.shape[1]} does not match fitted width {expected_width}",
+                context
+            )
+        expected_rows = X_shape[0]
+        if arr.shape[0] != expected_rows:
+            raise IncompatibleParamsError(
+                f"Embedding '{key}' row count {arr.shape[0]} does not match X rows {expected_rows}",
+                context
+            )
 from .core.logging import configure_logging, get_logger
 from .core.params import validate_placement
 from .pipeline import (
