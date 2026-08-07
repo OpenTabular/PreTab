@@ -18,9 +18,7 @@ def test_passes_conformance_suite():
 
 
 def test_register_and_use_through_preprocessor():
-    register_representation(
-        "chebyshev", ChebyshevRepresentation, allowed_args=("degree",), override=True
-    )
+    register_representation("chebyshev", ChebyshevRepresentation, allowed_args=("degree",), override=True)
     assert "chebyshev" in list_representations(feature_kind="numerical")
 
     X = pd.DataFrame({"a": np.linspace(0, 1, 20), "b": np.linspace(-1, 1, 20)})

@@ -258,7 +258,16 @@ _SPECS: tuple[TransformerSpec, ...] = (
     _spec(
         "cubicspline",
         CubicRegressionSplineTransformer,
-        ("output_dim", "degree", "include_bias", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        (
+            "output_dim",
+            "degree",
+            "include_bias",
+            "task",
+            "adaptive",
+            "min_output_dim",
+            "max_output_dim",
+            "random_state",
+        ),
         **_BOTH_MODE,
     ),
     _spec(
@@ -432,9 +441,7 @@ def register_spec(spec: TransformerSpec, *, override: bool = False) -> Transform
     if not isinstance(spec, TransformerSpec):
         raise TypeError(f"expected a TransformerSpec, got {type(spec).__name__}")
     if spec.name in TRANSFORMER_REGISTRY and not override:
-        raise ValueError(
-            f"method {spec.name!r} is already registered; pass override=True to replace it."
-        )
+        raise ValueError(f"method {spec.name!r} is already registered; pass override=True to replace it.")
     # Drop any stale derived-view entries before re-inserting (supports override).
     NUMERICAL_METHODS.pop(spec.name, None)
     CATEGORICAL_METHODS.discard(spec.name)

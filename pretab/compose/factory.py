@@ -272,9 +272,7 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
     if plan["separate_state"]:
         # Emit a dedicated ``__missing`` column (built on the raw input) alongside
         # the imputed representation, so the indicator never enters the basis.
-        return FeatureUnion(
-            [("representation", pipeline), ("missing", MissingStateIndicator())]
-        )
+        return FeatureUnion([("representation", pipeline), ("missing", MissingStateIndicator())])
     return pipeline
 
 

@@ -12,9 +12,7 @@ _VALID_ENCODINGS = ("ordinal", "onehot", "soft")
 _VALID_STRATEGIES = ("uniform", "quantile")
 
 
-class NumericBinningTransformer(
-    RepresentationSpecMixin, AliasResolverMixin, TransformerMixin, BaseEstimator
-):
+class NumericBinningTransformer(RepresentationSpecMixin, AliasResolverMixin, TransformerMixin, BaseEstimator):
     """Stateful binning transformer for numerical features.
 
     The bin edges are learned once in :meth:`fit` and reused at
@@ -119,8 +117,7 @@ class NumericBinningTransformer(
             self.n_features_in_ = X.shape[1]
         elif X.shape[1] != self.n_features_in_:
             raise PretabDataError(
-                f"Input has {X.shape[1]} features, but NumericBinningTransformer "
-                f"was fitted with {self.n_features_in_}."
+                f"Input has {X.shape[1]} features, but NumericBinningTransformer was fitted with {self.n_features_in_}."
             )
         return X
 

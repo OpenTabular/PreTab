@@ -140,9 +140,7 @@ def test_load_entry_point_representations_registers(monkeypatch):
         def load(self):
             return _EpRep
 
-    monkeypatch.setattr(
-        importlib_metadata, "entry_points", lambda group=None: [_FakeEntryPoint()]
-    )
+    monkeypatch.setattr(importlib_metadata, "entry_points", lambda group=None: [_FakeEntryPoint()])
     loaded = load_entry_point_representations()
     assert loaded == ["ep_square"]
     assert "ep_square" in registry.TRANSFORMER_REGISTRY
@@ -155,9 +153,7 @@ def test_load_entry_point_representations_skips_broken(monkeypatch):
         def load(self):
             raise ImportError("boom")
 
-    monkeypatch.setattr(
-        importlib_metadata, "entry_points", lambda group=None: [_BrokenEntryPoint()]
-    )
+    monkeypatch.setattr(importlib_metadata, "entry_points", lambda group=None: [_BrokenEntryPoint()])
     with pytest.warns(ConfigWarning, match="broken_entry"):
         loaded = load_entry_point_representations()
     assert loaded == []

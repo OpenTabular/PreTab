@@ -44,9 +44,7 @@ _CONTROLLED_MODULE_PREFIXES = (
 
 # Set while :class:`CrossFittedTransformer` fits its internal clones, so their
 # fits never emit a leakage warning.
-_cross_fit_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "pretab_cross_fit_active", default=False
-)
+_cross_fit_active: contextvars.ContextVar[bool] = contextvars.ContextVar("pretab_cross_fit_active", default=False)
 
 
 def in_controlled_context() -> bool:

@@ -783,9 +783,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         total = int(self.total_output_dim_)
         if self.max_output_features is not None and total > self.max_output_features:
-            violations.append(
-                f"total output columns ({total}) exceed max_output_features ({self.max_output_features})"
-            )
+            violations.append(f"total output columns ({total}) exceed max_output_features ({self.max_output_features})")
 
         if self.max_features_per_input is not None:
             for feature, width in self.output_dims_.items():

@@ -113,9 +113,7 @@ def test_impute_adds_no_indicator(frame_with_nan, y):
 
 def test_impute_with_indicator_appends_columns(frame_with_nan, y):
     plain = Preprocessor(numerical_method="minmax", missing_policy="impute").fit(frame_with_nan, y)
-    withind = Preprocessor(
-        numerical_method="minmax", missing_policy="impute_with_indicator"
-    ).fit(frame_with_nan, y)
+    withind = Preprocessor(numerical_method="minmax", missing_policy="impute_with_indicator").fit(frame_with_nan, y)
     assert withind.total_output_dim_ > plain.total_output_dim_
     out = withind.transform(frame_with_nan, return_array=True)
     assert not np.isnan(out).any()
@@ -150,9 +148,7 @@ def test_separate_state_indicator_marks_missing_rows(frame_with_nan, y):
 
 def test_separate_state_on_categorical(y):
     frame = pd.DataFrame({"c": ["x", "y", None, "x", "y", "x"]})
-    p = Preprocessor(
-        categorical_method="one-hot", missing_policy="separate_state"
-    ).fit(frame, y)
+    p = Preprocessor(categorical_method="one-hot", missing_policy="separate_state").fit(frame, y)
     names = list(p.get_feature_names_out())
     assert any(n.endswith("__missing") for n in names)
 

@@ -66,7 +66,6 @@ class BasePreTabTransformer(
             apply_constant_policy(X, self._resolved_policy(), estimator=self)
         return X
 
-
     def _feature_suffix(self) -> str:
         """Suffix used when generating output feature names."""
         return self._feature_suffix_value

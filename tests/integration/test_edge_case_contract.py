@@ -113,6 +113,7 @@ def test_constant_column_raises_typed_error(name, rng):
     with pytest.raises(PretabDataError, match="constant"):
         _factory(name).fit(X, y)
 
+
 @pytest.mark.parametrize("name", CONSTANT_GRACEFUL)
 def test_constant_column_degrades_gracefully(name, rng):
     X = np.full((40, 1), 3.14)
@@ -238,18 +239,14 @@ def test_preprocessor_policy_errors_on_constant(rng):
     df = _frame_with_constant(rng)
     y = rng.normal(size=60)
     with pytest.raises(PretabDataError):
-        Preprocessor(
-            numerical_method="standardization", policy={"constant": "error"}
-        ).fit(df, y)
+        Preprocessor(numerical_method="standardization", policy={"constant": "error"}).fit(df, y)
 
 
 def test_preprocessor_policy_warns_on_constant(rng):
     df = _frame_with_constant(rng)
     y = rng.normal(size=60)
     with pytest.warns(DataWarning):
-        Preprocessor(
-            numerical_method="standardization", policy={"constant": "warn"}
-        ).fit(df, y)
+        Preprocessor(numerical_method="standardization", policy={"constant": "warn"}).fit(df, y)
 
 
 def test_preprocessor_stores_resolved_policy(rng):

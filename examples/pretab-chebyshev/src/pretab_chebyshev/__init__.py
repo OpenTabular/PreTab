@@ -54,8 +54,7 @@ class ChebyshevRepresentation(BaseRepresentation):
         z = self._rescale(np.asarray(self._validate(X, reset=False), dtype=float))
         theta = np.arccos(z)
         blocks = [
-            np.column_stack([np.cos(k * theta[:, j]) for k in range(1, self.degree + 1)])
-            for j in range(z.shape[1])
+            np.column_stack([np.cos(k * theta[:, j]) for k in range(1, self.degree + 1)]) for j in range(z.shape[1])
         ]
         return np.hstack(blocks)
 

@@ -92,17 +92,13 @@ class BaseRepresentation(BasePreTabTransformer):
         super().__init_subclass__(**kwargs)
         if cls.feature_kind not in _VALID_FEATURE_KINDS:
             raise ValueError(
-                f"{cls.__name__}.feature_kind must be one of {sorted(_VALID_FEATURE_KINDS)}, "
-                f"got {cls.feature_kind!r}"
+                f"{cls.__name__}.feature_kind must be one of {sorted(_VALID_FEATURE_KINDS)}, got {cls.feature_kind!r}"
             )
         if cls.scope not in _VALID_SCOPES:
-            raise ValueError(
-                f"{cls.__name__}.scope must be one of {sorted(_VALID_SCOPES)}, got {cls.scope!r}"
-            )
+            raise ValueError(f"{cls.__name__}.scope must be one of {sorted(_VALID_SCOPES)}, got {cls.scope!r}")
         if cls.supervision not in _VALID_SUPERVISION:
             raise ValueError(
-                f"{cls.__name__}.supervision must be one of {sorted(_VALID_SUPERVISION)}, "
-                f"got {cls.supervision!r}"
+                f"{cls.__name__}.supervision must be one of {sorted(_VALID_SUPERVISION)}, got {cls.supervision!r}"
             )
         # Sync the public contract onto the internal representation hooks so the
         # inherited RepresentationSpec and estimator tags reflect the declared
@@ -378,9 +374,7 @@ def check_representation(cls, *, X=None, y=None):
             f"{cls.__name__}.transform before fit should raise NotFittedError, got {type(exc).__name__}"
         ) from exc
     else:
-        raise RepresentationConformanceError(
-            f"{cls.__name__}.transform before fit should raise NotFittedError"
-        )
+        raise RepresentationConformanceError(f"{cls.__name__}.transform before fit should raise NotFittedError")
     passed.append("unfitted_transform_raises")
 
     # 2. fit returns self and does not mutate X.
@@ -410,25 +404,19 @@ def check_representation(cls, *, X=None, y=None):
             f"{cls.__name__}.get_feature_names_out length {len(names)} != output width {width}"
         )
     if len(set(names)) != len(names):
-        raise RepresentationConformanceError(
-            f"{cls.__name__}.get_feature_names_out must be unique"
-        )
+        raise RepresentationConformanceError(f"{cls.__name__}.get_feature_names_out must be unique")
     passed.append("feature_names_match")
 
     # 5. deterministic across clone + refit.
     clone_out = _densify(_fit(clone(fitted)).transform(X))
     if clone_out.shape != out.shape or not np.allclose(clone_out, out, equal_nan=True):
-        raise RepresentationConformanceError(
-            f"{cls.__name__} is not deterministic across clone + refit"
-        )
+        raise RepresentationConformanceError(f"{cls.__name__} is not deterministic across clone + refit")
     passed.append("deterministic")
 
     # 6. typed representation spec agrees with the declared metadata.
     spec = fitted.get_representation_spec()
     if not isinstance(spec, RepresentationSpec):
-        raise RepresentationConformanceError(
-            f"{cls.__name__}.get_representation_spec must return a RepresentationSpec"
-        )
+        raise RepresentationConformanceError(f"{cls.__name__}.get_representation_spec must return a RepresentationSpec")
     declared_scope = getattr(cls, "scope", "univariate")
     if spec.scope != declared_scope:
         raise RepresentationConformanceError(

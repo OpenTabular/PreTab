@@ -113,9 +113,7 @@ class RepresentationSpec:
             "period": self.period,
             "local_support": self.local_support,
             "location_kind": self.location_kind,
-            "locations": (
-                None if self.locations is None else [list(group) for group in self.locations]
-            ),
+            "locations": (None if self.locations is None else [list(group) for group in self.locations]),
             "dtype": self.dtype,
             "cross_fitted": self.cross_fitted,
             "n_folds": self.n_folds,
@@ -142,11 +140,7 @@ class RepresentationSpec:
             period=None if data["period"] is None else float(data["period"]),
             local_support=bool(data["local_support"]),
             location_kind=data["location_kind"],
-            locations=(
-                None
-                if locations is None
-                else tuple(tuple(float(v) for v in group) for group in locations)
-            ),
+            locations=(None if locations is None else tuple(tuple(float(v) for v in group) for group in locations)),
             dtype=data.get("dtype", "float64"),
             cross_fitted=bool(data.get("cross_fitted", False)),
             n_folds=None if n_folds is None else int(n_folds),

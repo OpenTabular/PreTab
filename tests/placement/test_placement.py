@@ -151,9 +151,7 @@ def test_factory_builds_each_strategy():
 )
 def test_factory_rejects_invalid_combo(target_aware, strategy):
     with pytest.raises(InvalidParamError):
-        create_placement_strategy(
-            target_aware=target_aware, placement_strategy=strategy, min_count=1, max_count=5
-        )
+        create_placement_strategy(target_aware=target_aware, placement_strategy=strategy, min_count=1, max_count=5)
 
 
 def test_strategies_are_base_instances():

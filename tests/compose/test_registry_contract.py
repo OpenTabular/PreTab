@@ -147,9 +147,13 @@ _PREPROC_NUMERICAL = [
     for name, spec in _SPEC_ITEMS
     if spec.is_numerical and spec.preprocessor_compatible and not spec.is_multivariate
 ]
-_PREPROC_CATEGORICAL = [(name, spec) for name, spec in _SPEC_ITEMS if spec.is_categorical and spec.preprocessor_compatible]
+_PREPROC_CATEGORICAL = [
+    (name, spec) for name, spec in _SPEC_ITEMS if spec.is_categorical and spec.preprocessor_compatible
+]
 _REQUIRED_NUMERICAL = [
-    (name, spec) for name, spec in _SPEC_ITEMS if spec.is_numerical and spec.requires_target and not spec.is_multivariate
+    (name, spec)
+    for name, spec in _SPEC_ITEMS
+    if spec.is_numerical and spec.requires_target and not spec.is_multivariate
 ]
 
 
@@ -158,9 +162,7 @@ def _skip_if_dependency_missing(spec):
         pytest.skip(f"optional dependency {spec.optional_dependency!r} not installed")
 
 
-@pytest.mark.parametrize(
-    "name, spec", _PREPROC_NUMERICAL, ids=[name for name, _ in _PREPROC_NUMERICAL]
-)
+@pytest.mark.parametrize("name, spec", _PREPROC_NUMERICAL, ids=[name for name, _ in _PREPROC_NUMERICAL])
 def test_preprocessor_compatible_numerical_methods_fit_transform(name, spec):
     _skip_if_dependency_missing(spec)
     rng = np.random.RandomState(0)
@@ -174,9 +176,7 @@ def test_preprocessor_compatible_numerical_methods_fit_transform(name, spec):
     assert out.shape[0] == 60
 
 
-@pytest.mark.parametrize(
-    "name, spec", _PREPROC_CATEGORICAL, ids=[name for name, _ in _PREPROC_CATEGORICAL]
-)
+@pytest.mark.parametrize("name, spec", _PREPROC_CATEGORICAL, ids=[name for name, _ in _PREPROC_CATEGORICAL])
 def test_preprocessor_compatible_categorical_methods_fit_transform(name, spec):
     _skip_if_dependency_missing(spec)
     rng = np.random.RandomState(0)
@@ -195,9 +195,7 @@ def test_preprocessor_compatible_categorical_methods_fit_transform(name, spec):
     assert out.shape[0] == 60
 
 
-@pytest.mark.parametrize(
-    "name, spec", _REQUIRED_NUMERICAL, ids=[name for name, _ in _REQUIRED_NUMERICAL]
-)
+@pytest.mark.parametrize("name, spec", _REQUIRED_NUMERICAL, ids=[name for name, _ in _REQUIRED_NUMERICAL])
 def test_required_target_methods_raise_without_y_via_preprocessor(name, spec):
     _skip_if_dependency_missing(spec)
     X = pd.DataFrame({"f0": np.linspace(0.0, 1.0, 60)})
@@ -216,9 +214,7 @@ def test_required_target_methods_raise_without_y_via_preprocessor(name, spec):
 _MULTIVARIATE_NUMERICAL = [(name, spec) for name, spec in _SPEC_ITEMS if spec.is_numerical and spec.is_multivariate]
 
 
-@pytest.mark.parametrize(
-    "name, spec", _MULTIVARIATE_NUMERICAL, ids=[name for name, _ in _MULTIVARIATE_NUMERICAL]
-)
+@pytest.mark.parametrize("name, spec", _MULTIVARIATE_NUMERICAL, ids=[name for name, _ in _MULTIVARIATE_NUMERICAL])
 def test_multivariate_methods_not_preprocessor_selectable(name, spec):
     # The multivariate tensor-product / thin-plate splines are standalone-only and
     # deliberately excluded from the per-column Preprocessor whitelist; selecting

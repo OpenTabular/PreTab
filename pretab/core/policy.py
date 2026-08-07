@@ -71,9 +71,7 @@ class RepresentationPolicy:
         for name, choices in _CHOICES.items():
             value = getattr(self, name)
             if value not in choices:
-                raise invalid_param_error(
-                    "RepresentationPolicy", name, value, f"one of {choices}", valid=choices
-                )
+                raise invalid_param_error("RepresentationPolicy", name, value, f"one of {choices}", valid=choices)
 
     @classmethod
     def resolve(cls, policy) -> RepresentationPolicy:

@@ -224,6 +224,5 @@ class PeriodicPlacementAdapter:
 
     def get_locations(self, x: np.ndarray, y: np.ndarray | None = None) -> np.ndarray:
         raise NotImplementedError(
-            "Periodic encoding is parameter-driven (period, harmonics) and does not use "
-            "data-dependent placement."
+            "Periodic encoding is parameter-driven (period, harmonics) and does not use data-dependent placement."
         )

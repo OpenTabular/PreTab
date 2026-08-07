@@ -71,4 +71,3 @@ def test_cyclic_rejects_non_positive_harmonics():
     X = np.array([[0], [6], [12], [18]])
     with pytest.raises(InvalidParamError):
         PeriodicEncodingTransformer(period=24, harmonics=0).fit(X)
-

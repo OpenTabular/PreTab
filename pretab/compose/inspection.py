@@ -254,9 +254,7 @@ def build_feature_lineage(column_transformer):
                     )
                 )
             continue
-        family, component, uses_target, is_interaction = _resolve_block_representation(
-            transformer, columns
-        )
+        family, component, uses_target, is_interaction = _resolve_block_representation(transformer, columns)
         source_features = tuple(str(column) for column in columns)
         for offset in range(width):
             index = span.start + offset

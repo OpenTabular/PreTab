@@ -84,9 +84,7 @@ def test_feature_names_delegate(data):
     cf = CrossFittedTransformer(PLETransformer(output_dim=6), n_folds=3, random_state=0)
     cf.fit(X, y)
     reference = PLETransformer(output_dim=6).fit(X, y)
-    np.testing.assert_array_equal(
-        cf.get_feature_names_out(["f0"]), reference.get_feature_names_out(["f0"])
-    )
+    np.testing.assert_array_equal(cf.get_feature_names_out(["f0"]), reference.get_feature_names_out(["f0"]))
 
 
 def test_requires_y(data):

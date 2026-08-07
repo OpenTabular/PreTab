@@ -85,6 +85,7 @@ def test_fingerprint_stable_across_processes(frame, target):
         print(p.fingerprint_)
         """
     )
+
     def _run():
         result = subprocess.run(  # noqa: S603 - fixed interpreter + inline script, no untrusted input
             [sys.executable, "-c", script], capture_output=True, text=True, check=True

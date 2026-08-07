@@ -96,4 +96,3 @@ class PeriodicEncodingTransformer(BasePreTabTransformer):
     def _output_sizes(self) -> list[int]:
         per_feature = 2 * self.harmonics + (1 if self.include_original else 0)
         return [per_feature] * self.n_features_in_
-

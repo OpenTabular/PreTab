@@ -32,9 +32,7 @@ __all__ = ["PreprocessorConfig"]
 
 # Valid values for the high-level ``missing_policy`` orchestration knob. ``None``
 # keeps the explicit imputation parameters authoritative (historical behaviour).
-MISSING_POLICIES = frozenset(
-    {"error", "propagate", "impute", "impute_with_indicator", "separate_state"}
-)
+MISSING_POLICIES = frozenset({"error", "propagate", "impute", "impute_with_indicator", "separate_state"})
 
 
 def _normalize_method(method, canonical, aliases) -> str:
@@ -117,8 +115,7 @@ class PreprocessorConfig:
                 "Preprocessor",
                 "missing_policy",
                 missing_policy,
-                "must be None or one of "
-                "'error', 'propagate', 'impute', 'impute_with_indicator', 'separate_state'",
+                "must be None or one of 'error', 'propagate', 'impute', 'impute_with_indicator', 'separate_state'",
                 valid=set(MISSING_POLICIES),
             )
         if add_missing_indicator and numerical_imputation is None and categorical_imputation is None:
@@ -188,8 +185,10 @@ class PreprocessorConfig:
         the explicit ``*_imputation`` / ``add_missing_indicator`` parameters stay
         authoritative (historical behaviour); otherwise ``missing_policy`` decides.
         """
-        strategy = (self.numerical_imputation or "median") if is_numerical else (
-            self.categorical_imputation or "most_frequent"
+        strategy = (
+            (self.numerical_imputation or "median")
+            if is_numerical
+            else (self.categorical_imputation or "most_frequent")
         )
         if self.missing_policy is None:
             configured = self.numerical_imputation if is_numerical else self.categorical_imputation
