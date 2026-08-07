@@ -11,20 +11,25 @@
 
 [📘 Documentation](https://pretab.readthedocs.io) |
 [🚀 Getting Started](https://pretab.readthedocs.io/en/latest/getting_started/quickstart.html) |
-[📖 User Guide](https://pretab.readthedocs.io/en/latest/user_guide/preprocessing.html) |
+[📖 Representations](https://pretab.readthedocs.io/en/latest/representations/overview.html) |
 [🤔 Report Issues](https://github.com/OpenTabular/PreTab/issues)
 
 </div>
 
 # PreTab: Tabular Preprocessing Made Simple
 
-**PreTab** is a modular, scikit-learn compatible preprocessing library for tabular data. A
-single `Preprocessor` detects numerical and categorical columns and turns them into
-model-ready features, and every strategy is also available as a standalone transformer:
-splines, neural basis expansions, piecewise-linear encoding, binning, language embeddings,
-and temporal features. Because it speaks the sklearn API, PreTab drops straight into
-`Pipeline` and `ColumnTransformer` workflows and accepts any sklearn transformer alongside
-its own.
+**PreTab** is a modular, scikit-learn compatible representation and preprocessing library
+for tabular data. A single `Preprocessor` detects numerical and categorical columns and
+turns them into model-ready features. Every strategy it uses (splines, neural basis
+expansions, piecewise-linear encoding, binning, kernel approximations, and language
+embeddings) is also available as a standalone transformer. Because it speaks the sklearn
+API, PreTab drops straight into `Pipeline` and `ColumnTransformer` workflows and accepts any
+sklearn transformer alongside its own.
+
+Beyond the transformers themselves, every fitted representation is self-describing: it
+reports per-output-column lineage, guards supervised methods against leakage, serializes to
+a portable versioned spec, and can be extended with your own representations through a
+public, discoverable protocol.
 
 ## Why PreTab?
 
@@ -33,12 +38,18 @@ its own.
   inputs.
 - **Automatic feature handling.** Feature-type detection and per-feature strategies let you
   describe intent once instead of wiring transformers by hand.
-- **Beyond scaling.** Spline bases, neural basis maps, and piecewise-linear encoding turn
-  raw numerical columns into expressive representations.
-- **Categoricals done right.** Ordinal and one-hot encoding, pretrained language
-  embeddings, and custom binning cover both low- and high-cardinality columns.
+- **Beyond scaling.** Spline bases, neural basis maps, piecewise-linear encoding, and
+  kernel approximations turn raw numerical columns into expressive representations.
+- **Categoricals done right.** Ordinal and one-hot encoding and pretrained language
+  embeddings cover both low- and high-cardinality columns.
+- **Self-describing and reproducible.** Every fit produces per-column feature lineage and
+  serializes to a portable spec with a stable fingerprint, so you always know what a fitted
+  preprocessor does and can reproduce it exactly.
+- **Leakage-safe by default.** Supervised representations declare their target usage and
+  warn when fit outside a controlled context, with a cross-fitting wrapper for out-of-fold
+  training features.
 - **Composable and extensible.** Every strategy is a standalone transformer you can import,
-  compose, or subclass, and any sklearn transformer works out of the box.
+  compose, or subclass; register your own representation and it behaves like a built-in.
 
 ## 🏃 Quickstart
 
@@ -76,49 +87,50 @@ print({k: v.shape for k, v in X.items()})
 
 ## Available Transformers
 
-PreTab groups its transformers into four families. Each one follows the standard `fit` /
+PreTab groups its transformers into three families. Each one follows the standard `fit` /
 `transform` API and is importable from `pretab.transformers`.
 
 ### Splines
 
-| Transformer                      | Basis                        | Best for                             |
-| -------------------------------- | ---------------------------- | ------------------------------------ |
-| `CubicSplineTransformer`         | B-spline basis               | Smooth non-linear numerical effects  |
-| `NaturalCubicSplineTransformer`  | Natural cubic spline         | Smooth effects with linear tails     |
-| `PSplineTransformer`             | Penalized B-spline           | Smoothness with a penalty matrix     |
-| `TensorProductSplineTransformer` | Tensor-product spline        | Interactions between two features    |
-| `ThinPlateSplineTransformer`     | Thin-plate regression spline | Smooth multivariate surfaces         |
+| Transformer                        | Basis                                 | Best for                               |
+| ----------------------------------- | -------------------------------------- | ---------------------------------------- |
+| `BSplineTransformer`                | B-spline basis                        | General-purpose smooth nonlinearity    |
+| `MSplineTransformer`                | Non-negative B-spline basis           | Density-like, non-negative bases       |
+| `ISplineTransformer`                | Monotone integrated spline            | Effects that must not reverse          |
+| `CubicRegressionSplineTransformer`  | Cubic regression spline               | GAM-style additive smooth terms        |
+| `NaturalCubicSplineTransformer`     | Natural cubic spline                  | Smooth effects with linear tails       |
+| `PSplineTransformer`                | Penalized B-spline                    | Smoothness via a difference penalty    |
+| `TensorProductSplineTransformer`    | Tensor-product spline (multivariate)  | Smooth interactions across 2+ features |
+| `ThinPlateSplineTransformer`        | Thin-plate spline (multivariate)      | Smooth surfaces across 2+ features     |
 
 ### Feature maps
 
-| Transformer                   | Basis                  | Best for                            |
-| ----------------------------- | ---------------------- | ----------------------------------- |
-| `RBFExpansionTransformer`     | Radial basis functions | Localized, kernel-like features     |
-| `ReLUExpansionTransformer`    | ReLU basis             | Piecewise-linear neural features    |
-| `SigmoidExpansionTransformer` | Sigmoid basis          | Smooth saturating features          |
-| `TanhExpansionTransformer`    | Tanh basis             | Zero-centered saturating features   |
+| Transformer                        | Basis                                   | Best for                              |
+| ------------------------------------ | ------------------------------------------ | ---------------------------------------- |
+| `RBFExpansionTransformer`            | Radial basis functions                  | Localized, kernel-like features       |
+| `ReLUExpansionTransformer`           | ReLU basis                              | Piecewise-linear neural features      |
+| `SigmoidExpansionTransformer`        | Sigmoid basis                           | Smooth saturating features            |
+| `TanhExpansionTransformer`           | Tanh basis                              | Zero-centered saturating features     |
+| `FourierFeatureTransformer`          | Sine/cosine basis                       | Periodic or cyclic numerical effects  |
+| `RandomFourierFeaturesTransformer`   | Random Fourier features (multivariate)  | Scalable RBF-kernel approximation     |
+| `NystroemFeaturesTransformer`        | Nystroem kernel map (multivariate)      | Landmark-based kernel approximation   |
 
 ### Encoding and binning
 
-| Transformer                    | Method                                 | Best for                              |
-| ------------------------------ | -------------------------------------- | ------------------------------------- |
-| `PLETransformer`               | Piecewise linear encoding (supervised) | Strong numerical encoding for models  |
-| `CustomBinTransformer`         | Rule- or tree-based binning            | Discretizing numerical or code values |
-| `OneHotFromOrdinalTransformer` | One-hot from ordinal codes             | One-hot on pre-encoded categoricals   |
-| `LanguageEmbeddingTransformer` | Pretrained language embeddings         | High-cardinality, semantic columns    |
+| Transformer                    | Method                                  | Best for                              |
+| ------------------------------- | ------------------------------------------ | ---------------------------------------- |
+| `PLETransformer`                | Piecewise-linear encoding (supervised)  | Strong numerical encoding for models  |
+| `NumericBinningTransformer`     | Uniform/quantile binning, tree-driven   | Discretizing numerical columns        |
+| `ContinuousOrdinalTransformer`  | Integer (ordinal) encoding              | Compact codes for categoricals        |
+| `LanguageEmbeddingTransformer`  | Pretrained language embeddings          | High-cardinality, semantic columns    |
 
-### Temporal
-
-| Transformer               | Method                    | Best for                            |
-| ------------------------- | ------------------------- | ----------------------------------- |
-| `CyclicalTimeTransformer` | Sine/cosine encoding      | Hour, day, month and cyclic fields  |
-| `LagFeatureTransformer`   | Lagged values             | Time-series lag features            |
-| `RollingStatsTransformer` | Rolling window statistics | Moving averages and rolling summary |
+> **Deprecated.** `OneHotFromOrdinalTransformer` still works but is deprecated; use
+> `categorical_method="one-hot"` (backed by `sklearn.preprocessing.OneHotEncoder`) instead.
 
 > **Strategy strings.** Inside the `Preprocessor` you select these by short name (for
-> example `"ple"`, `"rbf"`, `"one-hot"`, `"pretrained"`). See the
-> [User Guide](https://pretab.readthedocs.io/en/latest/user_guide/preprocessing.html) for
-> the full list.
+> example `"ple"`, `"rbf"`, `"one-hot"`, `"pretrained"`). See
+> [Representations](https://pretab.readthedocs.io/en/latest/representations/overview.html) for
+> the full catalogue and [comparison table](https://pretab.readthedocs.io/en/latest/representations/comparison_table.html).
 
 ## 📚 Documentation
 
@@ -127,9 +139,11 @@ PreTab groups its transformers into four families. Each one follows the standard
 ### Quick Links
 
 - **[Getting Started](https://pretab.readthedocs.io/en/latest/getting_started/installation.html)**: Installation and quickstart
-- **[User Guide](https://pretab.readthedocs.io/en/latest/user_guide/preprocessing.html)**: Feature detection, strategies, and outputs
+- **[Core Concepts](https://pretab.readthedocs.io/en/latest/core_concepts/feature_representation.html)**: Configuration, resolution, target awareness, reproducibility
+- **[Representations](https://pretab.readthedocs.io/en/latest/representations/overview.html)**: The full method catalogue and how to choose one
+- **[Tutorials](https://pretab.readthedocs.io/en/latest/tutorials/nonlinear_regression.html)**: Worked, end-to-end examples
 - **[API Reference](https://pretab.readthedocs.io/en/latest/api/index.html)**: The `Preprocessor` and every transformer
-- **[Developer Guide](https://pretab.readthedocs.io/en/latest/developer_guide/contributing.html)**: Contributing, versioning, and releases
+- **[Developer Guide](https://pretab.readthedocs.io/en/latest/developer_guide/contributing.html)**: Contributing, testing, and releases
 
 ## 🛠️ Installation
 
@@ -139,14 +153,16 @@ PreTab groups its transformers into four families. Each one follows the standard
 pip install pretab
 ```
 
-**With language-embedding support:**
+**With optional extras:**
 
 ```bash
-pip install "pretab[embeddings]"   # adds sentence-transformers
+pip install "pretab[embeddings]"   # adds sentence-transformers, for the `pretrained` strategy
+pip install "pretab[lightgbm]"     # adds lightgbm, for placement_strategy="lightgbm"
+pip install "pretab[all]"          # both of the above
 ```
 
-> **Lightweight by default.** The `embeddings` extra pulls in `sentence-transformers` and
-> PyTorch, so install it only if you use the `pretrained` categorical strategy.
+> **Lightweight by default.** The core install has no heavy dependencies. Each extra is
+> opt-in and only needed if you use the corresponding strategy.
 
 > **Requirements:** Python 3.10 to 3.13.
 
@@ -247,13 +263,13 @@ Spline transformers expose their penalty matrix for penalized (smoothing) models
 ```python
 import numpy as np
 
-from pretab.transformers import ThinPlateSplineTransformer
+from pretab.transformers import NaturalCubicSplineTransformer
 
 x = np.random.randn(100, 1)
 
-tp = ThinPlateSplineTransformer(output_dim=15)
-x_tp = tp.fit_transform(x)
-penalty = tp.get_penalty_matrix()   # (output_dim, output_dim) smoothing penalty
+spline = NaturalCubicSplineTransformer(output_dim=10)
+x_spline = spline.fit_transform(x)
+penalty = spline.get_penalty_matrix()   # (output_dim, output_dim) smoothing penalty
 ```
 
 ## Advanced Features
@@ -286,10 +302,10 @@ preprocessor = Preprocessor(
 > **Optional dependency.** Install with `pip install "pretab[embeddings]"` before using the
 > `pretrained` strategy.
 
-### Custom binning
+### Numeric binning
 
-`CustomBinTransformer` supports both rule-based edges and tree-based bins learned from the
-target.
+`NumericBinningTransformer` (selected as `"custombin"`) discretizes a numerical column into
+uniformly- or quantile-spaced bins, with `ordinal`, `onehot`, or `soft` output encodings.
 
 ```python
 preprocessor = Preprocessor(
@@ -297,6 +313,66 @@ preprocessor = Preprocessor(
     output_dim=32,
 )
 ```
+
+### Feature lineage and inspection
+
+Every fitted `Preprocessor` can explain itself. `get_feature_info` summarizes the resolved
+per-column pipeline, and `get_feature_lineage` maps every output column back to its source
+feature, representation family, and component.
+
+```python
+preprocessor.get_feature_info(verbose=True)      # resolved strategies, widths, categories
+lineage = preprocessor.get_feature_lineage()     # one record per output column
+```
+
+### Leakage-safe supervised representations
+
+Methods like `PLETransformer` place their bins using the target. PreTab warns when a
+supervised transformer is fit outside a `Pipeline` or cross-validation context, and ships a
+cross-fitting wrapper that produces out-of-fold training features.
+
+```python
+from pretab import CrossFittedTransformer
+from pretab.transformers import PLETransformer
+
+cf = CrossFittedTransformer(PLETransformer(), n_folds=5)
+X_train_features = cf.fit_transform(x_train, y_train)   # out-of-fold, leakage-free
+```
+
+### Serialization and reproducibility
+
+A fitted preprocessor serializes to a portable, versioned JSON spec, a safer alternative to
+`pickle` that never executes arbitrary code on load, and reports a stable fingerprint for
+tracking exactly what was fitted.
+
+```python
+preprocessor.to_spec("representation.json")
+restored = Preprocessor.from_spec("representation.json")
+
+preprocessor.fingerprint_          # stable sha256 hash of the fitted representation
+```
+
+### Extending PreTab
+
+Add your own representation by subclassing `BaseRepresentation`, then register it so it
+behaves like a built-in, selectable via `Preprocessor(numerical_method=...)`.
+
+```python
+from pretab import BaseRepresentation, register_representation
+
+class MyRepresentation(BaseRepresentation):
+    representation_name = "my_representation"
+    feature_kind = "numerical"
+    scope = "univariate"
+    supervision = "unsupervised"
+    # implement fit / transform / _output_sizes
+
+register_representation("my_representation", MyRepresentation)
+```
+
+> **Full walkthrough.** See the
+> [custom representation tutorial](https://pretab.readthedocs.io/en/latest/tutorials/custom_representation.html)
+> for a complete, runnable example.
 
 ## 📄 License
 
