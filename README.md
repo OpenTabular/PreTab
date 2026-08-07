@@ -75,15 +75,12 @@ print({k: v.shape for k, v in X.items()})
 # {'num_age': (100, 7), 'num_income': (100, 7), 'cat_city': (100, 1)}
 ```
 
-> **That's it.** PreTab detects feature types, fits a strategy per column, and returns
-> ready-to-use arrays.
+> **Note:** PreTab accepts a `pandas.DataFrame` or a `numpy.ndarray` and infers numerical
+> versus categorical columns either way.
 
-> **Works with pandas and numpy.** Pass a DataFrame or an array, and PreTab infers
-> numerical vs. categorical columns for you.
-
-> **Mix strategies per column.** Swap the global methods for a `feature_preprocessing` map,
-> for example `{"age": "ple", "income": "rbf", "city": "one-hot"}`, and PreTab fits each
-> column with its own strategy in a single pass. See [Usage](#usage) for a full example.
+> **Tip:** Swap the global methods for a `feature_preprocessing` map, for example
+> `{"age": "ple", "income": "rbf", "city": "one-hot"}`, and PreTab fits each column with its
+> own strategy in a single pass. See [Usage](#usage) for a full example.
 
 ## Available Transformers
 
@@ -124,11 +121,11 @@ PreTab groups its transformers into three families. Each one follows the standar
 | `ContinuousOrdinalTransformer`  | Integer (ordinal) encoding              | Compact codes for categoricals        |
 | `LanguageEmbeddingTransformer`  | Pretrained language embeddings          | High-cardinality, semantic columns    |
 
-> **Deprecated.** `OneHotFromOrdinalTransformer` still works but is deprecated; use
+> **Warning:** `OneHotFromOrdinalTransformer` is deprecated. Use
 > `categorical_method="one-hot"` (backed by `sklearn.preprocessing.OneHotEncoder`) instead.
 
-> **Strategy strings.** Inside the `Preprocessor` you select these by short name (for
-> example `"ple"`, `"rbf"`, `"one-hot"`, `"pretrained"`). See
+> **Note:** Inside the `Preprocessor` you select these by short name, for example `"ple"`,
+> `"rbf"`, `"one-hot"`, `"pretrained"`. See
 > [Representations](https://pretab.readthedocs.io/en/latest/representations/overview.html) for
 > the full catalogue and [comparison table](https://pretab.readthedocs.io/en/latest/representations/comparison_table.html).
 
@@ -161,10 +158,8 @@ pip install "pretab[lightgbm]"     # adds lightgbm, for placement_strategy="ligh
 pip install "pretab[all]"          # both of the above
 ```
 
-> **Lightweight by default.** The core install has no heavy dependencies. Each extra is
-> opt-in and only needed if you use the corresponding strategy.
-
-> **Requirements:** Python 3.10 to 3.13.
+> **Note:** The core install has no heavy dependencies. Each extra is opt-in and only
+> needed if you use the corresponding strategy. PreTab requires Python 3.10 to 3.13.
 
 **From source:**
 
@@ -213,8 +208,8 @@ experience  numerical    imputer -> minmax -> quantile     1      -
 city        categorical  imputer -> onehot -> to_float     4      4
 ```
 
-> **Two output formats.** `transform` returns a dict of feature blocks by default (keys
-> prefixed `num_` and `cat_`), or a single stacked array when you pass `return_array=True`.
+> **Note:** `transform` returns a dict of feature blocks by default (keys prefixed `num_`
+> and `cat_`), or a single stacked array when you pass `return_array=True`.
 
 ### Standalone transformers
 
@@ -232,8 +227,8 @@ x_ple = PLETransformer(output_dim=15, task="regression").fit_transform(x, y)
 assert x_ple.shape[1] == 15
 ```
 
-> **Some transformers are supervised.** `PLETransformer` uses the target `y` during `fit`
-> to place its bin edges, so pass `y` whenever you fit it.
+> **Important:** `PLETransformer` is supervised. It uses the target `y` during `fit` to
+> place its bin edges and raises if you omit it, so always pass `y` when fitting it directly.
 
 ### Inside an sklearn Pipeline
 
@@ -299,8 +294,8 @@ preprocessor = Preprocessor(
 )
 ```
 
-> **Optional dependency.** Install with `pip install "pretab[embeddings]"` before using the
-> `pretrained` strategy.
+> **Note:** Install with `pip install "pretab[embeddings]"` before using the `pretrained`
+> strategy.
 
 ### Numeric binning
 
@@ -339,6 +334,11 @@ cf = CrossFittedTransformer(PLETransformer(), n_folds=5)
 X_train_features = cf.fit_transform(x_train, y_train)   # out-of-fold, leakage-free
 ```
 
+> **Warning:** Fitting a supervised transformer on the same rows you later evaluate on
+> leaks target information into the features. `CrossFittedTransformer` removes that leakage
+> from the training features themselves; inside a `Pipeline`, cross-validation already
+> keeps each fold's fit confined to its training data.
+
 ### Serialization and reproducibility
 
 A fitted preprocessor serializes to a portable, versioned JSON spec, a safer alternative to
@@ -370,7 +370,7 @@ class MyRepresentation(BaseRepresentation):
 register_representation("my_representation", MyRepresentation)
 ```
 
-> **Full walkthrough.** See the
+> **Tip:** See the
 > [custom representation tutorial](https://pretab.readthedocs.io/en/latest/tutorials/custom_representation.html)
 > for a complete, runnable example.
 
@@ -381,16 +381,11 @@ PreTab is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
 ## 🤝 Contributing
 
 Contributions are welcome, whether you are fixing bugs, adding transformers, or improving
-the docs. See the
+the docs. Clone the repository and install it in editable mode as shown in the Installation
+section above, then see the
 [Contributing Guide](https://pretab.readthedocs.io/en/latest/developer_guide/contributing.html)
-to get started, and please follow our
+and our
 [Code of Conduct](https://github.com/OpenTabular/PreTab/blob/main/CODE_OF_CONDUCT.md).
-
-```bash
-git clone https://github.com/OpenTabular/PreTab
-cd PreTab
-pip install -e ".[dev]"
-```
 
 ## 📞 Support
 
