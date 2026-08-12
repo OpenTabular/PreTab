@@ -70,6 +70,9 @@ norecursedirs = [
   ".venv",
 ]
 filterwarnings = [
+  # An unexpected LeakageWarning fails the suite; modules that fit supervised
+  # transformers directly opt out via tests/conftest.py.
+  "error::pretab.exceptions.LeakageWarning",
   # scikit-learn / scipy deprecation noise
   "ignore::DeprecationWarning:sklearn",
   "ignore::DeprecationWarning:scipy",
