@@ -39,6 +39,10 @@ types:
 test:
     poetry run pytest --cov=pretab tests/
 
+# run the end-to-end quickstart used as the CI smoke test and reviewer artifact
+quickstart:
+    poetry run python scripts/quickstart.py
+
 # build the HTML docs locally (warnings treated as errors)
 docs:
     rm -rf docs/_build

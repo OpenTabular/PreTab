@@ -181,6 +181,9 @@ jobs:
       - name: Run smoke tests
         run: poetry run pytest tests/ -v -m smoke --tb=short
 
+      - name: Run quickstart
+        run: poetry run python scripts/quickstart.py
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
