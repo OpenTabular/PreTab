@@ -32,6 +32,29 @@ pre = Preprocessor(feature_preprocessing={
 X = pre.fit_transform(df, y)
 ```
 
+## How this compares to scikit-learn's preprocessing transformers
+
+PreTab is not a competitor to scikit-learn. Every transformer subclasses `BaseEstimator` and
+`TransformerMixin` and drops into the same `Pipeline` and `ColumnTransformer` you already use.
+The real question is what PreTab adds where scope overlaps with scikit-learn's own
+`SplineTransformer`, `KBinsDiscretizer`, `PolynomialFeatures`, and `TargetEncoder`.
+
+| Capability | scikit-learn | PreTab |
+| --- | --- | --- |
+| Knot / threshold placement | Uniform or quantile, fixed before fitting | Optionally target-aware: a CART or LightGBM model places knots where the target changes fastest (`placement_strategy="cart"`) |
+| How many basis functions | You pick a fixed count | `adaptive=True` searches a width in `[min_output_dim, max_output_dim]` from the data |
+| Leakage safety | `TargetEncoder` cross-fits internally; nothing else does, and nothing warns you | Every supervised representation emits a `LeakageWarning` outside a `Pipeline`, and any of them can be wrapped in `CrossFittedTransformer` |
+| Feature provenance | `get_feature_names_out()` returns names only | A typed `RepresentationSpec` per transformer plus a `FeatureLineage` record per output column (family, component, target usage) |
+| Persistence | `pickle` / `joblib`, which execute arbitrary code on load | `to_spec()` / `from_spec()`: a versioned JSON schema that never runs estimator code, plus a stable `fingerprint_` |
+| Choosing per column | Hand-assemble a `ColumnTransformer` yourself | One `Preprocessor(feature_preprocessing={...})`, validated against a capability registry so incompatible combinations (a required-target method without `y`, for example) raise a typed error at fit time |
+
+```{note}
+Piecewise-linear encoding (`ple`) and the neural-style basis maps (`rbf`, `relu`, `sigmoid`,
+`tanh`, deterministic `fourier`) have no scikit-learn equivalent. `rff` and `nystroem` are thin
+wrappers around scikit-learn's own `RBFSampler` and `Nystroem`, exposed through the same
+`Preprocessor` interface as every other method.
+```
+
 ## When to reach for PreTab
 
 PreTab is a good fit when any of the following is true.

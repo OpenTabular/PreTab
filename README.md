@@ -51,6 +51,10 @@ public, discoverable protocol.
 - **Composable and extensible.** Every strategy is a standalone transformer you can import,
   compose, or subclass; register your own representation and it behaves like a built-in.
 
+> **Tip:** See
+> [how this compares to scikit-learn's own preprocessing transformers](https://pretab.readthedocs.io/en/latest/getting_started/overview.html#how-this-compares-to-scikit-learns-preprocessing-transformers)
+> for what each one adds where scope overlaps.
+
 ## 🏃 Quickstart
 
 ```python
