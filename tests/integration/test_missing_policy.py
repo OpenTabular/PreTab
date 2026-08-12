@@ -53,7 +53,9 @@ def test_default_missing_policy_is_none():
 
 def test_missing_policy_survives_clone():
     p = _bspline(missing_policy="separate_state")
-    assert clone(p).missing_policy == "separate_state"
+    cloned = clone(p)
+    assert isinstance(cloned, Preprocessor)
+    assert cloned.missing_policy == "separate_state"
 
 
 def test_default_still_imputes(frame_with_nan, y):

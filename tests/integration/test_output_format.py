@@ -49,6 +49,7 @@ def test_default_output_format_is_dense(frame, y):
 def test_default_dict_blocks_are_dense(frame, y):
     p = _bspline().fit(frame, y)
     out = p.transform(frame)
+    assert isinstance(out, dict)
     assert all(isinstance(v, np.ndarray) for v in out.values())
 
 
@@ -59,14 +60,17 @@ def test_sparse_return_array_is_csr(frame, y):
     p = _bspline(output_format="sparse").fit(frame, y)
     arr = p.transform(frame, return_array=True)
     assert sp.issparse(arr)
+    assert isinstance(arr, sp.csr_matrix)
     assert arr.format == "csr"
     dense = _bspline().fit(frame, y).transform(frame, return_array=True)
+    assert isinstance(dense, np.ndarray)
     np.testing.assert_allclose(arr.toarray(), dense)
 
 
 def test_sparse_dict_blocks_are_csr(frame, y):
     p = _bspline(output_format="sparse").fit(frame, y)
     out = p.transform(frame)
+    assert isinstance(out, dict)
     assert all(sp.issparse(v) for v in out.values())
 
 
@@ -102,12 +106,14 @@ def test_auto_picks_dense_for_high_density(frame, y):
 def test_dtype_casts_output(frame, y):
     p = _bspline(dtype=np.float32).fit(frame, y)
     arr = p.transform(frame, return_array=True)
+    assert isinstance(arr, np.ndarray)
     assert arr.dtype == np.float32
 
 
 def test_dtype_none_keeps_float64(frame, y):
     p = _bspline().fit(frame, y)
     arr = p.transform(frame, return_array=True)
+    assert isinstance(arr, np.ndarray)
     assert arr.dtype == np.float64
 
 
@@ -115,6 +121,7 @@ def test_dtype_with_sparse(frame, y):
     p = _bspline(dtype=np.float32, output_format="sparse").fit(frame, y)
     arr = p.transform(frame, return_array=True)
     assert sp.issparse(arr)
+    assert isinstance(arr, sp.csr_matrix)
     assert arr.dtype == np.float32
 
 
@@ -124,6 +131,7 @@ def test_dtype_with_sparse(frame, y):
 def test_output_report_shape_and_keys(frame, y):
     p = _bspline().fit(frame, y)
     arr = p.transform(frame, return_array=True)
+    assert isinstance(arr, np.ndarray)
     report = p.output_report_
     assert set(report) == {
         "format",

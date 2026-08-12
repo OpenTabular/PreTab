@@ -106,6 +106,7 @@ def test_clone_preserves_unfrozen_via_sklearn_clone(frame, target):
 
     p = _make().fit(frame, target).freeze()
     fresh = clone(p)
+    assert isinstance(fresh, Preprocessor)
     assert fresh.is_frozen() is False
     fresh.set_params(output_dim=7)
     assert fresh.output_dim == 7

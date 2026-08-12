@@ -117,4 +117,5 @@ def test_build_column_transformer_prefixes_and_passthrough(make_config):
 def test_build_column_transformer_fits_and_transforms(make_config, sample_frame):
     ct = build_column_transformer(make_config(), ["age"], ["city"])
     out = ct.fit_transform(sample_frame, np.array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0]))
+    assert isinstance(out, np.ndarray)
     assert out.shape[0] == len(sample_frame)

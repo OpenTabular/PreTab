@@ -60,7 +60,9 @@ def test_explicit_param_overrides_preset():
 def test_preset_is_preserved_by_get_params_and_clone():
     pre = Preprocessor(preset="standard")
     assert pre.get_params()["preset"] == "standard"
-    assert clone(pre).get_params()["preset"] == "standard"
+    cloned = clone(pre)
+    assert isinstance(cloned, Preprocessor)
+    assert cloned.get_params()["preset"] == "standard"
 
 
 def test_invalid_preset_raises():

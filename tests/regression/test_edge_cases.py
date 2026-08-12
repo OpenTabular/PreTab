@@ -26,6 +26,7 @@ def _finite(array) -> bool:
 def test_constant_numeric_graceful_method_is_finite():
     X = pd.DataFrame({"const": np.full(50, 3.14), "vary": np.linspace(0.0, 1.0, 50)})
     out = Preprocessor(numerical_method="minmax").fit_transform(X, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert out.shape == (50, 2)
     assert _finite(out)
 
@@ -73,6 +74,7 @@ def test_duplicate_support_points_are_handled():
         placement_strategy="quantile",
     ).fit(X)
     out = p.transform(X, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert _finite(out)
     assert out.shape[0] == len(X)
 

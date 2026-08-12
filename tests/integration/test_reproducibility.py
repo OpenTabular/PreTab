@@ -128,6 +128,8 @@ def test_add_missing_indicator_appends_columns(data):
         .fit(X, y)
         .transform(X, return_array=True)
     )
+    assert isinstance(base, np.ndarray)
+    assert isinstance(with_ind, np.ndarray)
     assert with_ind.shape[1] > base.shape[1]
 
 

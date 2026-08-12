@@ -44,7 +44,9 @@ def test_estimate_output_shape_matches_transform(frame, y):
     n_rows, n_cols = pre.estimate_output_shape(frame)
     assert n_rows == frame.shape[0]
     assert n_cols == pre.total_output_dim_
-    assert pre.transform(frame, return_array=True).shape == (n_rows, n_cols)
+    out = pre.transform(frame, return_array=True)
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (n_rows, n_cols)
 
 
 def test_estimate_memory_is_rows_times_cols_times_itemsize(frame, y):

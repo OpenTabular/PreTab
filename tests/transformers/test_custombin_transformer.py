@@ -42,7 +42,7 @@ def test_custom_bin_transformer_input_types(bins, input_type):
         if input_type == "list"
         else np.array(raw)
         if input_type == "np"
-        else pd.DataFrame(raw, columns=["x"])
+        else pd.DataFrame(raw, columns=pd.Index(["x"]))
     )
     transformer = NumericBinningTransformer(output_dim=bins)
     Xt = transformer.fit_transform(X)

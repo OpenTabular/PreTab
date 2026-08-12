@@ -41,6 +41,7 @@ def test_format_output_array_returns_input_unchanged():
 def test_format_output_dict_builds_blocks():
     arr = np.arange(6).reshape(2, 3)
     out = format_output(arr, return_array=False, slices=[("x", 0, 3)])
+    assert isinstance(out, dict)
     assert set(out) == {"x"}
     np.testing.assert_array_equal(out["x"], arr)
 

@@ -126,6 +126,8 @@ def test_numerical_alias_matches_canonical_output(sample_data, alias, canonical)
     out_canon = Preprocessor(numerical_method=canonical, categorical_method="int").fit_transform(
         X, y, return_array=True
     )
+    assert isinstance(out_alias, np.ndarray)
+    assert isinstance(out_canon, np.ndarray)
     np.testing.assert_allclose(out_alias, out_canon)
 
 
@@ -139,6 +141,8 @@ def test_categorical_alias_matches_canonical_output(sample_data, alias, canonica
     out_canon = Preprocessor(numerical_method="minmax", categorical_method=canonical).fit_transform(
         X, y, return_array=True
     )
+    assert isinstance(out_alias, np.ndarray)
+    assert isinstance(out_canon, np.ndarray)
     np.testing.assert_allclose(out_alias, out_canon)
 
 

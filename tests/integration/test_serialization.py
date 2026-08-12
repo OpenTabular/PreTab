@@ -116,6 +116,7 @@ def test_round_trip_preserves_dtype_and_output_format(frame, target):
     restored = Preprocessor.from_spec(p.to_spec())
 
     out = restored.transform(frame, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert out.dtype == np.float32
     assert restored.dtype == "float32"
     assert restored.output_format == "dense"

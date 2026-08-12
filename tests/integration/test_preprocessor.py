@@ -82,6 +82,7 @@ def test_dict_output_shapes_add_up(sample_data):
     X, y = sample_data
     pre = Preprocessor()
     out = pre.fit_transform(X, y)
+    assert isinstance(out, dict)
     shapes = [v.shape for v in out.values()]
     assert all(s[0] == len(X) for s in shapes)
 
@@ -90,6 +91,7 @@ def test_dict_keys_reflect_column_names(sample_data):
     X, y = sample_data
     pre = Preprocessor()
     out = pre.fit_transform(X, y)
+    assert isinstance(out, dict)
     expected_prefixes = ["num_", "cat_"]
     for k in out:
         if "embedding" not in k:

@@ -49,7 +49,7 @@ def test_ple_transformer_multi_feature_shape(X_multi_feature, y_regression):
 
 def test_ple_invalid_task_raises(X_single_feature):
     with pytest.raises(ValueError, match="Unsupported task"):
-        transformer = PLETransformer(task="unsupported")
+        transformer = PLETransformer(task="unsupported")  # type: ignore[arg-type]
         transformer.fit(X_single_feature, np.linspace(0, 1, 10))
 
 

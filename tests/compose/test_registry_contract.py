@@ -173,6 +173,7 @@ def test_preprocessor_compatible_numerical_methods_fit_transform(name, spec):
     else:
         pre = Preprocessor(numerical_method=name, target_aware=False, placement_strategy="uniform")
     out = pre.fit_transform(X, y, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert out.shape[0] == 60
 
 
@@ -192,6 +193,7 @@ def test_preprocessor_compatible_categorical_methods_fit_transform(name, spec):
         placement_strategy="uniform",
     )
     out = pre.fit_transform(X, y, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert out.shape[0] == 60
 
 
