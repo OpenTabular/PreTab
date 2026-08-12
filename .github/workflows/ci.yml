@@ -53,10 +53,6 @@ jobs:
   typecheck:
     name: Type check (pyright)
     runs-on: ubuntu-latest
-    # Advisory (non-blocking) during the 1.0.0 restructure: much of the code
-    # carrying pre-existing pyright errors (ple.py, cubic.py, preprocessor.py)
-    # is rewritten in Phases 1-5. Flip to a required check before the RC (P14.4).
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
@@ -220,6 +216,7 @@ jobs:
             --cov-branch \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
+            --cov-fail-under=90 \
             -q
 
       - name: Upload coverage report
