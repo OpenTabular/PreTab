@@ -1,5 +1,4 @@
-"""End-to-end sanity check for PreTab, doubling as a CI smoke test and a
-five-minute artifact for reviewers. Run it with::
+"""End-to-end sanity check for PreTab, doubling as a CI smoke test script. Run it with::
 
     python scripts/quickstart.py
 
