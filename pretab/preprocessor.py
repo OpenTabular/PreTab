@@ -4,6 +4,7 @@ import json
 import os
 import time
 import warnings
+from typing import cast
 
 import numpy as np
 from scipy import sparse as sp
@@ -337,8 +338,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         scaling="minmax",
         cat_cutoff=0.03,
         treat_all_integers_as_numerical=False,
-        numerical_imputation="median",
-        categorical_imputation="most_frequent",
+        numerical_imputation: str | None = "median",
+        categorical_imputation: str | None = "most_frequent",
         add_missing_indicator=False,
         missing_policy=None,
         policy=None,
@@ -530,7 +531,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         transformed_X = self.column_transformer_.transform(X)
         if sp.issparse(transformed_X):
-            transformed_X = transformed_X.toarray()
+            transformed_X = transformed_X.toarray()  # type: ignore
         transformed_X = np.asarray(transformed_X)
         if self.dtype is not None:
             transformed_X = transformed_X.astype(self.dtype, copy=False)
@@ -1027,7 +1028,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     def clone_unfitted(self) -> "Preprocessor":
         """Return a fresh, unfitted, mutable copy carrying the same constructor params."""
-        return clone(self)
+        return cast("Preprocessor", clone(self))
 
     def refit(self, X, y=None, embeddings=None) -> "Preprocessor":
         """Fit a fresh copy on new data and return it, leaving ``self`` untouched.

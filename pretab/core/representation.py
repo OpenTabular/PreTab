@@ -10,6 +10,7 @@ column provenance assembled by the preprocessor.
 """
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from sklearn.utils.validation import check_is_fitted
@@ -213,6 +214,12 @@ class RepresentationSpecMixin:
     Transformers with bespoke needs override the ``_representation_*`` helper
     methods (or ``get_representation_spec`` itself).
     """
+
+    if TYPE_CHECKING:
+        # Attributes provided by the concrete estimator this mixin is combined with.
+        n_features_in_: int
+
+        def get_feature_names_out(self, input_features: Any = ...) -> Any: ...
 
     _representation_family: str = "unknown"
     _representation_component_kind: str = "basis"

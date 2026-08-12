@@ -152,7 +152,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         n_samples = x.shape[0]
         n_knots = len(K)
 
-        basis = [np.ones((n_samples, 1))] if self.include_bias else []
+        basis: list[np.ndarray] = [np.ones((n_samples, 1))] if self.include_bias else []
         basis.append(x)
 
         def omega(z, k):

@@ -219,7 +219,7 @@ def get_categorical_transformer_steps(
     return steps
 
 
-def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorConfig) -> Pipeline:
+def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorConfig) -> Pipeline | FeatureUnion:
     """Build the per-column :class:`~sklearn.pipeline.Pipeline` for one feature.
 
     ``method`` is the resolved method name; ``is_numerical`` selects the numerical

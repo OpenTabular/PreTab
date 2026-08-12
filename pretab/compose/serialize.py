@@ -17,6 +17,7 @@ center / bin locations, scalers, nested estimators) for exact reconstruction.
 
 import dataclasses
 import importlib
+from typing import Any, cast
 
 import numpy as np
 from sklearn.base import BaseEstimator
@@ -151,14 +152,14 @@ def _decode_mapping(mapping: dict) -> dict:
 
 
 def _decode_estimator(payload: dict):
-    cls = _resolve(payload["class"])
+    cls = cast(Any, _resolve(payload["class"]))
     obj = cls.__new__(cls)
     obj.__dict__.update(_decode_mapping(payload["state"]))
     return obj
 
 
 def _decode_dataclass(payload: dict):
-    cls = _resolve(payload["class"])
+    cls = cast(Any, _resolve(payload["class"]))
     fields = {k: _decode(v) for k, v in payload["fields"].items()}
     return cls(**fields)
 

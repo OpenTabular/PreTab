@@ -45,7 +45,7 @@ def validate_2d_allow_nan(X, *, allow_nan: bool = True, reset: bool, estimator):
     ensure_all_finite: Literal["allow-nan"] | bool = "allow-nan" if allow_nan else True
     X = check_array(
         X,
-        dtype=np.float64,
+        dtype=np.float64,  # type: ignore
         ensure_2d=True,
         ensure_all_finite=ensure_all_finite,  # type: ignore
     )

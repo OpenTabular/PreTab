@@ -51,7 +51,7 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         if self.model is not None:
             return self.model
         try:
-            from sentence_transformers import SentenceTransformer
+            from sentence_transformers import SentenceTransformer  # type: ignore
         except ImportError as e:
             raise OptionalDependencyError(
                 "sentence-transformers is not installed. Install it via `pip install sentence-transformers` or provide a preloaded model."

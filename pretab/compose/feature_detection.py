@@ -22,7 +22,7 @@ def to_dataframe(X, *, copy: bool = False) -> pd.DataFrame:
     if isinstance(X, dict):
         return pd.DataFrame(X)
     if isinstance(X, np.ndarray):
-        return pd.DataFrame(X, columns=[f"feature_{i}" for i in range(X.shape[1])])
+        return pd.DataFrame(X, columns=pd.Index([f"feature_{i}" for i in range(X.shape[1])]))
     return X.copy() if copy else X
 
 

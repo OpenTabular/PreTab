@@ -132,7 +132,7 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
         if n_landmarks >= n:
             return X
         if self.landmark_strategy == "kmeans":
-            return KMeans(n_clusters=n_landmarks, random_state=rng, n_init=10).fit(X).cluster_centers_
+            return KMeans(n_clusters=n_landmarks, random_state=rng, n_init=10).fit(X).cluster_centers_  # type: ignore
         idx = rng.choice(n, size=n_landmarks, replace=False)
         return X[idx]
 

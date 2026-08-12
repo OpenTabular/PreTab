@@ -169,7 +169,7 @@ class PLETransformer(
 
         X = check_array(
             X,
-            dtype=np.float64,
+            dtype=np.float64,  # type: ignore
             ensure_2d=True,
             ensure_all_finite=True,
         )
@@ -236,7 +236,7 @@ class PLETransformer(
 
         X = check_array(
             X,
-            dtype=np.float64,
+            dtype=np.float64,  # type: ignore
             ensure_2d=True,
             ensure_all_finite=True,
         )

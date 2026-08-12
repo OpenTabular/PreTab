@@ -163,4 +163,4 @@ class NystroemFeaturesTransformer(BasePreTabTransformer):
         return np.asarray(self.nystroem_.transform(X))
 
     def _output_sizes(self) -> list[int]:
-        return [self.nystroem_.components_.shape[0]]
+        return [np.asarray(self.nystroem_.components_).shape[0]]

@@ -105,9 +105,9 @@ def to_dataframe_output(array, columns, container):
     if container == "pandas":
         import pandas as pd
 
-        return pd.DataFrame(array, columns=columns)
+        return pd.DataFrame(array, columns=pd.Index(columns))
     try:
-        import polars as pl
+        import polars as pl  # type: ignore
     except ImportError as exc:  # pragma: no cover - exercised only without polars
         raise OptionalDependencyError(
             "set_output(transform='polars') requires the optional 'polars' package. "

@@ -146,7 +146,7 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
         x = np.asarray(x).reshape(-1, 1)
         n_samples = x.shape[0]
 
-        X = [np.ones((n_samples, 1))] if self.include_bias else []
+        X: list[np.ndarray] = [np.ones((n_samples, 1))] if self.include_bias else []
         X.append(x)
         X.append(x**2)
         X.append(x**3)
