@@ -8,7 +8,7 @@ documentation:
 
 **[Contributing Guide](https://pretab.readthedocs.io/en/latest/developer_guide/contributing.html)**
 
-Quick start for the impatient:
+Quick start:
 
 ```bash
 git clone https://github.com/OpenTabular/PreTab
