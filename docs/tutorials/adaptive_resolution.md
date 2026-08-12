@@ -63,7 +63,10 @@ The same switch works at the `Preprocessor` level, so every eligible column adap
 independently.
 
 ```python
+import pandas as pd
 from pretab import Preprocessor
+
+df = pd.DataFrame({"simple": simple, "wiggly": wiggly})
 
 pre = Preprocessor(
     numerical_method="bspline",
@@ -71,7 +74,7 @@ pre = Preprocessor(
     min_output_dim=5,
     max_output_dim=15,
 )
-pre.fit(df, y)
+pre.fit(df, wiggly)
 pre.get_feature_info()
 ```
 

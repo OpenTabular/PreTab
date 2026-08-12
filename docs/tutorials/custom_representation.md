@@ -111,6 +111,13 @@ register_representation(
     supports_adaptive_resolution=False,
 )
 
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(0)
+df = pd.DataFrame({"x": rng.uniform(-3, 3, size=500)})
+y = np.cos(df["x"] * 2) + rng.normal(0, 0.1, size=500)
+
 pre = Preprocessor(numerical_method="chebyshev", degree=8)
 X2 = pre.fit_transform(df, y)
 ```
