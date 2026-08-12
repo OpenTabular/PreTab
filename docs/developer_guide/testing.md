@@ -33,6 +33,7 @@ directory.
 | `tests/extension/` | The public extensibility surface and conformance. |
 | `tests/integration/` | End-to-end `Preprocessor` and pipeline behaviour. |
 | `tests/regression/` | Pinned outputs that guard against silent numerical drift. |
+| `tests/doc_snippets/` | Executes the `docs/tutorials/*.md` code fences, so the tutorials cannot silently rot. |
 
 ```{note}
 Regression tests pin known-good output. If one fails after a deliberate change to a
@@ -85,6 +86,7 @@ Run the full local gate, which mirrors CI.
 just test     # tests with coverage
 just check    # lint, format, type-check across all files
 just docs     # strict docs build
+just quickstart  # end-to-end sanity check: same script CI's smoke job runs
 ```
 
 ## Where to go next

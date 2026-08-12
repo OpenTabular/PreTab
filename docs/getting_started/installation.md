@@ -55,6 +55,14 @@ poetry install
 poetry run pre-commit install --hook-type commit-msg --hook-type pre-commit --hook-type pre-push
 ```
 
+To check that everything works end to end, run the quickstart script. It exercises mixed
+preprocessing, feature lineage, leakage-safe cross-fitting, serialization, and more in a few
+seconds, and doubles as the reviewer smoke test:
+
+```bash
+just quickstart   # or: python scripts/quickstart.py
+```
+
 To work on the documentation, also install the docs group:
 
 ```bash
