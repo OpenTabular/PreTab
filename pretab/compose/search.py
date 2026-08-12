@@ -8,12 +8,16 @@ space is the ``numerical_method`` axis, and every fold uses the preprocessor's
 native array output so no target leaks across the train/validation split.
 """
 
+from collections.abc import Callable
+from typing import cast
+
 import numpy as np
 from sklearn.base import BaseEstimator, clone, is_classifier
 from sklearn.metrics import check_scoring
-from sklearn.model_selection import check_cv
+from sklearn.model_selection import BaseCrossValidator, check_cv
 from sklearn.utils.validation import check_is_fitted
 
+from ..core._typing import PredictorLike
 from ..exceptions import InvalidParamError
 from ..preprocessor import Preprocessor
 
@@ -84,7 +88,7 @@ class RepresentationSearchCV(BaseEstimator):
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
         y_arr = np.asarray(y).ravel()
         n_samples = X.shape[0] if hasattr(X, "shape") else len(X)
-        cv = check_cv(self.cv, y_arr, classifier=is_classifier(self.estimator))
+        cv = cast(BaseCrossValidator, check_cv(self.cv, y_arr, classifier=is_classifier(self.estimator)))
 
         cv_results: dict[str, float] = {}
         best_score = -np.inf
@@ -93,10 +97,10 @@ class RepresentationSearchCV(BaseEstimator):
             fold_scores = []
             for train_idx, test_idx in cv.split(np.zeros(n_samples), y_arr):
                 pre = self._make_preprocessor(method)
-                est = clone(self.estimator)
+                est = cast(PredictorLike, clone(self.estimator))
                 x_train = pre.fit_transform(_row_subset(X, train_idx), y_arr[train_idx], return_array=True)
                 est.fit(x_train, y_arr[train_idx])
-                scorer = check_scoring(est, scoring=self.scoring)
+                scorer = cast("Callable[..., float]", check_scoring(est, scoring=self.scoring))
                 x_test = pre.transform(_row_subset(X, test_idx), return_array=True)
                 fold_scores.append(scorer(est, x_test, y_arr[test_idx]))
             mean_score = float(np.mean(fold_scores))
@@ -110,7 +114,7 @@ class RepresentationSearchCV(BaseEstimator):
         self.best_score_ = best_score
         self.best_preprocessor_ = self._make_preprocessor(best_method)
         x_all = self.best_preprocessor_.fit_transform(X, y_arr, return_array=True)
-        self.best_estimator_ = clone(self.estimator).fit(x_all, y_arr)
+        self.best_estimator_ = cast(PredictorLike, clone(self.estimator)).fit(x_all, y_arr)
         return self
 
     def predict(self, X):
@@ -123,5 +127,5 @@ class RepresentationSearchCV(BaseEstimator):
         """Score the best refit estimator on ``(X, y)``."""
         check_is_fitted(self, "best_estimator_")
         x = self.best_preprocessor_.transform(X, return_array=True)
-        scorer = check_scoring(self.best_estimator_, scoring=self.scoring)
+        scorer = cast("Callable[..., float]", check_scoring(self.best_estimator_, scoring=self.scoring))
         return scorer(self.best_estimator_, x, np.asarray(y).ravel())

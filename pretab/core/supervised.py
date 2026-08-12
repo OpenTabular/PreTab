@@ -16,6 +16,7 @@ import contextvars
 import sys
 import warnings
 from dataclasses import replace
+from typing import cast
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin, clone
@@ -28,6 +29,7 @@ from ..exceptions import (
     LeakageWarning,
     PretabDataError,
 )
+from ._typing import TransformerLike
 from .representation import RepresentationSpecMixin
 
 __all__ = ["CrossFittedTransformer", "in_controlled_context", "warn_target_leakage"]
@@ -143,7 +145,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):
             raise PretabDataError(f"X and y must have same length. Got {len(X_arr)} and {len(y_arr)}")
-        estimator = clone(self.transformer)
+        estimator = cast(TransformerLike, clone(self.transformer))
         token = _cross_fit_active.set(True)
         try:
             estimator.fit(X_arr, y_arr)
@@ -175,7 +177,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         token = _cross_fit_active.set(True)
         try:
             for train_idx, test_idx in splitter.split(X_arr, y_arr):
-                fold = clone(self.transformer)
+                fold = cast(TransformerLike, clone(self.transformer))
                 fold.fit(X_arr[train_idx], y_arr[train_idx])
                 fold_out = np.asarray(fold.transform(X_arr[test_idx]))
                 if fold_out.shape[1] != width:
@@ -197,8 +199,9 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     def get_representation_spec(self, input_features=None):
         """Return the wrapped spec, flagged as cross-fitted."""
         check_is_fitted(self, "estimator_")
-        if hasattr(self.estimator_, "get_representation_spec"):
-            base = self.estimator_.get_representation_spec(input_features)
+        spec_fn = getattr(self.estimator_, "get_representation_spec", None)
+        if spec_fn is not None:
+            base = spec_fn(input_features)
             return replace(base, uses_target=True, cross_fitted=True, n_folds=int(self.n_folds))
         return super().get_representation_spec(input_features)
 
