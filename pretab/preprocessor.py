@@ -19,6 +19,7 @@ from .compose.inspection import (
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
+    clean_feature_names,
     get_output_slices,
 )
 from .compose.output import compute_output_report, format_output, to_dataframe_output
@@ -648,7 +649,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
 
         check_is_fitted(self)
-        return self.column_transformer_.get_feature_names_out(input_features)
+        raw_names = self.column_transformer_.get_feature_names_out(input_features)
+        return np.array(clean_feature_names(self.column_transformer_, raw_names))
 
     def get_feature_lineage(self):
         """Return per-output-column provenance for the fitted preprocessor.

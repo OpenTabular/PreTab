@@ -18,6 +18,7 @@ __all__ = [
     "build_feature_info",
     "build_feature_lineage",
     "build_transformer_summary",
+    "clean_feature_names",
     "get_output_slices",
 ]
 
@@ -41,6 +42,37 @@ def get_output_slices(column_transformer, X):
         slices.append((name, start, width))
         start += width
     return slices
+
+
+def clean_feature_names(column_transformer, names):
+    """Collapse the per-feature name that sklearn's ColumnTransformer duplicates.
+
+    Each per-column step is named ``f"{kind}_{feature}"`` (see ``compose/factory.py``),
+    and every PreTab transformer's own ``get_feature_names_out`` already bakes the
+    input feature name into each output column, so sklearn's default
+    ``f"{step}__{inner}"`` naming doubles it, e.g. ``"num_age__age_bs0"``. This
+    collapses that back to ``"num_age_bs0"``, leaving passthrough/remainder columns
+    and any name it cannot confidently match unchanged.
+    """
+    step_to_feature = {
+        name: columns[0]
+        for name, _transformer, columns in column_transformer.transformers_
+        if name != "remainder" and len(columns) == 1
+    }
+    cleaned = []
+    for raw in names:
+        raw = str(raw)
+        step_name, sep, inner_name = raw.partition("__")
+        feature = step_to_feature.get(step_name)
+        if not sep or feature is None:
+            cleaned.append(raw)
+            continue
+        if inner_name == feature or inner_name.startswith(f"{feature}_"):
+            kind_prefix = step_name[: -(len(feature) + 1)] if step_name.endswith(f"_{feature}") else ""
+            cleaned.append(f"{kind_prefix}_{inner_name}" if kind_prefix else inner_name)
+        else:
+            cleaned.append(raw)
+    return cleaned
 
 
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
@@ -227,7 +259,9 @@ def build_feature_lineage(column_transformer):
     its source feature(s), representation family, and component, covering 100%
     of the transformed columns in ``get_feature_names_out`` order.
     """
-    output_names = [str(name) for name in column_transformer.get_feature_names_out()]
+    output_names = clean_feature_names(
+        column_transformer, [str(name) for name in column_transformer.get_feature_names_out()]
+    )
     output_indices = column_transformer.output_indices_
     feature_names_in = getattr(column_transformer, "feature_names_in_", None)
     records = []
