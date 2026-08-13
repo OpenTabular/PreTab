@@ -79,6 +79,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Refactor
 
+- **preprocessor**: collapse the duplicated feature name in `Preprocessor` output column names (`get_feature_names_out()`, `return_array=True`, `set_output(transform="pandas"|"polars")`, and `get_feature_lineage()`); a column previously named `num_annual_income__annual_income_ncs0` is now `num_annual_income_ncs0`. Dict-mode output keys (`num_<col>` / `cat_<col>`) and standalone transformer usage outside `Preprocessor` are unaffected
 - **splines**: reformulate `ThinPlateSplineTransformer` as a multivariate low-rank thin-plate regression spline (landmark selection + eigen/Nyström basis via `n_components` / `landmark_strategy` / `rank_strategy`, replacing the univariate `output_dim` form)
 - **transformers**: rename `CustomBinTransformer` → `NumericBinningTransformer`, `CyclicalTimeTransformer` → `PeriodicEncodingTransformer`, and `CubicSplineTransformer` → `CubicRegressionSplineTransformer` (intention-revealing public names)
 - **transformers**: remove `LagFeatureTransformer` and `RollingStatsTransformer` (row-count-changing time-series utilities outside the tabular scope)
