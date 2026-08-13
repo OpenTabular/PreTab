@@ -194,6 +194,19 @@ def test_get_feature_names_out_before_fit_raises():
         Preprocessor().get_feature_names_out()
 
 
+def test_get_feature_names_out_does_not_duplicate_feature_name(sample_data):
+    """Regression guard: output names must not repeat as num_<feat>__<feat>_... ."""
+    X, y = sample_data
+    pre = Preprocessor()
+    pre.fit(X, y)
+    names = list(pre.get_feature_names_out())
+    assert names
+    assert all("__" not in name for name in names)
+    assert "num_num1_ple_piece0" in names
+    lineage_names = [record.output_feature for record in pre.get_feature_lineage()]
+    assert lineage_names == names
+
+
 def test_lowercase_and_none_method_resolution(sample_data):
     X, y = sample_data
     # Mixed-case / None methods are resolved at fit time, not stored on the instance.

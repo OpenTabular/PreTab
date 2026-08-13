@@ -1,12 +1,14 @@
 """Unit tests for :mod:`pretab.compose.inspection`."""
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from pretab.compose.factory import build_column_transformer
 from pretab.compose.inspection import (
     build_feature_info,
     build_transformer_summary,
+    clean_feature_names,
     get_output_slices,
 )
 
@@ -53,3 +55,34 @@ def test_build_transformer_summary_has_header_and_rows():
 
 def test_build_transformer_summary_empty_returns_empty():
     assert build_transformer_summary({}, {}, {}) == []
+
+
+def test_clean_feature_names_collapses_1_to_1_step(fitted_ct):
+    ct, _ = fitted_ct
+    raw = [str(name) for name in ct.get_feature_names_out()]
+    assert any("__" in name for name in raw), "sanity: sklearn's default naming should duplicate here"
+    assert clean_feature_names(ct, raw) == ["num_age", "cat_city"]
+
+
+def test_clean_feature_names_handles_underscore_in_feature_name(make_config):
+    # "annual_income" itself contains "_", so a naive string split on "_" would
+    # mis-collapse this; the fix must use the ColumnTransformer's own column metadata.
+    df = pd.DataFrame({"annual_income": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]})
+    ct = build_column_transformer(make_config(numerical_method="bspline", output_dim=5), ["annual_income"], [])
+    ct.fit(df)
+    raw = [str(name) for name in ct.get_feature_names_out()]
+    cleaned = clean_feature_names(ct, raw)
+    assert all("__" not in name for name in cleaned)
+    assert all(name.startswith("num_annual_income_bs") for name in cleaned)
+
+
+def test_clean_feature_names_leaves_unmatched_names_untouched(fitted_ct):
+    ct, _ = fitted_ct
+    untouched = ["remainder__extra", "totally_unrelated_name"]
+    assert clean_feature_names(ct, untouched) == untouched
+
+
+def test_clean_feature_names_leaves_non_matching_inner_name_untouched(fitted_ct):
+    ct, _ = fitted_ct
+    raw = ["num_age__somethingelse"]
+    assert clean_feature_names(ct, raw) == raw
