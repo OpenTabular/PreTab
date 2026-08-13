@@ -1,23 +1,21 @@
 # Preprocessing and representation
 
 PreTab draws a deliberate line between two ideas that are often blurred together:
-*preprocessing* and *representation*. Understanding the distinction explains why the library
-is shaped the way it is, and it is the key to using it well.
+*preprocessing* and *representation*. The distinction shapes the whole library.
 
 ## Preprocessing prepares a column
 
-Preprocessing makes a column safe and comparable for a model. It does not change what the
-column *means*, only its scale, dtype, or completeness. Standardizing to zero mean and unit
-variance, imputing a missing value, casting to float, and one-hot encoding a category are all
-preprocessing. Each keeps a one-to-one relationship with the original signal.
+Preprocessing makes a column safe and comparable for a model, without changing what it
+*means*. Standardizing to zero mean and unit variance, imputing a missing value, casting to
+float, and one-hot encoding a category are all preprocessing: each keeps a one-to-one
+relationship with the original signal.
 
-## Representation changes what the model can see
+## Representation exposes structure
 
 A representation expands a column into a new basis that exposes structure a plain estimator
-cannot weight on its own. A single numeric column becomes a set of spline coefficients, a
-bank of radial bumps, a stack of piecewise-linear bins, or a pair of sine and cosine values.
-The model now has several coordinates to weight where it previously had one slope, so it can
-express curves, thresholds, saturation, and periodicity.
+cannot weight on its own: spline coefficients, a bank of radial bumps, piecewise-linear bins,
+or a sine/cosine pair. The model gets several coordinates to weight instead of one slope, so
+it can express curves, thresholds, saturation, and periodicity.
 
 ```{note}
 This is the load-bearing idea in PreTab: the model is often fine, the *representation* is
@@ -27,23 +25,24 @@ on raw columns cannot.
 
 ## Why the distinction matters
 
-Keeping the two separate has practical consequences that show up all over the API.
-
-- **Scaling composes with representation.** A numeric column is typically imputed and scaled
-  first (preprocessing), then expanded into a basis (representation). The `Preprocessor`
-  wires this order for you.
-- **Representations are self-describing.** Because an expansion is a real modelling choice,
-  every fitted representation carries a typed [`RepresentationSpec`](../api/preprocessor.rst)
-  and per-output-column [lineage](outputs_and_inspection.md), so you always know which input
-  and which component produced each output column.
+- **Scaling composes with representation.** A numeric column is imputed and scaled first
+  (preprocessing), then expanded into a basis (representation). `Preprocessor` wires this
+  order for you.
+- **Representations are self-describing.** Every fitted representation carries a typed
+  [`RepresentationSpec`](../api/preprocessor.rst) and per-output-column
+  [lineage](outputs_and_inspection.md), so you always know which input and which component
+  produced each output column.
 - **Some representations use the target.** Placing bins or knots where the target actually
-  changes is a supervised decision, which is why leakage safety is a first-class concern. See
-  [Target awareness](target_awareness.md).
+  changes is a supervised decision, which is why leakage safety is a first-class concern.
+
+```{warning}
+Target-aware placement can leak information if fit outside a proper train/validation split.
+See [Target awareness](target_awareness.md) for how PreTab guards against this.
+```
 
 ## The shared vocabulary
 
-Every representation family in PreTab is described with the same small set of terms. Learning
-them once pays off across the whole catalogue.
+Every representation family is described with the same small set of terms.
 
 `family`
 : The kind of representation, for example spline, feature map, binning, periodic, or
@@ -67,11 +66,11 @@ them once pays off across the whole catalogue.
 
 ## The intermediate representation
 
-All of this is captured in one typed object, the `RepresentationSpec`, which is the common
-intermediate form across every family. It records the family, input and output features,
-scope, supervision, width, degree, and locations, and it round-trips to and from a plain
-dict. Feature lineage then maps each individual output column back to its source. Together
-they make a fitted PreTab pipeline fully inspectable and serializable.
+Every family's fitted state is captured in one typed object, `RepresentationSpec`, the common
+form across the whole catalogue. It records the family, input and output features, scope,
+supervision, width, degree, and locations, and round-trips to and from a plain dict. Feature
+lineage then maps each output column back to its source, making a fitted PreTab pipeline
+fully inspectable and serializable.
 
 ```python
 spec = transformer.get_representation_spec()
