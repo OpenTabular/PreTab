@@ -48,21 +48,32 @@ feature-type detection.
 ## Presets
 
 Presets are transparent, named bundles of parameters for common intents. They set the same
-knobs you could set by hand, so nothing is hidden.
+knobs you could set by hand, so nothing is hidden, and each one resolves to a fixed,
+documented set of values:
 
-| Preset | Intent |
-| --- | --- |
-| `"standard"` | A balanced, general-purpose configuration. |
-| `"expanded"` | Wider, more expressive representations. |
-| `"adaptive"` | Data-driven per-feature width within bounds. |
+| Preset | `numerical_method` | `categorical_method` | `output_dim` | `adaptive` | `max_output_dim` |
+| --- | --- | --- | --- | --- | --- |
+| `"standard"` | `"ple"` | `"int"` | `7` | `False` | `10` |
+| `"expanded"` | `"ple"` | `"one-hot"` | `16` | `False` | `10` |
+| `"adaptive"` | `"ple"` | `"int"` | `7` | `True` | `16` |
 
 ```python
-pre = Preprocessor(preset="standard")
+standard = Preprocessor(preset="standard")
+expanded = Preprocessor(preset="expanded")
+
+standard.get_resolved_config()["categorical_method"]   # "int": compact integer codes
+expanded.get_resolved_config()["categorical_method"]    # "one-hot": one column per category
+expanded.get_resolved_config()["output_dim"]             # 16: wider representations than "standard"
 ```
+
+So `"standard"` is the balanced default (PLE numerics, integer-coded categoricals, `output_dim=7`),
+`"expanded"` widens the representation and one-hot-encodes categoricals instead, and
+`"adaptive"` lets each feature pick its own width between `min_output_dim` and `max_output_dim`
+rather than using a fixed `output_dim`.
 
 ```{tip}
 A preset is a starting point, not a lock. Any parameter you pass alongside a preset overrides
-the preset's value for that knob.
+the preset's value for that knob, for example `Preprocessor(preset="expanded", output_dim=32)`.
 ```
 
 ## Reading the resolved configuration
