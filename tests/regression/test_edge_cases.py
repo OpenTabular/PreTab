@@ -85,6 +85,7 @@ def test_duplicate_support_points_are_handled():
 def test_missing_values_imputed_by_default():
     X = pd.DataFrame({"x": [1.0, 2.0, np.nan, 4.0, 5.0, 6.0]})
     out = Preprocessor(numerical_method="minmax").fit_transform(X, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert not np.isnan(out).any()
 
 

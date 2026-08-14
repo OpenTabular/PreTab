@@ -62,6 +62,7 @@ def test_default_still_imputes(frame_with_nan, y):
     # missing_policy=None keeps numerical_imputation="median" authoritative.
     p = Preprocessor(numerical_method="minmax").fit(frame_with_nan, y)
     out = p.transform(frame_with_nan, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert not np.isnan(out).any()
 
 
@@ -82,6 +83,7 @@ def test_error_policy_raises_at_transform(clean_frame, frame_with_nan, y):
 def test_error_policy_passes_when_clean(clean_frame, y):
     p = _bspline(missing_policy="error").fit(clean_frame, y)
     out = p.transform(clean_frame, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert np.isfinite(out).all()
 
 
@@ -92,6 +94,7 @@ def test_propagate_lets_nan_through(frame_with_nan, y):
     # MinMaxScaler maintains NaNs at transform; with no imputer they survive.
     p = Preprocessor(numerical_method="minmax", missing_policy="propagate").fit(frame_with_nan, y)
     out = p.transform(frame_with_nan, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert np.isnan(out).any()
 
 
@@ -101,6 +104,7 @@ def test_propagate_lets_nan_through(frame_with_nan, y):
 def test_impute_removes_nan(frame_with_nan, y):
     p = Preprocessor(numerical_method="minmax", missing_policy="impute").fit(frame_with_nan, y)
     out = p.transform(frame_with_nan, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert not np.isnan(out).any()
 
 
@@ -118,6 +122,7 @@ def test_impute_with_indicator_appends_columns(frame_with_nan, y):
     withind = Preprocessor(numerical_method="minmax", missing_policy="impute_with_indicator").fit(frame_with_nan, y)
     assert withind.total_output_dim_ > plain.total_output_dim_
     out = withind.transform(frame_with_nan, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert not np.isnan(out).any()
 
 
@@ -134,6 +139,7 @@ def test_separate_state_emits_missing_column(frame_with_nan, y):
 def test_separate_state_output_is_finite(frame_with_nan, y):
     p = _bspline(missing_policy="separate_state").fit(frame_with_nan, y)
     out = p.transform(frame_with_nan, return_array=True)
+    assert isinstance(out, np.ndarray)
     assert np.isfinite(out).all()
 
 
