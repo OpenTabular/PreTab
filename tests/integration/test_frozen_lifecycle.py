@@ -74,9 +74,11 @@ def test_refit_returns_new_object_and_leaves_original(frame, target):
     assert refit.is_frozen() is False
     # Original stays frozen and untouched.
     assert p.is_frozen() is True
-    assert np.array_equal(
-        p.transform(frame, return_array=True), refit.transform(frame, return_array=True), equal_nan=True
-    )
+    out_frozen = p.transform(frame, return_array=True)
+    out_refit = refit.transform(frame, return_array=True)
+    assert isinstance(out_frozen, np.ndarray)
+    assert isinstance(out_refit, np.ndarray)
+    assert np.array_equal(out_frozen, out_refit, equal_nan=True)
 
 
 def test_mark_stale(frame, target):

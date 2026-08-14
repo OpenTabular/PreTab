@@ -313,7 +313,7 @@ class LightGBMLocationSelector(BaseLocationSelector):
     @staticmethod
     def _import_lightgbm():
         try:
-            import lightgbm as lgb
+            import lightgbm as lgb  # type: ignore[import-untyped]
         except ImportError as exc:
             raise OptionalDependencyError(
                 "LightGBMLocationSelector requires the optional 'lightgbm' dependency. "
