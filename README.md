@@ -396,5 +396,3 @@ and our
 - **Issues:** [GitHub Issues](https://github.com/OpenTabular/PreTab/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/OpenTabular/PreTab/discussions)
 - **Security:** see [SECURITY.md](./SECURITY.md) for how to report a vulnerability privately.
-
-
