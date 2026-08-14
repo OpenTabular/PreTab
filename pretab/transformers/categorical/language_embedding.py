@@ -133,9 +133,5 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         check_is_fitted(self, ["n_features_in_", "embedding_dim_"])
         if input_features is None:
             input_features = [f"x{i}" for i in range(self.n_features_in_)]
-        names = [
-            f"{col}_emb{j}"
-            for col in input_features
-            for j in range(self.embedding_dim_)
-        ]
+        names = [f"{col}_emb{j}" for col in input_features for j in range(self.embedding_dim_)]
         return np.asarray(names, dtype=object)
