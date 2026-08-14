@@ -14,7 +14,7 @@ helpers leaves knot positions numerically unchanged.
 
 import numpy as np
 
-from .exceptions import invalid_param_error
+from ..exceptions import invalid_param_error
 
 __all__ = [
     "basis_to_knots",
@@ -72,14 +72,15 @@ def spanning_knots(x: np.ndarray, n_knots: int, strategy: str = "uniform") -> np
     if strategy == "quantile":
         return np.quantile(x, np.linspace(0, 1, n_knots))
     raise invalid_param_error(
-        "spanning_knots", "strategy", strategy,
-        "must be 'uniform' or 'quantile'", valid={"quantile", "uniform"},
+        "spanning_knots",
+        "strategy",
+        strategy,
+        "must be 'uniform' or 'quantile'",
+        valid={"quantile", "uniform"},
     )
 
 
-def generate_internal_knots(
-    x: np.ndarray, n_knots: int, strategy: str = "quantile"
-) -> np.ndarray:
+def generate_internal_knots(x: np.ndarray, n_knots: int, strategy: str = "quantile") -> np.ndarray:
     """Generate internal knots for one feature using ``strategy``.
 
     Parameters
@@ -96,8 +97,11 @@ def generate_internal_knots(
     if strategy == "quantile":
         return quantile_knots(x, n_knots)
     raise invalid_param_error(
-        "generate_internal_knots", "strategy", strategy,
-        "must be 'uniform' or 'quantile'", valid={"quantile", "uniform"},
+        "generate_internal_knots",
+        "strategy",
+        strategy,
+        "must be 'uniform' or 'quantile'",
+        valid={"quantile", "uniform"},
     )
 
 

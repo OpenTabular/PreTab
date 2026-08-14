@@ -1,8 +1,8 @@
 import numpy as np
 from scipy.special import expit
 
-from ...core.params import UNSET
-from ._base import BaseCenterExpansion
+from ...core.parameters import UNSET
+from .base import BaseCenterExpansion
 
 
 class SigmoidExpansionTransformer(BaseCenterExpansion):
@@ -78,6 +78,7 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
     """
 
     _feature_suffix_value = "sigmoid"
+    _representation_family = "sigmoid"
 
     def __init__(
         self,

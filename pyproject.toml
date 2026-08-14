@@ -13,7 +13,7 @@ dynamic = ["dependencies"]
 
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=2.0"]
-knots = ["lightgbm>=4.0"]
+lightgbm = ["lightgbm>=4.0"]
 all = ["sentence-transformers>=2.0", "lightgbm>=4.0"]
 
 [project.urls]
@@ -60,6 +60,9 @@ accessible-pygments = ">=0.0.4"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+  "smoke: fast end-to-end sanity checks run as a dedicated CI gate",
+]
 norecursedirs = [
   "dev",
   "docs",
@@ -67,6 +70,9 @@ norecursedirs = [
   ".venv",
 ]
 filterwarnings = [
+  # An unexpected LeakageWarning fails the suite; modules that fit supervised
+  # transformers directly opt out via tests/conftest.py.
+  "error::pretab.exceptions.LeakageWarning",
   # scikit-learn / scipy deprecation noise
   "ignore::DeprecationWarning:sklearn",
   "ignore::DeprecationWarning:scipy",

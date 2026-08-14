@@ -93,6 +93,12 @@ X = pre.fit_transform(df, y)
 ::::{grid} 1 1 3 3
 :gutter: 2
 
+:::{grid-item-card} Overview
+:link: getting_started/overview
+:link-type: doc
+What PreTab is, what it is not, and where it fits.
+:::
+
 :::{grid-item-card} Installation
 :link: getting_started/installation
 :link-type: doc
@@ -105,19 +111,19 @@ Install PreTab from PyPI or from source.
 Fit and transform a dataset in a few lines.
 :::
 
-:::{grid-item-card} End-to-end example
-:link: getting_started/end_to_end
+:::{grid-item-card} Nonlinear regression
+:link: tutorials/nonlinear_regression
 :link-type: doc
 See PreTab lift a linear model, baseline vs. PreTab.
 :::
 
-:::{grid-item-card} Tutorials
-:link: tutorials/sklearn_pipeline
+:::{grid-item-card} Representations
+:link: representations/overview
 :link-type: doc
-Classification and full `sklearn` pipelines.
+The full catalogue of splines, feature maps, and encoders.
 :::
 
-:::{grid-item-card} API Reference
+:::{grid-item-card} API reference
 :link: api/index
 :link-type: doc
 The `Preprocessor` and every transformer.

@@ -50,6 +50,11 @@ jobs:
       - name: Install package and docs dependencies
         run: poetry install --with docs
 
+      # pandoc is required once the P14.1 notebook tutorials (nbsphinx / myst-nb)
+      # land; installing it now keeps the strict build forward-compatible.
+      - name: Install pandoc
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+
       - name: Build Sphinx docs
         run: poetry run sphinx-build -b html docs docs/_build/html -W --keep-going
 

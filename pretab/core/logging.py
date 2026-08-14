@@ -8,7 +8,7 @@ application (such as DeepTab) keeps full control of handlers and levels. Use
 
 import logging
 
-from .exceptions import PretabWarning  # re-exported for convenience
+from ..exceptions import PretabWarning  # re-exported for convenience
 
 __all__ = [
     "PretabWarning",
@@ -36,9 +36,7 @@ def get_logger(name: str = "pretab") -> logging.Logger:
 
 def _has_real_handler(logger: logging.Logger) -> bool:
     """Whether ``logger`` already carries a handler other than ``NullHandler``."""
-    return any(
-        not isinstance(handler, logging.NullHandler) for handler in logger.handlers
-    )
+    return any(not isinstance(handler, logging.NullHandler) for handler in logger.handlers)
 
 
 def set_verbosity(level: int = 1) -> None:
@@ -77,4 +75,3 @@ def configure_logging(level: int = 1, handler: "logging.Handler | None" = None) 
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     _LOGGER.addHandler(handler)
-

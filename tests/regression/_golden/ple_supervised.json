@@ -1,0 +1,31 @@
+{
+  "shape": [
+    200,
+    23
+  ],
+  "feature_names": [
+    "num_num_linear_ple_piece0",
+    "num_num_linear_ple_piece1",
+    "num_num_linear_ple_piece2",
+    "num_num_linear_ple_piece3",
+    "num_num_linear_ple_piece4",
+    "num_num_normal_ple_piece0",
+    "num_num_normal_ple_piece1",
+    "num_num_normal_ple_piece2",
+    "num_num_normal_ple_piece3",
+    "num_num_normal_ple_piece4",
+    "num_num_skewed_ple_piece0",
+    "num_num_skewed_ple_piece1",
+    "num_num_skewed_ple_piece2",
+    "num_num_skewed_ple_piece3",
+    "num_num_skewed_ple_piece4",
+    "cat_cat_str_alpha",
+    "cat_cat_str_beta",
+    "cat_cat_str_gamma",
+    "cat_cat_int_0",
+    "cat_cat_int_1",
+    "cat_cat_int_2",
+    "cat_cat_int_3",
+    "cat_cat_int_4"
+  ]
+}

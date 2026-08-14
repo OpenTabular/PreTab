@@ -20,11 +20,6 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
-from ...core.exceptions import (
-    IncompatibleParamsError,
-    InvalidParamError,
-    PretabDataError,
-)
 from ...core.knots import (
     basis_to_knots,
     generate_internal_knots,
@@ -32,8 +27,14 @@ from ...core.knots import (
     select_knots,
     uniform_knots,
 )
-from ...core.params import UNSET, validate_placement
-from .knot_selectors import BaseKnotSelector, build_knot_selector
+from ...core.parameters import UNSET, validate_placement
+from ...core.supervised import warn_target_leakage
+from ...exceptions import (
+    IncompatibleParamsError,
+    InvalidParamError,
+    PretabDataError,
+)
+from ...placement.adapters import SplinePlacementAdapter
 
 
 class BaseSplineTransformer(BasePreTabTransformer):
@@ -126,6 +127,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
     (50, 9)
     """
 
+    _representation_component_kind = "basis"
+    _representation_supervision = "optional"
+    _representation_local_support = True
+
     def __init__(
         self,
         output_dim=UNSET,
@@ -209,7 +214,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         y_valid: np.ndarray | None,
         n_basis: int,
         strategy: str,
-        selector: BaseKnotSelector | None,
+        selector: SplinePlacementAdapter | None,
         min_basis_req: int | None,
         max_basis_req: int | None,
     ) -> np.ndarray:
@@ -226,7 +231,9 @@ class BaseSplineTransformer(BasePreTabTransformer):
         if self.knot_locations is not None:
             expected_knots = self._basis_to_knots(n_basis)
             if not self.adaptive and len(self.knot_locations) != expected_knots:
-                raise IncompatibleParamsError("knot_locations length must match output_dim - degree - 1 when adaptive=False")
+                raise IncompatibleParamsError(
+                    "knot_locations length must match output_dim - degree - 1 when adaptive=False"
+                )
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
         elif selector is not None:
             selected = selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)
@@ -245,6 +252,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     def fit(self, X, y=None):
         """Determine per-feature knot vectors."""
+        warn_target_leakage(self, y)
         validate_placement(self.target_aware, self.placement_strategy)
         n_basis = self._resolve_param("output_dim", default=6)
         min_basis_req = self._resolve_param("min_output_dim", default=None)
@@ -262,8 +270,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
         # selector built from placement_strategy, then the automatic (unsupervised)
         # spacing named by placement_strategy.
         if self.target_aware and self.knot_locations is None:
-            selector = build_knot_selector(
-                self.placement_strategy,
+            selector = SplinePlacementAdapter(
+                placement_strategy=self.placement_strategy,
                 degree=self.degree,
                 spline_type=self._selector_spline_type,
                 random_state=self.random_state,
@@ -280,6 +288,11 @@ class BaseSplineTransformer(BasePreTabTransformer):
             xi_valid = xi[valid_mask]
             if xi_valid.size == 0:
                 raise PretabDataError(f"Feature at index {i} has only NaN values")
+            if xi_valid.size > 1 and np.ptp(xi_valid) == 0:
+                raise PretabDataError(
+                    f"Feature at index {i} is constant (all values equal {float(xi_valid[0])!r}); "
+                    "a spline basis cannot be constructed on a zero-range feature."
+                )
             yi_valid = y_arr[valid_mask] if y_arr is not None else None
             self.knots_.append(
                 self._column_knots(xi_valid, yi_valid, n_basis, strategy, selector, min_basis_req, max_basis_req)

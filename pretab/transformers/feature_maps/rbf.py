@@ -1,7 +1,7 @@
 import numpy as np
 
-from ...core.params import UNSET
-from ._base import BaseCenterExpansion
+from ...core.parameters import UNSET
+from .base import BaseCenterExpansion
 
 
 class RBFExpansionTransformer(BaseCenterExpansion):
@@ -78,6 +78,8 @@ class RBFExpansionTransformer(BaseCenterExpansion):
     """
 
     _feature_suffix_value = "rbf"
+    _representation_family = "rbf"
+    _representation_local_support = True
 
     def __init__(
         self,

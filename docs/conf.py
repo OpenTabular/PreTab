@@ -114,11 +114,7 @@ autodoc_default_options = {
     # Exclude scikit-learn metadata-routing boilerplate that is inherited from
     # BaseEstimator / TransformerMixin and is not part of pretab's public API.
     "exclude-members": (
-        "set_output,"
-        "get_metadata_routing,"
-        "set_fit_request,"
-        "set_transform_request,"
-        "set_inverse_transform_request,"
+        "set_output,get_metadata_routing,set_fit_request,set_transform_request,set_inverse_transform_request,"
     ),
 }
 
@@ -169,6 +165,11 @@ myst_fence_as_directive = [
 myst_substitutions = {
     "version": release,
 }
+
+# Auto-generate anchor slugs for headings (h1-h3) so in-page and cross-page
+# links such as ``choosing_a_method.md#when-basis-expansion-does-not-help``
+# resolve under the strict (-W) build.
+myst_heading_anchors = 3
 
 # -- Options for todo --------------------------------------------------------
 

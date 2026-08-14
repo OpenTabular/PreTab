@@ -1,7 +1,7 @@
 import numpy as np
 
-from ...core.params import UNSET
-from ._base import BaseCenterExpansion
+from ...core.parameters import UNSET
+from .base import BaseCenterExpansion
 
 
 class ReLUExpansionTransformer(BaseCenterExpansion):
@@ -74,6 +74,7 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
     """
 
     _feature_suffix_value = "relu"
+    _representation_family = "relu"
 
     def __init__(
         self,

@@ -12,7 +12,7 @@ from typing import Literal
 import numpy as np
 from sklearn.utils.validation import check_array
 
-from .exceptions import DataWarning, PretabDataError
+from ..exceptions import DataWarning, PretabDataError
 
 __all__ = ["validate_2d_allow_nan"]
 
@@ -44,7 +44,10 @@ def validate_2d_allow_nan(X, *, allow_nan: bool = True, reset: bool, estimator):
     original_dim = input_shape[1] if input_shape is not None and len(input_shape) == 2 else None
     ensure_all_finite: Literal["allow-nan"] | bool = "allow-nan" if allow_nan else True
     X = check_array(
-        X, dtype=np.float64, ensure_2d=True, ensure_all_finite=ensure_all_finite  # type: ignore
+        X,
+        dtype=np.float64,  # type: ignore
+        ensure_2d=True,
+        ensure_all_finite=ensure_all_finite,  # type: ignore
     )
     if original_dim is not None and X.shape[1] < original_dim:
         warnings.warn(

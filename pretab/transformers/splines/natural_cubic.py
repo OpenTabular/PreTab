@@ -2,9 +2,10 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.exceptions import InvalidParamError
-from ...core.params import UNSET, validate_placement
-from .knot_selectors import build_knot_selector
+from ...core.parameters import UNSET, validate_placement
+from ...core.supervised import warn_target_leakage
+from ...exceptions import InvalidParamError
+from ...placement.adapters import SplinePlacementAdapter
 from .mixins import SplineBasisMixin
 
 
@@ -117,6 +118,9 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
     """
 
     _feature_suffix_value = "ncs"
+    _representation_family = "naturalspline"
+    _representation_supervision = "optional"
+    _representation_local_support = True
 
     def __init__(
         self,
@@ -148,7 +152,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         n_samples = x.shape[0]
         n_knots = len(K)
 
-        basis = [np.ones((n_samples, 1))] if self.include_bias else []
+        basis: list[np.ndarray] = [np.ones((n_samples, 1))] if self.include_bias else []
         basis.append(x)
 
         def omega(z, k):
@@ -163,20 +167,21 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         return np.hstack(basis)
 
     def fit(self, X, y=None):
+        warn_target_leakage(self, y)
         validate_placement(self.target_aware, self.placement_strategy)
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=6)
 
         if output_dim < 2:
-            raise InvalidParamError(
-                f"output_dim must be >= 2 for the natural cubic spline basis, got {output_dim}"
-            )
+            raise InvalidParamError(f"output_dim must be >= 2 for the natural cubic spline basis, got {output_dim}")
 
         n_spanning = output_dim + 1
 
         if self.target_aware:
-            selector = build_knot_selector(
-                self.placement_strategy, degree=self.degree, spline_type="bspline",
+            selector = SplinePlacementAdapter(
+                placement_strategy=self.placement_strategy,
+                degree=self.degree,
+                spline_type="bspline",
                 random_state=self.random_state,
             )
             strategy = "uniform"
@@ -184,9 +189,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
             selector = None
             strategy = self.placement_strategy
 
-        min_interior, max_interior = self._adaptive_interior_bounds(
-            output_dim, selector, floor=2, offset=1
-        )
+        min_interior, max_interior = self._adaptive_interior_bounds(output_dim, selector, floor=2, offset=1)
 
         self.knots_ = []
         self.designs_ = []
