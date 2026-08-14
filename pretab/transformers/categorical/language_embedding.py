@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_is_fitted
 
 from ...exceptions import OptionalDependencyError, PretabConfigError
 
@@ -26,6 +27,8 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         ``fit`` from ``model`` or by loading ``model_name``.
     n_features_in_ : int
         Number of input features seen during ``fit``.
+    embedding_dim_ : int
+        Dimensionality of the embeddings produced by ``model_``.
 
     Notes
     -----
@@ -75,6 +78,12 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         """
         self.n_features_in_ = X.shape[1] if len(X.shape) > 1 else 1
         self.model_ = self._resolve_model()
+        # Read the embedding dim without calling encode() so call-count stays
+        # predictable; fall back to the 'dim' attribute used by test stubs.
+        if hasattr(self.model_, "get_sentence_embedding_dimension"):
+            self.embedding_dim_ = int(self.model_.get_sentence_embedding_dimension())
+        else:
+            self.embedding_dim_ = int(getattr(self.model_, "dim", 0))
         return self
 
     def transform(self, X):
@@ -107,3 +116,26 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
 
         column_embeddings = [self.model_.encode(arr[:, i].tolist(), convert_to_numpy=True) for i in range(arr.shape[1])]
         return np.hstack(column_embeddings)
+
+    def get_feature_names_out(self, input_features=None):
+        """Return output feature names: one per embedding dimension per input column.
+
+        Parameters
+        ----------
+        input_features : array-like of str or None
+            Input feature names. When ``None``, names of the form ``x0, x1, ...``
+            are generated.
+
+        Returns
+        -------
+        feature_names_out : ndarray of str, shape (n_features_in_ * embedding_dim_,)
+        """
+        check_is_fitted(self, ["n_features_in_", "embedding_dim_"])
+        if input_features is None:
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        names = [
+            f"{col}_emb{j}"
+            for col in input_features
+            for j in range(self.embedding_dim_)
+        ]
+        return np.asarray(names, dtype=object)
