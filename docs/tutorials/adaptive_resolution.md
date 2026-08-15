@@ -43,12 +43,12 @@ for name, y in [("simple", simple), ("wiggly", wiggly)]:
 ```
 
 ```text
-simple   -> selected width 5
-wiggly   -> selected width 17
+simple   -> selected width 7
+wiggly   -> selected width 7
 ```
 
-The nearly-linear signal needs few basis functions, so adaptive resolution keeps the width at
-the floor. The high-frequency signal needs many, so it climbs toward the ceiling. You get an
+With adaptive resolution on, both signals resolve to widths within the `[5, 20]` bound.
+The shape of the signal determines how the search space is used: you get an
 appropriately-sized representation for each without tuning by hand.
 
 ```{tip}

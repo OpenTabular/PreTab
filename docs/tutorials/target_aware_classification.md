@@ -103,12 +103,12 @@ print(f"ROC AUC:  {roc_auc_score(y_test, proba):.3f}")
 ```
 
 ```text
-accuracy: 0.872
+accuracy: 0.870
 ROC AUC:  0.927
 ```
 
 The RBF features let the linear classifier bend around the ring. Accuracy rises from `0.742`
-to `0.872`, and the `ROC AUC` jumps from `0.569` to `0.927`.
+to `0.870`, and the `ROC AUC` jumps from `0.569` to `0.927`.
 
 ```{note}
 `target_aware=True` lets supervised expansions use `y` during `fit` to place their basis

@@ -56,10 +56,10 @@ for name, (mean, std) in results.items():
 ```
 
 ```text
-minmax (baseline)    R2 = 0.081 +/- 0.010
-bspline              R2 = 0.972 +/- 0.004
-rbf                  R2 = 0.964 +/- 0.006
-ple                  R2 = 0.958 +/- 0.005
+minmax (baseline)    R2 = 0.111 +/- 0.030
+bspline              R2 = 0.966 +/- 0.002
+rbf                  R2 = 0.965 +/- 0.003
+ple                  R2 = 0.950 +/- 0.002
 ```
 
 The scaled baseline fits a straight line and cannot follow the sine. Every expansion captures
