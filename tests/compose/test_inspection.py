@@ -21,8 +21,8 @@ def fitted_ct(make_config, sample_frame):
 
 
 def test_get_output_slices_are_ordered_and_named(fitted_ct):
-    ct, X = fitted_ct
-    slices = get_output_slices(ct, X)
+    ct, _ = fitted_ct
+    slices = get_output_slices(ct)
     names = [name for name, _, _ in slices]
     assert "num_age" in names and "cat_city" in names
     starts = [start for _, start, _ in slices]

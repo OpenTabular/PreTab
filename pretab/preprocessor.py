@@ -543,7 +543,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if container in ("pandas", "polars"):
             return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
 
-        slices = None if return_array else get_output_slices(self.column_transformer_, X)
+        slices = None if return_array else get_output_slices(self.column_transformer_)
         return format_output(
             transformed_X,
             return_array=return_array,

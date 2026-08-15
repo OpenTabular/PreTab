@@ -23,24 +23,24 @@ __all__ = [
 ]
 
 
-def get_output_slices(column_transformer, X):
+def get_output_slices(column_transformer):
     """Return ordered ``(name, start, width)`` spans for each output block.
 
-    The width of each transformer's block is obtained by transforming its input
-    columns, matching the order in which the fitted ColumnTransformer stacks its
-    outputs.
+    Reads widths from ``output_indices_`` — the fitted index map that
+    ``ColumnTransformer`` already maintains — so no second transform is needed.
     """
+    indices = column_transformer.output_indices_
     slices = []
-    start = 0
-    for name, transformer, columns in column_transformer.transformers_:
+    for name, transformer, _columns in column_transformer.transformers_:
         if transformer == "drop":
             continue
-        if hasattr(transformer, "transform"):
-            width = transformer.transform(X[columns]).shape[1]
-        else:
-            width = 1
-        slices.append((name, start, width))
-        start += width
+        span = indices.get(name)
+        if span is None:
+            continue
+        width = span.stop - span.start
+        if width == 0:
+            continue
+        slices.append((name, span.start, width))
     return slices
 
 
