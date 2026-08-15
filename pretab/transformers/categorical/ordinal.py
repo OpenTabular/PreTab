@@ -50,8 +50,11 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         self : object
             Fitted transformer.
         """
-        # Fit should determine the mapping from original categories to sequential integers starting from 0
-        self.mapping_ = [{category: i + 1 for i, category in enumerate(np.unique(col))} for col in X.T]
+        # Coerce to 2-D ndarray so DataFrame.T / DataFrame row-iteration work correctly
+        X = np.asarray(X, dtype=object)
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        self.mapping_ = [{category: i + 1 for i, category in enumerate(np.unique(X[:, j]))} for j in range(X.shape[1])]
         for mapping in self.mapping_:
             mapping[None] = 0  # Assign 0 to unknown values
         self.n_features_in_ = len(self.mapping_)
@@ -71,9 +74,14 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
             The transformed data with integer values.
         """
         check_is_fitted(self, "mapping_")
-        # Transform the categories to their mapped integer values
-        X_transformed = np.array([[self.mapping_[col].get(value, 0) for col, value in enumerate(row)] for row in X])
-        return X_transformed
+        # Coerce to 2-D ndarray so DataFrame row-iteration and empty-input shape both work
+        X = np.asarray(X, dtype=object)
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        out = np.zeros(X.shape, dtype=int)
+        for j, mapping in enumerate(self.mapping_):
+            out[:, j] = [mapping.get(v, 0) for v in X[:, j]]
+        return out
 
     def get_feature_names_out(self, input_features=None):
         """Return the output feature names (unchanged from the input).

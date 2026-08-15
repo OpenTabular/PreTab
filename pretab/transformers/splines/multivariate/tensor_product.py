@@ -2,22 +2,10 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ....core.knots import bspline_basis
 from ....core.parameters import UNSET
 from ....exceptions import InvalidParamError
 from ..mixins import SplineBasisMixin
-
-
-def bspline_basis(x, knots, degree, i):
-    if degree == 0:
-        return ((knots[i] <= x) & (x < knots[i + 1])).astype(float)
-    else:
-        denom1 = knots[i + degree] - knots[i]
-        denom2 = knots[i + degree + 1] - knots[i + 1]
-        term1 = 0.0 if denom1 == 0 else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i)
-        term2 = (
-            0.0 if denom2 == 0 else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1)
-        )
-        return term1 + term2
 
 
 class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
