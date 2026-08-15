@@ -129,7 +129,12 @@ class BaseLocationSelector(ABC):
         raise NotImplementedError
 
     def _enforce_spacing(self, split_points: list[float], x: np.ndarray) -> list[float]:
-        """Drop locations closer than ``min_location_spacing`` of the range."""
+        """Drop locations closer than ``min_location_spacing`` of the range.
+
+        Compares each candidate against every already-kept location so the filter
+        is order-independent and honours both ascending (CART) and gain-descending
+        (LightGBM) ordering.
+        """
         if len(split_points) <= 1:
             return split_points
 
@@ -138,7 +143,7 @@ class BaseLocationSelector(ABC):
 
         spaced = [split_points[0]]
         for point in split_points[1:]:
-            if point - spaced[-1] >= min_distance:
+            if all(abs(point - kept) >= min_distance for kept in spaced):
                 spaced.append(point)
 
         return spaced
