@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from pretab.compose.feature_detection import detect_column_types, to_dataframe
-from pretab.exceptions import InvalidParamError
+from pretab.exceptions import InvalidParamError, PretabDataError
 
 
 def test_to_dataframe_wraps_ndarray_with_feature_names():
@@ -22,6 +22,17 @@ def test_to_dataframe_returns_same_object_without_copy():
     df = pd.DataFrame({"a": [1, 2]})
     assert to_dataframe(df) is df
     assert to_dataframe(df, copy=True) is not df
+
+
+def test_to_dataframe_rejects_duplicate_columns():
+    """Regression guard for issue #37: a duplicate column label must raise a
+
+    clear PretabDataError instead of an opaque AttributeError deep inside
+    column-type detection.
+    """
+    df = pd.DataFrame(np.column_stack([np.zeros(5), np.ones(5)]), columns=["a", "a"])
+    with pytest.raises(PretabDataError, match=r"Duplicate column names.*\['a'\]"):
+        to_dataframe(df)
 
 
 def test_float_cutoff_uses_unique_ratio():
