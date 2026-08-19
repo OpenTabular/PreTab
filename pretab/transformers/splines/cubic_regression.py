@@ -78,10 +78,6 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
     n_knots_ : list of int
         Number of interior knots placed for each feature (``len(knots_[i])``).
 
-    designs_ : list of ndarray
-        Cached design matrices (spline basis evaluations) for each input feature,
-        each of shape ``(n_samples, output_dim (+1 if include_bias))``.
-
     n_basis_ : list of int
         Number of output columns per feature, including the optional bias.
 
@@ -182,16 +178,15 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
         min_interior, max_interior = self._adaptive_interior_bounds(output_dim, selector, floor=3, offset=3)
 
         self.knots_ = []
-        self.designs_ = []
+        self.n_basis_ = []
         for i in range(X.shape[1]):
             xi = X[:, i]
             knots = self._place_interior_knots(
                 xi, y, n_interior, strategy, selector, self.task, min_interior, max_interior
             )
             self.knots_.append(knots)
-            self.designs_.append(self._bspline_basis(xi, knots))
+            self.n_basis_.append(self._bspline_basis(xi, knots).shape[1])
 
-        self.n_basis_ = [design.shape[1] for design in self.designs_]
         self.n_knots_ = [len(knots) for knots in self.knots_]
         return self
 
@@ -224,8 +219,8 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
             Penalty matrix that penalizes the second derivative (curvature) of
             the spline basis for smoothness.
         """
-        check_is_fitted(self, "designs_")
-        n_basis = self.designs_[feature_index].shape[1]
+        check_is_fitted(self, "n_basis_")
+        n_basis = self.n_basis_[feature_index]
         P = np.zeros((n_basis, n_basis))
         offset = 4 if self.include_bias else 3
         for i in range(offset, n_basis):

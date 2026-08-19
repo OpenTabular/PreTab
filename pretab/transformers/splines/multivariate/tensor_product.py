@@ -80,15 +80,12 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         Number of interior knots for each marginal dimension
         (``output_dim - degree - 1`` on the default, non-selector path).
 
-    bases_ : list of ndarray
-        Marginal B-spline basis matrices, each of shape
-        ``(n_samples, output_dim (+1 if include_bias))``.
+    marginal_sizes_ : list of int
+        Marginal B-spline basis widths for each dimension (``basis.shape[1]``);
+        the training basis matrices themselves are not retained.
 
     penalties_ : list of ndarray
         Univariate difference penalties for each marginal basis.
-
-    X_design_ : ndarray of shape (n_samples, output_dim ** dim\_)
-        Full tensor-product design matrix computed during ``fit``.
 
     n_features_in_ : int
         Number of input features seen during ``fit``.
@@ -183,7 +180,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
         self.dim_ = X.shape[1]
         self.knots_ = []
-        self.bases_ = []
+        self.marginal_sizes_ = []
         self.penalties_ = []
         self.n_knots_ = []
 
@@ -200,20 +197,14 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
             if self.include_bias:
                 penalty = np.pad(penalty, ((1, 0), (1, 0)))
             self.knots_.append(knots)
-            self.bases_.append(basis)
+            self.marginal_sizes_.append(basis.shape[1])
             self.penalties_.append(penalty)
             self.n_knots_.append(max(0, len(knots) - 2 * (self.degree + 1)))
-
-        n_samples = X.shape[0]
-        design = self.bases_[0]
-        for b in self.bases_[1:]:
-            design = np.einsum("ni,nj->nij", design, b).reshape(n_samples, -1)
-        self.X_design_ = design
 
         return self
 
     def transform(self, X):
-        check_is_fitted(self, "X_design_")
+        check_is_fitted(self, "marginal_sizes_")
         X = self._validate_allow_nan(X, reset=False)
 
         bases = []
@@ -229,10 +220,10 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     def get_feature_names_out(self, input_features=None):
         """Return names for the interaction basis as ``tp_{feat0 i}_{feat1 j}...``."""
-        check_is_fitted(self, "bases_")
+        check_is_fitted(self, "marginal_sizes_")
         if input_features is None:
             input_features = [f"x{i}" for i in range(self.n_features_in_)]
-        sizes = [b.shape[1] for b in self.bases_]
+        sizes = self.marginal_sizes_
         names = []
         for multi_index in np.ndindex(*sizes):
             parts = [f"{input_features[d]}{multi_index[d]}" for d in range(self.dim_)]
@@ -251,7 +242,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         """
         kron_penalties = []
         for i, Si in enumerate(self.penalties_):
-            mats = [np.eye(b.shape[1]) for j, b in enumerate(self.bases_) if j != i]
+            mats = [np.eye(size) for j, size in enumerate(self.marginal_sizes_) if j != i]
             P = Si
             for M in mats:
                 P = np.kron(P, M)

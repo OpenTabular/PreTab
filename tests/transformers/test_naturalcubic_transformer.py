@@ -23,7 +23,7 @@ def test_natural_spline_multi_feature_shape():
     Xt = transformer.fit_transform(X)
 
     n_features = X.shape[1]
-    n_basis_per_feature = transformer.designs_[0].shape[1]
+    n_basis_per_feature = transformer.n_basis_[0]
     assert Xt.shape == (25, n_features * n_basis_per_feature)
     assert np.isfinite(Xt).all()
 
@@ -79,3 +79,14 @@ def test_natural_spline_transform_requires_fit():
         transformer.transform(np.random.rand(5, 1))
     with pytest.raises(NotFittedError):
         transformer.get_penalty_matrix()
+
+
+def test_natural_spline_does_not_retain_training_design_matrix():
+    """Regression guard for issue #19: fitted size must not scale with n_samples."""
+    import pickle
+
+    small = NaturalCubicSplineTransformer(output_dim=7).fit(np.random.rand(50, 1))
+    large = NaturalCubicSplineTransformer(output_dim=7).fit(np.random.rand(20_000, 1))
+
+    assert not hasattr(small, "designs_")
+    assert len(pickle.dumps(large)) < 2 * len(pickle.dumps(small))

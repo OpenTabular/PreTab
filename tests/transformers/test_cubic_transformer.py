@@ -80,3 +80,14 @@ def test_cubic_transform_requires_fit():
         transformer.transform(np.random.rand(5, 1))
     with pytest.raises(NotFittedError):
         transformer.get_penalty_matrix()
+
+
+def test_cubic_spline_does_not_retain_training_design_matrix():
+    """Regression guard for issue #19: fitted size must not scale with n_samples."""
+    import pickle
+
+    small = CubicRegressionSplineTransformer(output_dim=7).fit(np.random.rand(50, 1))
+    large = CubicRegressionSplineTransformer(output_dim=7).fit(np.random.rand(20_000, 1))
+
+    assert not hasattr(small, "designs_")
+    assert len(pickle.dumps(large)) < 2 * len(pickle.dumps(small))

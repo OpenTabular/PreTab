@@ -81,10 +81,6 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
     n_knots_ : list of int
         Number of interior knots for each feature (``len(knots_[i]) - 2``).
 
-    designs_ : list of ndarray
-        Cached spline basis design matrices, each of shape
-        ``(n_samples, output_dim (+1 if include_bias))``.
-
     n_basis_ : list of int
         Number of output columns per feature, including the optional bias.
 
@@ -192,7 +188,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         min_interior, max_interior = self._adaptive_interior_bounds(output_dim, selector, floor=2, offset=1)
 
         self.knots_ = []
-        self.designs_ = []
+        self.n_basis_ = []
 
         for i in range(X.shape[1]):
             xi = X[:, i]
@@ -200,9 +196,8 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
                 xi, y, n_spanning, strategy, selector, self.task, min_interior, max_interior
             )
             self.knots_.append(knots)
-            self.designs_.append(self._basis(xi, knots))
+            self.n_basis_.append(self._basis(xi, knots).shape[1])
 
-        self.n_basis_ = [design.shape[1] for design in self.designs_]
         self.n_knots_ = [max(0, len(knots) - 2) for knots in self.knots_]
         return self
 

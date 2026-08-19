@@ -10,8 +10,8 @@ def test_tensorproduct_spline_output_shape():
     transformer = TensorProductSplineTransformer(output_dim=4)
     Xt = transformer.fit_transform(X)
 
-    n_basis_0 = transformer.bases_[0].shape[1]
-    n_basis_1 = transformer.bases_[1].shape[1]
+    n_basis_0 = transformer.marginal_sizes_[0]
+    n_basis_1 = transformer.marginal_sizes_[1]
     assert Xt.shape == (20, n_basis_0 * n_basis_1)
     # output_dim is per-marginal; total width is the product across dimensions
     assert Xt.shape == (20, 4**2)
@@ -57,7 +57,7 @@ def test_tensorproduct_feature_names_out_default_input():
     transformer = TensorProductSplineTransformer(output_dim=4).fit(X)
 
     names = transformer.get_feature_names_out()
-    n_expected = transformer.bases_[0].shape[1] * transformer.bases_[1].shape[1]
+    n_expected = transformer.marginal_sizes_[0] * transformer.marginal_sizes_[1]
     assert len(names) == n_expected
     assert names[0].startswith("tp_")
 
@@ -71,3 +71,15 @@ def test_tensorproduct_transform_requires_fit():
     transformer = TensorProductSplineTransformer()
     with pytest.raises(NotFittedError):
         transformer.transform(np.random.rand(5, 2))
+
+
+def test_tensorproduct_does_not_retain_training_design_matrix():
+    """Regression guard for issue #19: fitted size must not scale with n_samples."""
+    import pickle
+
+    small = TensorProductSplineTransformer(output_dim=7).fit(np.random.rand(50, 2))
+    large = TensorProductSplineTransformer(output_dim=7).fit(np.random.rand(20_000, 2))
+
+    assert not hasattr(small, "bases_")
+    assert not hasattr(small, "X_design_")
+    assert len(pickle.dumps(large)) < 2 * len(pickle.dumps(small))
