@@ -5,6 +5,14 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.representation import RepresentationSpecMixin
+from ...exceptions import PretabDataError
+
+_NOT_ORDINAL_MSG = (
+    "OneHotFromOrdinalTransformer requires input that is already ordinal-encoded "
+    "(non-negative integer codes); got values that cannot be cast to int. Use "
+    "categorical_method='one-hot' to one-hot encode raw categories directly, or "
+    "'int' to ordinal-encode first."
+)
 
 
 class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
@@ -69,8 +77,13 @@ class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         self : object
             Fitted transformer.
         """
-        self.max_bins_ = np.max(X, axis=0).astype(int) + 1  # Find the maximum bin index for each feature
-        self.n_features_in_ = np.asarray(X).shape[1]
+        X = np.asarray(X)
+        try:
+            codes = X.astype(int)
+        except (TypeError, ValueError) as exc:
+            raise PretabDataError(_NOT_ORDINAL_MSG) from exc
+        self.max_bins_ = np.max(codes, axis=0) + 1  # Find the maximum bin index for each feature
+        self.n_features_in_ = X.shape[1]
         return self
 
     def transform(self, X):
@@ -96,11 +109,15 @@ class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         """
         check_is_fitted(self, "max_bins_")
         X = np.asarray(X)
+        try:
+            X = X.astype(int)
+        except (TypeError, ValueError) as exc:
+            raise PretabDataError(_NOT_ORDINAL_MSG) from exc
         # Initialize an empty list to hold the one-hot encoded arrays
         one_hot_encoded = []
         for i, max_bins in enumerate(self.max_bins_):
             max_bins = int(max_bins)
-            codes = X[:, i].astype(int)
+            codes = X[:, i]
             # Codes outside the fitted range map to an all-zero row instead of
             # raising an IndexError on np.eye indexing.
             in_range = (codes >= 0) & (codes < max_bins)

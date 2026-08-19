@@ -93,8 +93,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     categorical_method : str, default="int"
         Preprocessing strategy applied to every categorical column unless overridden per feature.
         Choices: ``"int"`` (contiguous integer codes), ``"one-hot"`` (dummy columns),
-        ``"onehot_from_ordinal"`` (integer codes then one-hot), ``"pretrained"`` (sentence-transformer
-        language embeddings), and ``"custombin"`` (discretized bin codes). Pass ``None`` (resolved to
+        ``"onehot_from_ordinal"`` (one-hot from an already integer-coded column; raises if the
+        input is not already ordinal-encoded), ``"pretrained"`` (sentence-transformer language
+        embeddings), and ``"custombin"`` (discretized bin codes). Pass ``None`` (resolved to
         ``"none"``) to leave categorical columns unchanged.
     feature_preprocessing : dict, optional
         Mapping of individual column names to a method, overriding the global ``numerical_method`` /

@@ -1,6 +1,9 @@
 import numpy as np
+import pandas as pd
 import pytest
 
+from pretab import Preprocessor
+from pretab.exceptions import PretabDataError
 from pretab.transformers import OneHotFromOrdinalTransformer
 
 
@@ -100,3 +103,28 @@ def test_onehot_from_ordinal_negative_code_gives_zero_row():
         ]
     )
     np.testing.assert_array_equal(Xt, expected)
+
+
+def test_onehot_from_ordinal_fit_rejects_non_numeric():
+    """Regression guard for issue #17: string input must raise a clear PretabDataError."""
+    transformer = OneHotFromOrdinalTransformer()
+    with pytest.raises(PretabDataError, match="already ordinal-encoded"):
+        transformer.fit(np.array([["a"], ["b"], ["c"]]))
+
+
+def test_onehot_from_ordinal_transform_rejects_non_numeric():
+    """Regression guard for issue #17: same guard applies at transform time."""
+    transformer = OneHotFromOrdinalTransformer()
+    transformer.fit(np.array([[0], [1], [2]]))
+    with pytest.raises(PretabDataError, match="already ordinal-encoded"):
+        transformer.transform(np.array([["a"], ["b"]]))
+
+
+def test_preprocessor_onehot_from_ordinal_rejects_string_column():
+    """Regression guard for issue #17: the Preprocessor path raises a typed pretab
+
+    error instead of a bare numpy ValueError with no pointer to the cause.
+    """
+    df = pd.DataFrame({"c": ["a", "b", "c"] * 30})
+    with pytest.raises(PretabDataError, match="already ordinal-encoded"):
+        Preprocessor(categorical_method="onehot_from_ordinal").fit(df, None)
