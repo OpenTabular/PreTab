@@ -45,6 +45,22 @@ def test_scaling_injected_only_when_different_from_method():
     assert same.count("standardization") == 1
 
 
+def test_unknown_scaling_raises():
+    """Regression guard for issue #35: an unrecognized scaling must raise, not
+
+    silently produce an unscaled pipeline.
+    """
+    with pytest.raises(InvalidParamError):
+        get_numerical_transformer_steps("ple", add_imputer=False, scaling="not_a_scaler")
+
+
+def test_scaling_none_disables_scaling():
+    for none_spelling in (None, "none"):
+        steps = _names(get_numerical_transformer_steps("ple", add_imputer=False, scaling=none_spelling))
+        assert "scaler" not in steps
+        assert "minmax" not in steps
+
+
 def test_bmi_spline_output_dim_is_clamped_with_warning():
     with pytest.warns(ConfigWarning):
         get_numerical_transformer_steps("bspline", add_imputer=False, output_dim=100)

@@ -128,6 +128,14 @@ def get_numerical_transformer_steps(
     }
     if scaling is not None:
         scaling = resolve_method(scaling, NUMERICAL_METHODS, NUMERICAL_ALIASES)
+        if scaling not in scalers and scaling != "none":
+            raise invalid_param_error(
+                "get_numerical_transformer_steps",
+                "scaling",
+                scaling,
+                "must name a scaler or disable scaling",
+                valid={*scalers, "none"},
+            )
     if scaling in scalers and scaling != method:
         steps.append(scalers[scaling])
 
