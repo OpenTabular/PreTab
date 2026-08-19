@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.exceptions import NotFittedError
 
 from pretab.exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 from pretab.transformers import NumericBinningTransformer
@@ -167,9 +168,33 @@ def test_custom_bin_transformer_feature_names_out_onehot():
 
 
 def test_custom_bin_transformer_feature_names_out_raises():
+    """Regression guard for issue #36: an unfitted transformer must raise
+
+    NotFittedError, but a fitted one must accept no arguments and default to
+    generated ``x0, x1, ...`` names (matching the sklearn contract), not raise.
+    """
     transformer = NumericBinningTransformer(output_dim=3)
-    with pytest.raises(ValueError):
+    with pytest.raises(NotFittedError):
         transformer.get_feature_names_out()
+
+    transformer.fit(np.linspace(0.0, 1.0, 10).reshape(-1, 1))
+    names = transformer.get_feature_names_out()
+    assert isinstance(names, np.ndarray)
+    assert list(names) == ["x0"]
+
+
+def test_custom_bin_transformer_get_feature_names_out_in_pipeline():
+    """Regression guard for issue #36: Pipeline.get_feature_names_out() must work
+
+    for a pipeline containing this transformer, with no names passed explicitly.
+    """
+    from sklearn.pipeline import Pipeline
+
+    X = np.linspace(0.0, 1.0, 10).reshape(-1, 1)
+    pipeline = Pipeline([("bin", NumericBinningTransformer(output_dim=3))]).fit(X)
+    names = pipeline.get_feature_names_out()
+    assert isinstance(names, np.ndarray)
+    assert list(names) == ["x0"]
 
 
 def test_custom_bin_transformer_is_sklearn_compatible():

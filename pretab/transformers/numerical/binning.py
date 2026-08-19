@@ -236,21 +236,23 @@ class NumericBinningTransformer(RepresentationSpecMixin, AliasResolverMixin, Tra
 
         Parameters
         ----------
-        input_features : list of str
-            The names of the input features.
+        input_features : list of str or None
+            The names of the input features. When ``None``, names of the form
+            ``x0, x1, ...`` are generated.
 
         Returns
         -------
-        feature_names : list of str
+        feature_names : ndarray of shape (total_output_dim_,)
             One name per input feature for ``encode="ordinal"``; otherwise one
             ``"{feature}_bin{k}"`` name per bin.
         """
+        check_is_fitted(self, "n_features_in_")
         if input_features is None:
-            raise InvalidParamError("input_features must be specified")
+            input_features = [f"x{i}" for i in range(self.n_features_in_)]
         if self.encode == "ordinal":
-            return list(input_features)
+            return np.asarray(input_features, dtype=object)
         check_is_fitted(self, "n_bins_")
         names = []
         for feature, n_bins in zip(input_features, self.n_bins_, strict=False):
             names.extend(f"{feature}_bin{k}" for k in range(n_bins))
-        return names
+        return np.asarray(names, dtype=object)
