@@ -72,6 +72,20 @@ def test_mixin_floor_and_ceil_and_ordering():
         dummy._resolve_output_bounds(7, 9, 6, floor=1)
 
 
+def test_mixin_non_adaptive_floor_violation_names_output_dim():
+    """Regression guard for issue #38: a non-adaptive floor/ceil violation must
+
+    name output_dim, the parameter the caller actually set, not min/max_output_dim
+    (which are ignored when adaptive=False). Anchored at the start since
+    "min_output_dim"/"max_output_dim" would otherwise substring-match "output_dim".
+    """
+    dummy = _Dummy(adaptive=False)
+    with pytest.raises(ValueError, match=r"^output_dim must be >= 4, got 0"):
+        dummy._resolve_output_bounds(0, None, None, floor=4, floor_label="4")
+    with pytest.raises(ValueError, match=r"^output_dim should be <= 50, got 60"):
+        dummy._resolve_output_bounds(60, None, None, floor=1, ceil=50)
+
+
 # --------------------------------------------------------------------------- #
 # Feature maps                                                                #
 # --------------------------------------------------------------------------- #

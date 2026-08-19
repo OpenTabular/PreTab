@@ -88,14 +88,13 @@ class AdaptiveResolutionMixin:
 
         label = floor_label if floor_label is not None else str(floor)
         if lo < floor:
+            name = "min_output_dim" if self.adaptive and min_req is not None else "output_dim"
             raise InvalidParamError(
-                f"min_output_dim must be >= {label}, got {lo}.\n"
-                "Fix: raise min_output_dim to at least the family minimum."
+                f"{name} must be >= {label}, got {lo}.\nFix: raise {name} to at least the family minimum."
             )
         if ceil is not None and hi > ceil:
-            raise InvalidParamError(
-                f"max_output_dim should be <= {ceil}, got {hi}.\nFix: lower max_output_dim to at most {ceil}."
-            )
+            name = "max_output_dim" if self.adaptive and max_req is not None else "output_dim"
+            raise InvalidParamError(f"{name} should be <= {ceil}, got {hi}.\nFix: lower {name} to at most {ceil}.")
         if lo > hi:
             raise IncompatibleParamsError(
                 f"min_output_dim must be <= max_output_dim (got min_output_dim={lo}, max_output_dim={hi})."
