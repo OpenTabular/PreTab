@@ -10,6 +10,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ..exceptions import invalid_param_error
 from .adaptive import AdaptiveResolutionMixin
 from .parameters import AliasResolverMixin
 from .policy import RepresentationPolicy, apply_constant_policy
@@ -79,6 +80,13 @@ class BasePreTabTransformer(
         check_is_fitted(self, "n_features_in_")
         if input_features is None:
             input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        elif len(input_features) != self.n_features_in_:
+            raise invalid_param_error(
+                type(self).__name__,
+                "get_feature_names_out.input_features",
+                len(input_features),
+                f"must have exactly {self.n_features_in_} entries (one per input feature)",
+            )
         suffix = self._feature_suffix()
         names = []
         for feature, n_cols in zip(input_features, self._output_sizes(), strict=False):
