@@ -65,3 +65,14 @@ def test_resolve_dedupe_toggle():
     kept = resolve_locations(locs, min_count=0, max_count=10, dedupe=False)
     np.testing.assert_array_equal(deduped, [1.0, 2.0, 3.0])
     np.testing.assert_array_equal(kept, [1.0, 1.0, 2.0, 3.0])
+
+
+def test_resolve_importance_stays_aligned_after_sort():
+    """Regression guard for issue #21: importance must track its own location,
+
+    not the position it happened to occupy in the caller's unsorted input.
+    """
+    locs = np.array([5.0, 1.0, 3.0])
+    importance = np.array([0.1, 9.9, 0.2])  # location 1.0 is by far the most important
+    out = resolve_locations(locs, min_count=1, max_count=1, importance=importance)
+    np.testing.assert_array_equal(out, [1.0])
