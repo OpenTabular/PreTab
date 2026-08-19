@@ -76,7 +76,8 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         self : object
             Fitted transformer.
         """
-        self.n_features_in_ = X.shape[1] if len(X.shape) > 1 else 1
+        X = np.asarray(X)
+        self.n_features_in_ = X.shape[1] if X.ndim > 1 else 1
         self.model_ = self._resolve_model()
         # Read the embedding dim without calling encode() so call-count stays
         # predictable; fall back to the 'dim' attribute used by test stubs.

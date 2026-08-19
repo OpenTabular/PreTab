@@ -91,3 +91,18 @@ def test_fit_without_dependency_raises(monkeypatch):
     transformer = LanguageEmbeddingTransformer()
     with pytest.raises(OptionalDependencyError):
         transformer.fit(np.array([["a"], ["b"]]))
+
+
+def test_fit_accepts_plain_list_input():
+    """Regression guard for issue #21: a bare list (no .shape) must not crash fit."""
+    dummy = _DummyModel()
+    transformer = LanguageEmbeddingTransformer(model=dummy)
+    transformer.fit([["red"], ["blue"], ["green"]])
+    assert transformer.n_features_in_ == 1
+
+
+def test_fit_accepts_flat_list_input():
+    dummy = _DummyModel()
+    transformer = LanguageEmbeddingTransformer(model=dummy)
+    transformer.fit(["red", "blue", "green"])
+    assert transformer.n_features_in_ == 1
