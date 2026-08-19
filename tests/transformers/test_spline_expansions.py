@@ -48,6 +48,30 @@ def test_bspline_reproducible(data):
     np.testing.assert_allclose(a, b, rtol=1e-6)
 
 
+def test_bspline_default_design_is_full_rank(data):
+    """Regression guard for issue #33: the default basis must not be rank-deficient."""
+    X, _ = data
+    Xt = BSplineTransformer(output_dim=8).fit_transform(X)
+    assert np.linalg.matrix_rank(Xt) == Xt.shape[1]
+    assert np.linalg.cond(Xt) < 1e6
+
+
+def test_bspline_basis_is_a_partition_of_unity(data):
+    """Every row of the (bias-free) basis sums to 1, so a prepended bias column
+
+    would be an exact linear combination of the rest -- the root cause of #33.
+    """
+    X, _ = data
+    Xt = BSplineTransformer(output_dim=8, include_bias=False).fit_transform(X)
+    np.testing.assert_allclose(Xt.sum(axis=1), 1.0, atol=1e-9)
+
+
+def test_bspline_include_bias_still_available_opt_in(data):
+    X, _ = data
+    Xt = BSplineTransformer(output_dim=8, include_bias=True).fit_transform(X)
+    assert Xt.shape == (200, 9)
+
+
 def test_bspline_feature_names_out(data):
     X, _ = data
     transformer = BSplineTransformer(output_dim=8, include_bias=True).fit(X)

@@ -30,7 +30,7 @@ from pretab.transformers import BSplineTransformer
 t = BSplineTransformer(output_dim=13, degree=3, placement_strategy="quantile")
 ```
 
-Constructor highlights: `output_dim`, `degree=3`, `include_bias=True`, `knot_locations=None`
+Constructor highlights: `output_dim`, `degree=3`, `include_bias=False`, `knot_locations=None`
 (pass explicit knots to override placement), `target_aware=False`, `placement_strategy="quantile"`,
 `adaptive`, `random_state`.
 

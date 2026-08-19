@@ -54,8 +54,9 @@ FIXED_WIDTH = {
     "pspline": OUTPUT_DIM,
     "mspline": OUTPUT_DIM,
     "ispline": OUTPUT_DIM,
-    # B-spline defaults to include_bias=True -> output_dim + 1
-    "bspline": OUTPUT_DIM + 1,
+    # B-spline: include_bias defaults to False (a bias column would be collinear
+    # with the partition-of-unity basis), so width == output_dim like its siblings
+    "bspline": OUTPUT_DIM,
 }
 
 # Families that honor the adaptive window when driven through the Preprocessor.
