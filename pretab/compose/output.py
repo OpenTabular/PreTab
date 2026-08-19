@@ -14,7 +14,7 @@ or polars DataFrame for :meth:`~pretab.Preprocessor.set_output`.
 import numpy as np
 from scipy import sparse as sp
 
-from ..exceptions import IncompatibleParamsError, OptionalDependencyError
+from ..exceptions import IncompatibleParamsError, OptionalDependencyError, PretabDataError
 
 __all__ = [
     "attach_embeddings",
@@ -130,21 +130,52 @@ def build_output_dict(transformed, slices, *, as_sparse=False) -> dict:
     return result
 
 
-def attach_embeddings(result: dict, embeddings, *, expected: bool) -> dict:
+def attach_embeddings(result: dict, embeddings, *, expected: bool, embedding_dimensions=None, n_samples=None) -> dict:
     """Attach external embedding blocks to a transformed-output dict.
+
+    Validates the arrays against what ``fit`` recorded in ``embedding_dimensions``
+    (a ``name -> width`` mapping): the number of arrays, that each is 2D, that
+    each array's width matches its fitted dimension, and that each array's row
+    count matches ``n_samples``. Both are optional and skip the corresponding
+    check when omitted (``None``), so callers without fit-time metadata keep
+    working.
 
     Raises
     ------
     IncompatibleParamsError
         If ``embeddings`` are provided but none were configured at fit time.
+    PretabDataError
+        If the number of arrays, an array's shape, or its row count does not
+        match what ``fit`` recorded.
     """
     if not expected:
         raise IncompatibleParamsError(_EMBEDDINGS_NOT_EXPECTED)
-    if isinstance(embeddings, np.ndarray):
-        result["embedding_1"] = embeddings.astype(np.float32)
-    elif isinstance(embeddings, list):
-        for idx, e in enumerate(embeddings):
-            result[f"embedding_{idx + 1}"] = e.astype(np.float32)
+    arrays = [embeddings] if isinstance(embeddings, np.ndarray) else list(embeddings)
+    if embedding_dimensions is not None and len(arrays) != len(embedding_dimensions):
+        raise PretabDataError(
+            f"Expected {len(embedding_dimensions)} embedding array(s) (as fitted) but got {len(arrays)}.\n"
+            "Fix: pass the same number of embedding arrays that were passed to fit."
+        )
+    for idx, arr in enumerate(arrays):
+        name = f"embedding_{idx + 1}"
+        arr = np.asarray(arr)
+        if arr.ndim != 2:
+            raise PretabDataError(
+                f"{name} must be 2D (n_samples, n_dims); got shape {arr.shape}.\n"
+                "Fix: reshape the embedding array to 2 dimensions."
+            )
+        expected_width = embedding_dimensions.get(name) if embedding_dimensions is not None else None
+        if expected_width is not None and arr.shape[1] != expected_width:
+            raise PretabDataError(
+                f"{name} has {arr.shape[1]} column(s) but {expected_width} were fitted.\n"
+                "Fix: pass an embedding array with the same width used at fit time."
+            )
+        if n_samples is not None and arr.shape[0] != n_samples:
+            raise PretabDataError(
+                f"{name} has {arr.shape[0]} row(s) but X has {n_samples}.\n"
+                "Fix: pass an embedding array with one row per sample in X."
+            )
+        result[name] = arr.astype(np.float32)
     return result
 
 
@@ -155,6 +186,7 @@ def format_output(
     slices=None,
     embeddings=None,
     embeddings_expected=False,
+    embedding_dimensions=None,
     output_format="dense",
 ):
     """Return the transformed data as a stacked array or a per-block dict.
@@ -172,6 +204,9 @@ def format_output(
         External embedding blocks to attach to the dict output.
     embeddings_expected : bool, default=False
         Whether embedding blocks were configured at fit time.
+    embedding_dimensions : dict, optional
+        ``name -> width`` mapping recorded at fit time, used to validate the
+        arrays passed here.
     output_format : {"dense", "sparse"}, default="dense"
         Resolved output format. ``"sparse"`` returns a CSR matrix (array path) or
         CSR blocks (dict path).
@@ -182,5 +217,11 @@ def format_output(
 
     result = build_output_dict(transformed, slices or [], as_sparse=as_sparse)
     if embeddings is not None:
-        attach_embeddings(result, embeddings, expected=embeddings_expected)
+        attach_embeddings(
+            result,
+            embeddings,
+            expected=embeddings_expected,
+            embedding_dimensions=embedding_dimensions,
+            n_samples=transformed.shape[0],
+        )
     return result

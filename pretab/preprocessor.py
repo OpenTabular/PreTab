@@ -551,6 +551,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             slices=slices,
             embeddings=embeddings,
             embeddings_expected=self.embeddings_,
+            embedding_dimensions=self.embedding_dimensions_,
             output_format=fmt,
         )
 
