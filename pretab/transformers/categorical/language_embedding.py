@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...exceptions import OptionalDependencyError, PretabConfigError
+from ...exceptions import OptionalDependencyError, PretabConfigError, PretabDataError
 
 
 class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
@@ -113,6 +113,11 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         arr = np.asarray(X)
         if arr.ndim == 1:
             arr = arr.reshape(-1, 1)
+        if arr.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {arr.shape[1]} features, but {type(self).__name__} "
+                f"is expecting {self.n_features_in_} features as input."
+            )
         arr = arr.astype(str)
 
         column_embeddings = [self.model_.encode(arr[:, i].tolist(), convert_to_numpy=True) for i in range(arr.shape[1])]

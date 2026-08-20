@@ -3,6 +3,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.representation import RepresentationSpecMixin
+from ...exceptions import PretabDataError
 
 
 class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
@@ -78,6 +79,11 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         X = np.asarray(X, dtype=object)
         if X.ndim == 1:
             X = X.reshape(-1, 1)
+        if X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} "
+                f"is expecting {self.n_features_in_} features as input."
+            )
         out = np.zeros(X.shape, dtype=int)
         for j, mapping in enumerate(self.mapping_):
             out[:, j] = [mapping.get(v, 0) for v in X[:, j]]

@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from sklearn.base import clone
 
-from pretab.exceptions import OptionalDependencyError, PretabConfigError
+from pretab.exceptions import OptionalDependencyError, PretabConfigError, PretabDataError
 from pretab.transformers import LanguageEmbeddingTransformer
 
 
@@ -82,6 +82,22 @@ def test_transform_multi_column_preserves_row_count():
     embeddings = transformer.fit_transform(np.array([["a", "b"], ["c", "d"], ["e", "f"]]))
     assert embeddings.shape == (3, 8)  # 2 columns x 4-dim embedding
     assert dummy.calls == 2  # one encode call per column
+
+
+@pytest.mark.parametrize(
+    "X_transform",
+    [
+        np.array([["a"], ["b"]]),
+        np.array([["a", "b", "extra"], ["c", "d", "extra"]]),
+    ],
+)
+def test_transform_rejects_fitted_feature_count_mismatch(X_transform):
+    dummy = _DummyModel()
+    transformer = LanguageEmbeddingTransformer(model=dummy).fit(np.array([["a", "b"], ["c", "d"]]))
+
+    with pytest.raises(PretabDataError, match="is expecting 2 features"):
+        transformer.transform(X_transform)
+    assert dummy.calls == 0
 
 
 def test_fit_without_dependency_raises(monkeypatch):
