@@ -44,6 +44,18 @@ def test_build_feature_info_reports_embeddings(fitted_ct):
     assert embeddings == {"embedding_1": {"preprocessing": None, "dimension": 8, "categories": None}}
 
 
+def test_build_feature_info_does_not_infer_kind_from_cat_in_feature_name(make_config):
+    feature = "education_category_score"
+    frame = pd.DataFrame({feature: np.linspace(0.0, 1.0, 8)})
+    ct = build_column_transformer(make_config(numerical_method="robust"), [feature], [])
+    ct.fit(frame)
+
+    numerical, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert feature in numerical
+    assert feature not in categorical
+
+
 def test_build_transformer_summary_has_header_and_rows():
     numerical = {"age": {"preprocessing": "imputer -> standardization", "dimension": 1, "categories": None}}
     categorical = {"city": {"preprocessing": "imputer -> continuous_ordinal", "dimension": 1, "categories": 3}}

@@ -197,7 +197,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                         dimension = None
                 if separate_state_dimension is not None:
                     dimension = separate_state_dimension
-                if "cat" in name:
+                if name.startswith("cat_"):
                     categorical_feature_info[feature_name] = {
                         "preprocessing": preprocessing_type,
                         "dimension": dimension,
