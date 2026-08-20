@@ -38,17 +38,22 @@ class _Square(BaseRepresentation):
         return [1] * self.n_features_in_
 
 
-class _CatPassthrough(BaseRepresentation):
+class _CatStringLength(BaseRepresentation):
     representation_name = "cat_reg"
     feature_kind = "categorical"
 
+    def __init__(self, degree=1):
+        self.degree = degree
+
     def fit(self, X, y=None):
-        self._validate(X, reset=True)
+        X = np.asarray(X, dtype=object)
+        self.n_features_in_ = X.shape[1]
         return self
 
     def transform(self, X):
         check_is_fitted(self, "n_features_in_")
-        return np.asarray(self._validate(X, reset=False), dtype=float)
+        X = np.asarray(X, dtype=object)
+        return np.vectorize(lambda value: len(str(value)) * self.degree, otypes=[float])(X)
 
     def _output_sizes(self):
         return [1] * self.n_features_in_
@@ -78,9 +83,28 @@ def test_register_end_to_end_through_preprocessor():
 
 
 def test_register_categorical_updates_categorical_view():
-    register_representation("cat_reg", _CatPassthrough)
+    register_representation("cat_reg", _CatStringLength)
     assert "cat_reg" in registry.CATEGORICAL_METHODS
     assert "cat_reg" in list_representations(feature_kind="categorical")
+
+
+def test_register_categorical_end_to_end_through_preprocessor():
+    register_representation("cat_reg", _CatStringLength, allowed_args=("degree",))
+    X = pd.DataFrame({"city": ["Rome", "Berlin", "Oslo", "Paris"]})
+    pre = Preprocessor(
+        numerical_method="none",
+        categorical_method="cat_reg",
+        degree=2,
+        target_aware=False,
+        placement_strategy="uniform",
+    )
+
+    out = np.asarray(pre.fit_transform(X, return_array=True))
+
+    np.testing.assert_array_equal(out[:, 0], [8.0, 12.0, 8.0, 10.0])
+    pipeline = pre.column_transformer_.named_transformers_["cat_city"]
+    assert isinstance(pipeline.named_steps["cat_reg"], _CatStringLength)
+    assert pipeline.named_steps["cat_reg"].degree == 2
 
 
 def test_duplicate_registration_requires_override():

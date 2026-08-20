@@ -207,7 +207,8 @@ def get_categorical_transformer_steps(
             valid=set(CATEGORICAL_METHODS),
         )
 
-    cls = get_spec(method).transformer_cls
+    spec = get_spec(method)
+    cls = spec.transformer_cls
 
     if method == "int":
         steps.append(("continuous_ordinal", cls()))
@@ -223,6 +224,10 @@ def get_categorical_transformer_steps(
         steps.append(("none", cls()))
     elif method == "onehot_from_ordinal":
         steps.append(("onehot_from_ordinal", cls()))
+    else:
+        call_kwargs = _filter_kwargs(spec.allowed_args, kwargs)
+        call_kwargs.update(_placement_kwargs(spec, kwargs))
+        steps.append((method, cls(**call_kwargs)))
 
     return steps
 
@@ -269,11 +274,27 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             **config.seed_kwargs,
         )
     else:
+        constructor_kwargs = {}
+        if known:
+            shared_kwargs = {
+                "task": config.task,
+                "target_aware": config.target_aware,
+                "output_dim": config.output_dim,
+                "adaptive": config.adaptive,
+                "min_output_dim": config.min_output_dim if config.adaptive else None,
+                "max_output_dim": config.max_output_dim if config.adaptive else None,
+                "degree": config.degree,
+                "placement_strategy": config.placement_strategy,
+                **config.seed_kwargs,
+            }
+            constructor_kwargs = _filter_kwargs(spec.allowed_args, shared_kwargs)
+            constructor_kwargs.update(_placement_kwargs(spec, shared_kwargs))
         steps = get_categorical_transformer_steps(
             method,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
             add_missing_indicator=plan["add_indicator"],
+            **constructor_kwargs,
         )
 
     pipeline = Pipeline(steps)
