@@ -40,8 +40,9 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
 
     Parameters
     ----------
-    array : numpy.ndarray
-        The dense stacked output.
+    array : numpy.ndarray or scipy.sparse matrix
+        The stacked output. Sparse inputs are inspected through their shape,
+        dtype, and stored values without converting them to a dense array.
     output_format : {"auto", "dense", "sparse"}
         Requested format. ``"auto"`` picks ``"sparse"`` when the density is below
         ``threshold``.
@@ -55,8 +56,10 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
         ``format``, ``shape``, ``density``, ``dense_bytes``, ``actual_bytes``, and
         ``memory_saved_bytes``.
     """
-    density = float(np.count_nonzero(array)) / array.size if array.size else 0.0
-    dense_bytes = int(array.nbytes)
+    size = int(np.prod(array.shape, dtype=np.int64))
+    nonzero = int(array.count_nonzero()) if sp.issparse(array) else int(np.count_nonzero(array))
+    density = float(nonzero) / size if size else 0.0
+    dense_bytes = size * int(array.dtype.itemsize)
 
     if output_format == "sparse":
         use_sparse = True
@@ -66,7 +69,7 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
         use_sparse = False
 
     if use_sparse:
-        csr = sp.csr_matrix(array)
+        csr = array.tocsr(copy=False) if sp.issparse(array) else sp.csr_matrix(array)
         actual_bytes = int(csr.data.nbytes + csr.indices.nbytes + csr.indptr.nbytes)
         fmt = "sparse"
     else:
@@ -89,8 +92,9 @@ def to_dataframe_output(array, columns, container):
 
     Parameters
     ----------
-    array : numpy.ndarray
-        Dense stacked output.
+    array : numpy.ndarray or scipy.sparse matrix
+        Stacked output. Sparse input is intentionally densified because
+        ``set_output`` requests a dense pandas or polars container.
     columns : sequence of str
         One name per output column (from ``get_feature_names_out``).
     container : {"pandas", "polars"}
@@ -102,6 +106,8 @@ def to_dataframe_output(array, columns, container):
         If ``container="polars"`` but polars is not installed.
     """
     columns = list(columns)
+    if sp.issparse(array):
+        array = array.toarray()
     if container == "pandas":
         import pandas as pd
 
@@ -117,7 +123,7 @@ def to_dataframe_output(array, columns, container):
 
 
 def build_output_dict(transformed, slices, *, as_sparse=False) -> dict:
-    """Split a stacked array into a name -> block dict using ``slices``.
+    """Split a stacked dense or sparse array into a name -> block dict.
 
     ``slices`` is an ordered iterable of ``(name, start, width)`` describing each
     transformer's contiguous span in the stacked output. When ``as_sparse`` is
@@ -126,7 +132,10 @@ def build_output_dict(transformed, slices, *, as_sparse=False) -> dict:
     result = {}
     for name, start, width in slices:
         block = transformed[:, start : start + width]
-        result[name] = sp.csr_matrix(block) if as_sparse else block
+        if as_sparse:
+            result[name] = block.tocsr(copy=False) if sp.issparse(block) else sp.csr_matrix(block)
+        else:
+            result[name] = block.toarray() if sp.issparse(block) else block
     return result
 
 
@@ -193,8 +202,8 @@ def format_output(
 
     Parameters
     ----------
-    transformed : numpy.ndarray
-        The dense stacked array produced by the fitted ColumnTransformer.
+    transformed : numpy.ndarray or scipy.sparse matrix
+        The stacked output produced by the fitted ColumnTransformer.
     return_array : bool
         If True, return the stacked array (dense or CSR); otherwise build the dict.
     slices : iterable of (str, int, int), optional
@@ -212,8 +221,13 @@ def format_output(
         CSR blocks (dict path).
     """
     as_sparse = output_format == "sparse"
+    if as_sparse:
+        transformed = transformed.tocsr(copy=False) if sp.issparse(transformed) else sp.csr_matrix(transformed)
+    elif sp.issparse(transformed):
+        transformed = transformed.toarray()
+
     if return_array:
-        return sp.csr_matrix(transformed) if as_sparse else transformed
+        return transformed
 
     result = build_output_dict(transformed, slices or [], as_sparse=as_sparse)
     if embeddings is not None:

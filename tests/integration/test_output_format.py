@@ -83,6 +83,27 @@ def test_sparse_report_saves_memory(frame, y):
     assert report["memory_saved_bytes"] == report["dense_bytes"] - report["actual_bytes"]
 
 
+def test_sparse_intermediate_is_never_densified(monkeypatch):
+    """A sparse ColumnTransformer result must remain sparse through formatting."""
+    cats = pd.DataFrame({"c": [f"value-{i}" for i in range(100)]})
+    p = Preprocessor(categorical_method="one-hot", output_format="sparse").fit(cats)
+    raw = p.column_transformer_.transform(cats)
+    assert sp.issparse(raw)
+
+    class NoDensifyCSR(sp.csr_matrix):
+        def toarray(self, *args, **kwargs):
+            raise AssertionError("sparse intermediate was densified")
+
+    guarded = NoDensifyCSR(raw)
+    monkeypatch.setattr(p.column_transformer_, "transform", lambda X: guarded)
+
+    out = p.transform(cats, return_array=True)
+    assert sp.issparse(out)
+    assert out.shape == (100, 100)
+    assert out.nnz == 100
+    assert p.output_report_["density"] == pytest.approx(0.01)
+
+
 # --- auto ----------------------------------------------------------------------
 
 

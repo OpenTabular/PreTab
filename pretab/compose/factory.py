@@ -305,7 +305,13 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
     return pipeline
 
 
-def build_column_transformer(config: PreprocessorConfig, numerical_features, categorical_features) -> ColumnTransformer:
+def build_column_transformer(
+    config: PreprocessorConfig,
+    numerical_features,
+    categorical_features,
+    *,
+    sparse_threshold: float = 0.3,
+) -> ColumnTransformer:
     """Assemble the per-column pipelines into the final ColumnTransformer.
 
     Numerical features are prefixed ``num_`` and categorical features ``cat_`` to
@@ -321,4 +327,8 @@ def build_column_transformer(config: PreprocessorConfig, numerical_features, cat
         method = config.method_for(feature, is_numerical=False)
         pipeline = create_transformer(method, is_numerical=False, config=config)
         transformers.append((f"cat_{feature}", pipeline, [feature]))
-    return ColumnTransformer(transformers=transformers, remainder="passthrough")
+    return ColumnTransformer(
+        transformers=transformers,
+        remainder="passthrough",
+        sparse_threshold=sparse_threshold,
+    )

@@ -482,10 +482,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             numeric_values = X[numerical_features].to_numpy(dtype=np.float64, na_value=np.nan)
             apply_constant_policy(numeric_values, self.policy_, estimator=self)
 
-        self.column_transformer_ = build_column_transformer(config, numerical_features, categorical_features)
-        self.column_transformer_.fit(X, y)
-        self.n_features_in_ = X.shape[1]
-
         valid_formats = ("auto", "dense", "sparse")
         if self.output_format not in valid_formats:
             raise invalid_param_error(
@@ -495,6 +491,19 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 "must be one of 'auto', 'dense', 'sparse'",
                 valid=set(valid_formats),
             )
+
+        # Ask ColumnTransformer to assemble the representation in the requested
+        # container whenever its component outputs permit it. In particular,
+        # explicit sparse output must not densely stack sparse one-hot blocks.
+        sparse_threshold = {"dense": 0.0, "auto": 0.3, "sparse": 1.0}[self.output_format]
+        self.column_transformer_ = build_column_transformer(
+            config,
+            numerical_features,
+            categorical_features,
+            sparse_threshold=sparse_threshold,
+        )
+        self.column_transformer_.fit(X, y)
+        self.n_features_in_ = X.shape[1]
 
         self._enforce_output_budget(X.shape[0])
 
@@ -547,9 +556,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             self._reject_missing(X)
 
         transformed_X = self.column_transformer_.transform(X)
-        if sp.issparse(transformed_X):
-            transformed_X = transformed_X.toarray()  # type: ignore
-        transformed_X = np.asarray(transformed_X)
+        if not sp.issparse(transformed_X):
+            transformed_X = np.asarray(transformed_X)
         if self.dtype is not None:
             transformed_X = transformed_X.astype(self.dtype, copy=False)
 
