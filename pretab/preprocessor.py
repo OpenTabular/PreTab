@@ -21,7 +21,7 @@ from .compose.inspection import (
     clean_feature_names,
     get_output_slices,
 )
-from .compose.output import compute_output_report, format_output, to_dataframe_output
+from .compose.output import compute_output_report, format_output, to_dataframe_output, validate_embedding_request
 from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
 from .core.logging import configure_logging, get_logger
 from .core.parameters import UNSET
@@ -535,7 +535,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         X : pandas.DataFrame, numpy.ndarray, or dict
             Input features to transform.
         embeddings : np.ndarray or list of np.ndarray, optional
-            Optional external embeddings to attach to the transformation.
+            External embeddings to attach to dictionary output. Required when
+            embeddings were supplied during ``fit`` and unsupported when
+            ``return_array=True`` or :meth:`set_output` requests a DataFrame.
         return_array : bool, default=False
             If True, return a single stacked NumPy array. If False, return a dict of transformed arrays.
 
@@ -555,6 +557,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if self.missing_policy == "error":
             self._reject_missing(X)
 
+        container = _get_output_config("transform", self)["dense"]
+        output_kind = container if container in ("pandas", "polars") else ("array" if return_array else "dict")
+        validate_embedding_request(embeddings, expected=self.embeddings_, output_kind=output_kind)
+
         transformed_X = self.column_transformer_.transform(X)
         if not sp.issparse(transformed_X):
             transformed_X = np.asarray(transformed_X)
@@ -563,7 +569,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         fmt, self.output_report_ = compute_output_report(transformed_X, self.output_format)
 
-        container = _get_output_config("transform", self)["dense"]
         if container in ("pandas", "polars"):
             return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
 

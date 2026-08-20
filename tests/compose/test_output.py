@@ -48,9 +48,7 @@ def test_attach_embeddings_rejects_wrong_width():
 def test_attach_embeddings_rejects_wrong_row_count():
     """Regression guard for issue #34: a mismatched row count must raise."""
     with pytest.raises(PretabDataError, match="has 2 row"):
-        attach_embeddings(
-            {}, np.ones((2, 3)), expected=True, embedding_dimensions={"embedding_1": 3}, n_samples=100
-        )
+        attach_embeddings({}, np.ones((2, 3)), expected=True, embedding_dimensions={"embedding_1": 3}, n_samples=100)
 
 
 def test_format_output_array_returns_input_unchanged():
@@ -76,3 +74,18 @@ def test_format_output_dict_attaches_embeddings():
         embeddings_expected=True,
     )
     assert "embedding_1" in out
+
+
+def test_format_output_requires_fitted_embeddings():
+    with pytest.raises(PretabDataError, match="required during transform"):
+        format_output(np.zeros((2, 2)), return_array=False, embeddings_expected=True)
+
+
+def test_format_output_rejects_embeddings_with_array_output():
+    with pytest.raises(IncompatibleParamsError, match="only with dictionary output"):
+        format_output(
+            np.zeros((2, 2)),
+            return_array=True,
+            embeddings=np.ones((2, 3)),
+            embeddings_expected=True,
+        )

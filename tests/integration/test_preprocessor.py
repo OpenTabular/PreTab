@@ -5,6 +5,7 @@ from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 from sklearn.utils.validation import check_is_fitted
 
+from pretab.exceptions import IncompatibleParamsError, PretabDataError
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
 
 
@@ -66,6 +67,33 @@ def test_multiple_embeddings(sample_data):
     assert "embedding_1" in out and "embedding_2" in out
     assert out["embedding_1"].shape[1] == 3
     assert out["embedding_2"].shape[1] == 7
+
+
+def test_embeddings_are_required_after_embedding_aware_fit(sample_data):
+    X, y = sample_data
+    embeddings = np.random.rand(len(X), 4)
+    pre = Preprocessor().fit(X, y, embeddings=embeddings)
+
+    with pytest.raises(PretabDataError, match="required during transform"):
+        pre.transform(X)
+
+
+def test_embeddings_are_rejected_with_array_output(sample_data):
+    X, y = sample_data
+    embeddings = np.random.rand(len(X), 4)
+    pre = Preprocessor().fit(X, y, embeddings=embeddings)
+
+    with pytest.raises(IncompatibleParamsError, match="only with dictionary output"):
+        pre.transform(X, embeddings=embeddings, return_array=True)
+
+
+def test_embeddings_are_rejected_with_dataframe_output(sample_data):
+    X, y = sample_data
+    embeddings = np.random.rand(len(X), 4)
+    pre = Preprocessor().fit(X, y, embeddings=embeddings).set_output(transform="pandas")
+
+    with pytest.raises(IncompatibleParamsError, match="only with dictionary output"):
+        pre.transform(X, embeddings=embeddings)
 
 
 def test_feature_info_returns_three_dicts(sample_data):

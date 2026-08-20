@@ -161,6 +161,38 @@ def test_separate_state_on_categorical(y):
     assert any(n.endswith("__missing") for n in names)
 
 
+def test_separate_state_feature_info_reports_both_branches(frame_with_nan, y):
+    p = _bspline(missing_policy="separate_state").fit(frame_with_nan, y)
+
+    numerical, categorical, embeddings = p.get_feature_info(verbose=False)
+
+    assert categorical == {}
+    assert embeddings == {}
+    for feature in frame_with_nan.columns:
+        assert "representation(" in numerical[feature]["preprocessing"]
+        assert "+ missing" in numerical[feature]["preprocessing"]
+        assert numerical[feature]["dimension"] == p.output_dims_[feature]
+
+
+def test_separate_state_verbose_two_does_not_break_fit(frame_with_nan, y):
+    fitted = _bspline(missing_policy="separate_state", verbose=2).fit(frame_with_nan, y)
+    assert fitted.total_output_dim_ > 0
+
+
+def test_separate_state_lineage_distinguishes_missing_indicator(frame_with_nan, y):
+    p = Preprocessor(numerical_method="minmax", missing_policy="separate_state").fit(frame_with_nan, y)
+
+    lineage = p.get_feature_lineage()
+    representation = [record for record in lineage if record.family != "missing_state"]
+    missing = [record for record in lineage if record.family == "missing_state"]
+
+    assert len(missing) == len(frame_with_nan.columns)
+    assert all(record.family == "minmax" and record.component == "raw" for record in representation)
+    assert all(record.component == "indicator" for record in missing)
+    assert all(record.output_feature.endswith("__missing") for record in missing)
+    assert [record.output_feature for record in lineage] == list(p.get_feature_names_out())
+
+
 # --- validation ----------------------------------------------------------------
 
 

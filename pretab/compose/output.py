@@ -22,6 +22,7 @@ __all__ = [
     "compute_output_report",
     "format_output",
     "to_dataframe_output",
+    "validate_embedding_request",
 ]
 
 # Density at or below which ``output_format="auto"`` switches to a sparse matrix,
@@ -33,6 +34,31 @@ _EMBEDDINGS_NOT_EXPECTED = (
     "Fix: configure an embedding feature in feature_preprocessing before "
     "passing embeddings to transform, or omit the embeddings argument."
 )
+_EMBEDDINGS_REQUIRED = (
+    "External embeddings were supplied during fit and are required during transform.\n"
+    "Fix: pass embeddings with the same number of blocks and dimensions used during fit."
+)
+_EMBEDDINGS_DICT_ONLY = (
+    "External embeddings are supported only with dictionary output.\n"
+    "Fix: call transform(..., return_array=False) with set_output(transform='default')."
+)
+
+
+def validate_embedding_request(embeddings, *, expected: bool, output_kind: str = "dict") -> None:
+    """Validate embedding presence and the requested output container.
+
+    External embeddings are separate named feature blocks, so they are available
+    only through dictionary output. Once supplied during fit, they are required on
+    every transform to keep the fitted and transformed feature contracts aligned.
+    """
+    if embeddings is None:
+        if expected:
+            raise PretabDataError(_EMBEDDINGS_REQUIRED)
+        return
+    if not expected:
+        raise IncompatibleParamsError(_EMBEDDINGS_NOT_EXPECTED)
+    if output_kind != "dict":
+        raise IncompatibleParamsError(_EMBEDDINGS_DICT_ONLY)
 
 
 def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESHOLD):
@@ -157,8 +183,7 @@ def attach_embeddings(result: dict, embeddings, *, expected: bool, embedding_dim
         If the number of arrays, an array's shape, or its row count does not
         match what ``fit`` recorded.
     """
-    if not expected:
-        raise IncompatibleParamsError(_EMBEDDINGS_NOT_EXPECTED)
+    validate_embedding_request(embeddings, expected=expected)
     arrays = [embeddings] if isinstance(embeddings, np.ndarray) else list(embeddings)
     if embedding_dimensions is not None and len(arrays) != len(embedding_dimensions):
         raise PretabDataError(
@@ -220,6 +245,12 @@ def format_output(
         Resolved output format. ``"sparse"`` returns a CSR matrix (array path) or
         CSR blocks (dict path).
     """
+    validate_embedding_request(
+        embeddings,
+        expected=embeddings_expected,
+        output_kind="array" if return_array else "dict",
+    )
+
     as_sparse = output_format == "sparse"
     if as_sparse:
         transformed = transformed.tocsr(copy=False) if sp.issparse(transformed) else sp.csr_matrix(transformed)
