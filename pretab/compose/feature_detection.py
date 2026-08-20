@@ -66,7 +66,7 @@ def detect_column_types(X, *, cat_cutoff, treat_all_integers_as_numerical, estim
         num_unique_values = X[col].nunique()
         total_samples = len(X[col])
 
-        if treat_all_integers_as_numerical and X[col].dtype.kind == "i":
+        if treat_all_integers_as_numerical and X[col].dtype.kind in "iu":
             numerical_features.append(col)
         else:
             if isinstance(cat_cutoff, float):
@@ -81,7 +81,7 @@ def detect_column_types(X, *, cat_cutoff, treat_all_integers_as_numerical, estim
                     "must be a float (unique-ratio cutoff) or an int (absolute unique-count cutoff)",
                 )
 
-            if X[col].dtype.kind not in "iufc" or (X[col].dtype.kind == "i" and cutoff_condition):
+            if X[col].dtype.kind not in "iufc" or (X[col].dtype.kind in "iu" and cutoff_condition):
                 categorical_features.append(col)
             else:
                 numerical_features.append(col)

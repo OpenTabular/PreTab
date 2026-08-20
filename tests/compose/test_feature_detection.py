@@ -57,6 +57,38 @@ def test_treat_all_integers_as_numerical_overrides_cutoff():
     assert num == ["x"] and cat == []
 
 
+@pytest.mark.parametrize("dtype", [np.int8, np.uint8])
+@pytest.mark.parametrize(
+    "cat_cutoff, expected_numerical, expected_categorical",
+    [
+        (0.6, [], ["x"]),
+        (0.4, ["x"], []),
+        (4, [], ["x"]),
+        (2, ["x"], []),
+    ],
+)
+def test_signed_and_unsigned_integers_follow_same_cutoff(dtype, cat_cutoff, expected_numerical, expected_categorical):
+    df = pd.DataFrame({"x": np.array([1, 2, 3, 1, 2, 3], dtype=dtype)})
+    numerical, categorical = detect_column_types(
+        df,
+        cat_cutoff=cat_cutoff,
+        treat_all_integers_as_numerical=False,
+    )
+    assert numerical == expected_numerical
+    assert categorical == expected_categorical
+
+
+def test_treat_all_unsigned_integers_as_numerical_overrides_cutoff():
+    df = pd.DataFrame({"x": np.array([0, 1, 0, 1], dtype=np.uint8)})
+    numerical, categorical = detect_column_types(
+        df,
+        cat_cutoff=0.9,
+        treat_all_integers_as_numerical=True,
+    )
+    assert numerical == ["x"]
+    assert categorical == []
+
+
 def test_object_dtype_is_always_categorical():
     df = pd.DataFrame({"c": ["a", "b", "c", "d", "e", "f"]})
     _, cat = detect_column_types(df, cat_cutoff=0.01, treat_all_integers_as_numerical=False)
