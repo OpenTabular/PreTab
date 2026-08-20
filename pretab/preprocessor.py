@@ -1,5 +1,4 @@
 import hashlib
-import inspect
 import json
 import os
 import time
@@ -25,6 +24,7 @@ from .compose.inspection import (
 from .compose.output import compute_output_report, format_output, to_dataframe_output
 from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
 from .core.logging import configure_logging, get_logger
+from .core.parameters import UNSET
 from .core.policy import RepresentationPolicy, apply_constant_policy
 from .exceptions import (
     ConfigWarning,
@@ -39,7 +39,10 @@ logger = get_logger(__name__)
 
 #: Named parameter bundles exposed through ``Preprocessor(preset=...)``. Each
 #: preset supplies values only for the listed parameters; any parameter the caller
-#: sets explicitly (i.e. away from its ``__init__`` default) overrides the preset.
+#: sets explicitly overrides the preset. ``__init__`` defaults every parameter listed
+#: here to :data:`~pretab.core.parameters.UNSET` (rather than its ordinary value) so
+#: "left unset" can be told apart from "explicitly passed the same value the default
+#: happens to have" -- see :meth:`Preprocessor._resolved_params`.
 PRESETS = {
     "standard": {
         "numerical_method": "ple",
@@ -60,6 +63,18 @@ PRESETS = {
         "min_output_dim": 5,
         "max_output_dim": 16,
     },
+}
+
+#: True ``__init__`` defaults for the parameters presets may override. These are
+#: substituted back in by :meth:`Preprocessor._resolved_params` wherever the
+#: constructor received :data:`~pretab.core.parameters.UNSET`.
+_PRESET_PARAM_DEFAULTS = {
+    "numerical_method": "ple",
+    "categorical_method": "int",
+    "output_dim": 7,
+    "adaptive": False,
+    "min_output_dim": 5,
+    "max_output_dim": 10,
 }
 
 
@@ -325,17 +340,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     def __init__(
         self,
-        numerical_method="ple",
-        categorical_method="int",
+        numerical_method=UNSET,
+        categorical_method=UNSET,
         feature_preprocessing=None,
-        output_dim=7,
+        output_dim=UNSET,
         degree=3,
         target_aware=True,
         placement_strategy="cart",
         task="regression",
-        adaptive=False,
-        min_output_dim=5,
-        max_output_dim=10,
+        adaptive=UNSET,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
         random_state=None,
         scaling="minmax",
         cat_cutoff=0.03,
@@ -578,27 +593,24 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         return self.fit(X, y, embeddings=embeddings).transform(X, embeddings, return_array)
 
-    @classmethod
-    def _param_defaults(cls):
-        """Return the ``__init__`` parameter defaults, keyed by name."""
-        signature = inspect.signature(cls.__init__)
-        return {
-            name: parameter.default
-            for name, parameter in signature.parameters.items()
-            if parameter.default is not inspect.Parameter.empty
-        }
-
     def _resolved_params(self):
         """Return the effective parameters after expanding ``preset``.
 
-        A preset fills in only the parameters left at their ``__init__`` default;
-        explicitly-set parameters always take precedence. The ``preset`` key is
-        dropped from the returned mapping.
+        Parameters that presets can fill in default to :data:`UNSET` in
+        ``__init__`` rather than to their ordinary value, so a caller who
+        explicitly passes that same ordinary value (e.g. ``adaptive=False``,
+        which is also the plain constructor default) is still recognized as
+        having set it -- an explicit value always takes precedence over the
+        preset, no matter what it equals. Parameters left at ``UNSET`` fall
+        back to the preset's value, or to their ordinary default when no
+        preset supplies one. The ``preset`` key is dropped from the returned
+        mapping.
         """
         params = self.get_params(deep=False)
         preset = params.pop("preset", None)
+        resolved = {key: (_PRESET_PARAM_DEFAULTS[key] if value is UNSET else value) for key, value in params.items()}
         if preset is None:
-            return params
+            return resolved
         if preset not in PRESETS:
             raise invalid_param_error(
                 type(self).__name__,
@@ -607,10 +619,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 "must be one of " + ", ".join(repr(name) for name in sorted(PRESETS)),
                 valid=set(PRESETS),
             )
-        defaults = self._param_defaults()
-        resolved = dict(params)
         for key, preset_value in PRESETS[preset].items():
-            if key in defaults and params.get(key) == defaults[key]:
+            if params.get(key, UNSET) is UNSET:
                 resolved[key] = preset_value
         return resolved
 

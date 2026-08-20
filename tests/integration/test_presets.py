@@ -57,6 +57,17 @@ def test_explicit_param_overrides_preset():
     assert cfg["output_dim"] == 5  # user value wins over the preset's 16
 
 
+def test_explicit_param_equal_to_constructor_default_overrides_preset():
+    # Regression guard: an explicit value that happens to equal the ordinary
+    # __init__ default must still win over the preset, not be mistaken for
+    # "left unset".
+    cfg = Preprocessor(preset="adaptive", adaptive=False).get_resolved_config()
+    assert cfg["adaptive"] is False  # user explicitly said no, preset's True must not apply
+
+    cfg2 = Preprocessor(preset="expanded", output_dim=7).get_resolved_config()
+    assert cfg2["output_dim"] == 7  # user explicitly said 7, preset's 16 must not apply
+
+
 def test_preset_is_preserved_by_get_params_and_clone():
     pre = Preprocessor(preset="standard")
     assert pre.get_params()["preset"] == "standard"
