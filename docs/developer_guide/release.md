@@ -73,8 +73,16 @@ pip install --index-url https://test.pypi.org/simple/ \
 python -c "import pretab; print(pretab.__version__)"
 ```
 
-If the candidate has problems, fix them on the branch, then repeat step 3 to produce the
-next RC (`rc2`, `rc3`, ...).
+If the candidate has problems, fix them on the branch and produce the next RC:
+
+```bash
+just bump-rc-preview     # confirm the proposed version (e.g. 1.0.0rc2)
+just bump-rc             # apply the bump: pyproject.toml, CHANGELOG.md, commit, tag
+git push origin release/vX.Y.Z
+git push origin vX.Y.ZrcN
+```
+
+Repeat for each additional RC (`rc3`, `rc4`, ...) until the build is clean.
 
 ### 5. Merge to main
 
