@@ -17,26 +17,26 @@ defines testing, building, and formatting).
 
 1. Clone the repository:
 
-   ```bash
-   git clone https://github.com/OpenTabular/PreTab
-   cd PreTab
-   ```
+```bash
+git clone https://github.com/OpenTabular/PreTab
+cd PreTab
+```
 
 2. Install the prerequisites: `pip install poetry` and `just` (see the
    [just install guide](https://just.systems/man/en/packages.html), e.g. `brew install just`).
 
 3. Install dependencies and register the pre-commit hooks:
 
-   ```bash
-   just install
-   ```
+```bash
+just install
+```
 
-   Without `just`, run the same steps directly:
+Without `just`, run the same steps directly:
 
-   ```bash
-   poetry install
-   poetry run pre-commit install --hook-type commit-msg --hook-type pre-commit --hook-type pre-push
-   ```
+```bash
+poetry install
+poetry run pre-commit install --hook-type commit-msg --hook-type pre-commit --hook-type pre-push
+```
 
 4. To work on the docs, also install the docs group with `poetry install --with docs`.
 
@@ -46,11 +46,11 @@ defines testing, building, and formatting).
 2. Make your changes, keeping each pull request to a single logical focus.
 3. Add or update tests, and run the full check suite locally before pushing:
 
-   ```bash
-   just test     # full suite with coverage
-   just check    # lint, format, type-check, all pre-commit hooks (what CI runs)
-   just docs     # build HTML docs (warnings treated as errors)
-   ```
+```bash
+just test     # full suite with coverage
+just check    # lint, format, type-check, all pre-commit hooks (what CI runs)
+just docs     # build HTML docs (warnings treated as errors)
+```
 
 4. Commit using Conventional Commits via `just commit`. If `just check` reformats files,
    commit those separately with `style: apply ruff formatting`.
