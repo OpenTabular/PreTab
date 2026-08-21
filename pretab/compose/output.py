@@ -267,6 +267,6 @@ def format_output(
             embeddings,
             expected=embeddings_expected,
             embedding_dimensions=embedding_dimensions,
-            n_samples=transformed.shape[0],
+            n_samples=transformed.shape[0] if transformed.shape else None,
         )
     return result

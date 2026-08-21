@@ -30,7 +30,7 @@ def test_to_dataframe_rejects_duplicate_columns():
     clear PretabDataError instead of an opaque AttributeError deep inside
     column-type detection.
     """
-    df = pd.DataFrame(np.column_stack([np.zeros(5), np.ones(5)]), columns=["a", "a"])
+    df = pd.DataFrame(np.column_stack([np.zeros(5), np.ones(5)]), columns=pd.Index(["a", "a"]))
     with pytest.raises(PretabDataError, match=r"Duplicate column names.*\['a'\]"):
         to_dataframe(df)
 

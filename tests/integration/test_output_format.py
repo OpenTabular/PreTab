@@ -98,7 +98,7 @@ def test_sparse_intermediate_is_never_densified(monkeypatch):
     monkeypatch.setattr(p.column_transformer_, "transform", lambda X: guarded)
 
     out = p.transform(cats, return_array=True)
-    assert sp.issparse(out)
+    assert isinstance(out, sp.csr_matrix)
     assert out.shape == (100, 100)
     assert out.nnz == 100
     assert p.output_report_["density"] == pytest.approx(0.01)
