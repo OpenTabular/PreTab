@@ -45,11 +45,13 @@ def bspline_basis(x: np.ndarray, knots: np.ndarray, degree: int, i: int, last: i
     denom1 = knots[i + degree] - knots[i]
     denom2 = knots[i + degree + 1] - knots[i + 1]
     term1: np.ndarray = (
-        np.zeros_like(x, dtype=float) if denom1 == 0
+        np.zeros_like(x, dtype=float)
+        if denom1 == 0
         else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i, last)
     )
     term2: np.ndarray = (
-        np.zeros_like(x, dtype=float) if denom2 == 0
+        np.zeros_like(x, dtype=float)
+        if denom2 == 0
         else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1, last)
     )
     return term1 + term2
