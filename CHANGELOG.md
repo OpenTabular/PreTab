@@ -7,6 +7,36 @@ This project adheres to [Semantic Versioning](https://semver.org/) and uses
 
 Going forward, this file is updated automatically by `cz bump` on each release.
 
+## v1.0.0rc2 (2026-08-21)
+
+### Fix
+
+- missclassify numerical to cat feature based on name
+- enfore feature count for cat transformer
+- unassigned int cat cuttoff
+- missing policy feature inspection, embedding silient failure
+- sparse to dense conversion for sparse output
+- custom representation usage for cat features
+- supplied parameter override preset
+- appropriate error message for out_dim and min_out_dim (#38)
+- raise error for duplicate columns (#37)
+- follow sklearn contract for binning (#36)
+- reject unrecognized scalar (#35)
+- validate embedding against fitted dimension (#34)
+- set include_bias to False as default (#33)
+- **embeddings**: accept list input in LanguageEmbeddingTransformer.fit (issue #21)
+- **core**: raise on mismatched input_features length in get_feature_names_out (issue #21)
+- **locations**: keep importance aligned with locations after sort/dedupe (issue #21)
+- keep location provided by tree when suplementing
+-  provide appropriate error for onehot_from_ordinal input
+- **splines,transformers**: close B-spline final span and fix ContinuousOrdinalTransformer DataFrame input (issues #12, #14)
+- **selectors**: make _enforce_spacing order-independent to fix lightgbm clustering (issue #10)
+
+### Perf
+
+- **splines**: drop retained training design matrices (issue #19)
+- **preprocessor**: slice dict blocks from output_indices_ instead of re-transforming (issue #20)
+
 ## v1.0.0rc1 (2026-08-15)
 
 ### Feat
