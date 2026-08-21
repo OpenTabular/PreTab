@@ -39,7 +39,7 @@ extensions = [
     "sphinx.ext.todo",
     "myst_parser",
     "sphinx_design",
-    "sphinx_copybutton",
+    # "sphinx_copybutton",
 ]
 
 # Optional dependency imported lazily by the embeddings transformer.
