@@ -123,6 +123,12 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         column_embeddings = [self.model_.encode(arr[:, i].tolist(), convert_to_numpy=True) for i in range(arr.shape[1])]
         return np.hstack(column_embeddings)
 
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
+        tags.input_tags.categorical = True
+        tags.input_tags.string = True
+        return tags
+
     def get_feature_names_out(self, input_features=None):
         """Return output feature names: one per embedding dimension per input column.
 

@@ -110,6 +110,8 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
 
     def __sklearn_tags__(self):
         """Declare that missing/unknown categories are handled (mapped to 0)."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.input_tags.allow_nan = True
+        tags.input_tags.categorical = True
+        tags.input_tags.string = True
         return tags
