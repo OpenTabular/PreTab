@@ -152,6 +152,6 @@ class BaseCenterExpansion(BasePreTabTransformer):
 
     def __sklearn_tags__(self):
         """Require ``y`` only when centers are placed by a target-aware selector."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.target_tags.required = bool(self.target_aware)
         return tags

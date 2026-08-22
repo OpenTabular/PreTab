@@ -79,7 +79,7 @@ class NoTransformer(TransformerMixin, BaseEstimator):
 
     def __sklearn_tags__(self):
         """Declare that missing values pass through unchanged."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.input_tags.allow_nan = True
         return tags
 
@@ -157,6 +157,6 @@ class ToFloatTransformer(TransformerMixin, BaseEstimator):
 
     def __sklearn_tags__(self):
         """Declare that missing values pass through the float cast."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.input_tags.allow_nan = True
         return tags

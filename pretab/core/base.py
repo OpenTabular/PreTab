@@ -109,7 +109,7 @@ class BasePreTabTransformer(
 
     def __sklearn_tags__(self):
         """Declare NaN-passthrough and target-requirement estimator tags."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.input_tags.allow_nan = self._allow_nan
         tags.target_tags.required = self._requires_y
         return tags

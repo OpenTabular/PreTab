@@ -147,6 +147,6 @@ class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
 
     def __sklearn_tags__(self):
         """Ordinal integer input is required; missing values are not supported."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.input_tags.allow_nan = False
         return tags

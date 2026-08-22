@@ -91,6 +91,6 @@ class MissingStateIndicator(TransformerMixin, BaseEstimator):
 
     def __sklearn_tags__(self):
         """Declare that missing values are expected (they are the signal)."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.input_tags.allow_nan = True
         return tags

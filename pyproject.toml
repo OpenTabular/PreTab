@@ -82,6 +82,7 @@ filterwarnings = [
 # code quality tools
 [tool.pyright]
 include = ["pretab", "tests"]
+reportImplicitOverride = false
 exclude = [
   "**/__pycache__",
   ".venv",

@@ -140,7 +140,7 @@ class PLETransformer(
 
     def __sklearn_tags__(self):
         """Declare the required-target tag; PLE requires finite input."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.input_tags.allow_nan = False
         tags.target_tags.required = True
         return tags
