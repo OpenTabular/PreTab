@@ -2,14 +2,14 @@
 
 :func:`create_placement_strategy` is the single entry point transformers use to
 turn the user-facing ``target_aware`` / ``placement_strategy`` pair into a
-concrete :class:`~pretab.placement.base.BasePlacementStrategy`. It enforces the
-``target_aware`` / ``placement_strategy`` combo (D4) up front via
+concrete :class:`~pretab.placement.base.BasePlacementStrategy`. It validates the
+``target_aware`` / ``placement_strategy`` combination up front via
 :func:`pretab.core.parameters.validate_placement`, so an invalid pairing fails
 with one clear error instead of surfacing deep inside a family.
 
 The count window (``min_count`` / ``max_count``) and endpoint convention
-(``include_endpoints``) are resolved by the caller -- typically a family adapter
-in :mod:`pretab.placement.adapters` -- and passed straight through.
+(``include_endpoints``) are resolved by the caller, typically a family adapter
+in :mod:`pretab.placement.adapters`, and passed straight through.
 """
 
 from __future__ import annotations

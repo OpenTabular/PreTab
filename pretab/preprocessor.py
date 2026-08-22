@@ -899,7 +899,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 if hasattr(last_step, attr):
                     logger.debug("%s.%s = %r", name, attr, getattr(last_step, attr))
 
-    # --- Portable serialization (P9.1) ---
+    # --- Portable serialization ---
     def to_spec(self, path=None) -> dict:
         """Serialize the fitted preprocessor to a portable, versioned spec.
 
@@ -954,7 +954,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             raise PretabSerializationError(f"Spec reconstructed a {type(obj).__name__}, expected {cls.__name__}.")
         return obj
 
-    # --- Fingerprint & reproducibility (P9.2) ---
+    # --- Fingerprint & reproducibility ---
     def _canonical_spec(self) -> dict:
         """Deterministic subset of the spec used for fingerprinting."""
         spec = preprocessor_to_spec(self)
@@ -1008,7 +1008,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             "representations": representations,
         }
 
-    # --- Immutable lifecycle (P9.3) ---
+    # --- Immutable lifecycle ---
     @property
     def lifecycle_state_(self) -> str:
         """Current lifecycle state: ``UNFITTED``, ``FITTED``, ``FROZEN``, or ``STALE``."""

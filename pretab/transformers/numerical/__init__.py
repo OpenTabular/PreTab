@@ -1,6 +1,5 @@
 """Numerical single-column transformers: binning, piecewise-linear encoding (PLE)
-and periodic encoding. Modules are moved here during the 1.0.0 restructure (Phase 1)
-and renamed to their intention-revealing public names in Phase 5.
+and periodic encoding.
 """
 
 from .binning import NumericBinningTransformer

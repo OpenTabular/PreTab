@@ -1,6 +1,5 @@
 """Categorical transformers: ordinal encoding, language embeddings and the
-time-boxed legacy one-hot-from-ordinal encoder. Modules are moved here during the
-1.0.0 restructure (Phase 1).
+time-boxed legacy one-hot-from-ordinal encoder.
 """
 
 from .language_embedding import LanguageEmbeddingTransformer

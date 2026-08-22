@@ -1,4 +1,4 @@
-"""Central, explicit edge-case policy for representations (decision D9).
+"""Central, explicit edge-case policy for representations.
 
 :class:`RepresentationPolicy` names, in one place, how every transformer reacts
 to the recurring edge cases that would otherwise diverge silently per family:

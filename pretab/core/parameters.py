@@ -1,22 +1,15 @@
-"""Canonical parameter vocabulary and legacy-alias resolution.
+"""Shared parameter names and backward-compatible alias resolution.
 
-Different transformer families historically spelled the same concept in
-different ways -- the per-feature output size alone was named
-``n_basis_functions`` / ``n_knots`` / ``n_bins`` / ``n_centers`` / ``bins`` /
-``n_basis``. As of Phase 15 those count names are removed and every family takes
-a single ``output_dim`` (the number of non-bias output columns per feature).
-:data:`CANONICAL_PARAMS` records the single cross-family vocabulary new code and
-docs should use, and :class:`AliasResolverMixin` provides the (currently unused)
-machinery for a transformer to accept a legacy constructor name as an *alias*
-that resolves to its canonical name at ``fit`` time (with a
-:class:`FutureWarning`).
+Every transformer family uses the same parameter names for the same concepts.
+``output_dim`` controls how many output columns are produced per input feature;
+``placement_strategy`` controls where basis functions are placed; and so on.
+These shared names are listed in :data:`CANONICAL_PARAMS`.
 
-The mechanism follows scikit-learn's deprecation constraint: ``get_params`` and
-``clone`` introspect ``__init__`` and re-instantiate with the exact same
-argument names, so aliases cannot hide behind ``**kwargs``. Instead the
-canonical parameter and every legacy alias are ordinary constructor arguments
-that default to :data:`UNSET` and are stored verbatim; the effective value is
-resolved inside ``fit``.
+Older code may pass the historic names that existed before the vocabulary was
+unified (e.g. ``n_knots``, ``n_bins``, ``n_centers``). :class:`AliasResolverMixin`
+lets a transformer accept those old names transparently: the old name still works
+but emits a :class:`FutureWarning` so you know to update your code. Using both
+the old and new name for the same parameter at the same time raises an error.
 """
 
 from __future__ import annotations
@@ -28,11 +21,12 @@ from ..exceptions import InvalidParamError
 
 
 class _Unset:
-    """Sentinel marking a constructor argument the user did not provide.
+    """Sentinel for a constructor argument the caller did not supply.
 
-    A dedicated singleton (rather than ``None``) is used because ``None`` is a
-    meaningful value for several parameters (for example an unset adaptive
-    bound). Being a singleton keeps it identity-comparable and clone-safe.
+    Using a dedicated singleton rather than ``None`` matters because ``None``
+    is a valid value for several parameters (for example, an unbounded adaptive
+    dimension). The singleton is identity-comparable, so ``value is UNSET``
+    is always unambiguous, and it survives sklearn's ``clone`` safely.
     """
 
     __slots__ = ()
@@ -66,12 +60,15 @@ UNSUPERVISED_STRATEGIES: tuple[str, ...] = ("uniform", "quantile")
 
 
 def validate_placement(target_aware: bool, placement_strategy: str) -> None:
-    """Validate the ``target_aware`` / ``placement_strategy`` contract.
+    """Check that ``target_aware`` and ``placement_strategy`` are compatible.
 
-    When ``target_aware`` is True the strategy must name a target-aware selector
-    (``"cart"`` or ``"lightgbm"``); when False it must name an unsupervised
-    spacing rule (``"uniform"`` or ``"quantile"``). Raises
-    :class:`~pretab.exceptions.InvalidParamError` (a ``ValueError``) otherwise.
+    Target-aware transformers must use ``"cart"`` or ``"lightgbm"`` as their
+    placement strategy; unsupervised transformers must use ``"uniform"`` or
+    ``"quantile"``.
+
+    .. note::
+        This is enforced at ``fit`` time, not at construction, so you will only
+        see the error once you call ``fit()`` or ``fit_transform()``.
     """
     if target_aware and placement_strategy not in TARGET_AWARE_STRATEGIES:
         raise InvalidParamError("When target_aware=True, placement_strategy must be 'cart' or 'lightgbm'.")
@@ -79,7 +76,7 @@ def validate_placement(target_aware: bool, placement_strategy: str) -> None:
         raise InvalidParamError("When target_aware=False, placement_strategy must be 'uniform' or 'quantile'.")
 
 
-# §8.3 canonical vocabulary: the family-neutral name for each shared concept.
+#: Shared parameter names with a short description of what each one controls.
 CANONICAL_PARAMS: dict[str, str] = {
     "output_dim": "Number of non-bias output columns produced per input feature.",
     "min_output_dim": "Lower bound on the per-feature output dimension in adaptive mode.",
@@ -93,21 +90,29 @@ CANONICAL_PARAMS: dict[str, str] = {
 
 
 class AliasResolverMixin:
-    """Accept legacy parameter names as aliases of the canonical vocabulary.
+    """Allow old parameter names to be used alongside the current ones.
 
-    Subclasses declare a class-level ``_param_aliases`` mapping each legacy
-    constructor argument to its canonical name, e.g.::
+    Some transformers used to accept parameter names like ``n_knots`` or
+    ``n_bins`` that have since been renamed to ``output_dim``. This mixin lets
+    a transformer keep accepting the old names so existing code does not break,
+    while nudging users toward the new names via a :class:`FutureWarning`.
 
-        _param_aliases = {"legacy_name": "canonical_name"}
+    To enable aliases for a transformer, set a class-level ``_param_aliases``
+    dict mapping each old name to its current equivalent::
 
-    Both the canonical parameter and every legacy alias are ordinary
-    constructor parameters that default to :data:`UNSET` and are stored
-    verbatim (so ``get_params`` / ``clone`` / ``set_params`` stay
-    sklearn-correct). Inside ``fit`` call :meth:`_resolve_param` to obtain the
-    effective value: an explicit canonical value wins, an explicit legacy alias
-    is honoured with a ``FutureWarning``, and setting both a canonical and one
-    of its aliases -- or two conflicting aliases -- raises
-    :class:`~pretab.exceptions.InvalidParamError`.
+        _param_aliases = {"n_knots": "output_dim"}
+
+    Both names must be real constructor arguments defaulting to :data:`UNSET`.
+    This keeps scikit-learn's ``get_params``, ``set_params``, and ``clone``
+    working correctly, since they inspect ``__init__`` directly.
+
+    Inside ``fit``, call :meth:`_resolve_param` to get the effective value.
+    It returns the current-name value if supplied, falls back to the old name
+    with a warning, and raises if both are set at the same time.
+
+    .. warning::
+        Setting both the current name and a legacy alias for the same parameter
+        raises :class:`~pretab.exceptions.InvalidParamError`. Pick one.
     """
 
     _param_aliases: ClassVar[dict[str, str]] = {}
@@ -117,17 +122,17 @@ class AliasResolverMixin:
         return [alias for alias, target in self._param_aliases.items() if target == canonical]
 
     def _resolve_param(self, canonical: str, default=UNSET) -> Any:
-        """Return the effective value for a canonical parameter.
+        """Return the effective value for a parameter, resolving any legacy alias.
 
-        Resolution order: an explicitly set canonical value, otherwise an
-        explicitly set legacy alias (emitting a ``FutureWarning``), otherwise
-        ``default``.
+        Checks the canonical name first. If not set, looks for a legacy alias
+        and returns its value with a deprecation warning. Returns ``default``
+        if neither is set.
 
         Raises
         ------
         InvalidParamError
-            If both the canonical parameter and a legacy alias are set, or if
-            two conflicting legacy aliases for the same canonical are set.
+            If both the canonical name and a legacy alias are set, or if two
+            conflicting aliases for the same parameter are both set.
         """
         canon_val = getattr(self, canonical, UNSET)
         set_aliases = [

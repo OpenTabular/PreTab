@@ -41,8 +41,8 @@ class BasePreTabTransformer(
     _requires_y: bool = False
     _feature_suffix_value: str = "f"
 
-    #: Shared, central edge-case policy (decision D9). Its defaults reproduce the
-    #: library's historical behaviour, so it is inert until narrowed.
+    #: Shared, central edge-case policy. Its defaults reproduce the library's
+    #: historical behaviour, so it is inert until narrowed.
     _policy: RepresentationPolicy = RepresentationPolicy()
 
     #: Per-family policy overrides; ``None`` inherits the corresponding ``_policy``
