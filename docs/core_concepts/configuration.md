@@ -69,7 +69,9 @@ expanded.get_resolved_config()["output_dim"]             # 16: wider representat
 So `"standard"` is the balanced default (PLE numerics, integer-coded categoricals, `output_dim=7`),
 `"expanded"` widens the representation and one-hot-encodes categoricals instead, and
 `"adaptive"` lets each feature pick its own width between `min_output_dim` and `max_output_dim`
-rather than using a fixed `output_dim`.
+rather than using a fixed `output_dim`. The `output_dim=7` shown for `"adaptive"` above is just
+the ordinary fallback default reported by `get_resolved_config()`; the preset itself never sets
+it, and it has no effect since both bounds are set.
 
 ```{tip}
 A preset is a starting point, not a lock. Any parameter you pass alongside a preset overrides

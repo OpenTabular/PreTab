@@ -53,6 +53,12 @@ instead.
 : The lower and upper bounds that apply only when `adaptive=True` (defaults `5` and `10`).
   They are ignored otherwise.
 
+```{note}
+When `adaptive=True` and both `min_output_dim` and `max_output_dim` are set, `output_dim` has
+no effect at all: the window comes entirely from the two bounds. `output_dim` only matters in
+adaptive mode when one of the bounds is left unset, where it fills in for the missing one.
+```
+
 ```python
 from pretab import Preprocessor
 

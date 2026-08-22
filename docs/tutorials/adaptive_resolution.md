@@ -15,9 +15,17 @@ one.
 `min_output_dim` and `max_output_dim`
 : The lower and upper bounds of the search. The method picks a width in this range.
 
-When adaptive is on, `output_dim` becomes a hint rather than a fixed value; the fitted width is
-chosen from the data and stored on the transformer. See
+When adaptive is on and both bounds are set, `output_dim` is ignored completely: the fitted
+width comes only from `[min_output_dim, max_output_dim]` and the data. If you leave one bound
+unset, `output_dim` fills in for it (as the missing lower or upper edge of the search), so it
+still matters in that case. See
 [Resolution and placement](../core_concepts/resolution_and_placement.md) for the mechanics.
+
+```{warning}
+Setting `output_dim` alongside `adaptive=True` with both `min_output_dim` and `max_output_dim`
+is harmless but silently has no effect. It is easy to assume it caps or anchors the search; it
+does not. Drop it, or drop one of the two bounds if you meant `output_dim` to anchor the window.
+```
 
 ## A worked example
 
