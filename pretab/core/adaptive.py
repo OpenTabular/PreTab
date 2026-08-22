@@ -30,7 +30,9 @@ class AdaptiveResolutionMixin:
       checking ``output_dim`` is consistent with any explicitly supplied
       ``min``/``max`` request.
     * ``adaptive is True`` -> ``lo``/``hi`` come from the requested
-      ``min``/``max`` (each falling back to ``output_dim`` when unset).
+      ``min``/``max`` (each falling back to ``output_dim`` when unset). When both
+      ``min_output_dim`` and ``max_output_dim`` are supplied, ``output_dim`` is
+      not consulted at all -- it has no effect on the resolved window.
 
     The resolved window is then validated against a family-specific ``floor``
     (minimum admissible count, e.g. ``degree + 1`` basis functions or ``1`` bin)

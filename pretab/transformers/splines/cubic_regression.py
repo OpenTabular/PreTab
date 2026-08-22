@@ -58,7 +58,7 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
     adaptive : bool, default=False
         If True (with ``target_aware=True``), the per-feature output dimension may
         vary within ``[min_output_dim, max_output_dim]`` instead of being fixed to
-        ``output_dim``.
+        ``output_dim``. When both bounds are set, ``output_dim`` is ignored entirely.
 
     min_output_dim : int or None, default=None
         Lower bound on the per-feature output dimension in adaptive mode.

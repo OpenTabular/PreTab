@@ -57,7 +57,8 @@ class PLETransformer(
     adaptive : bool, default=False
         If True, allow the number of bins per feature to be data-driven, bounded
         by ``min_output_dim`` and ``max_output_dim``. If False, every feature is
-        capped by ``output_dim``.
+        capped by ``output_dim``. When True and both bounds are set, ``output_dim``
+        is ignored entirely.
     min_output_dim : int or None, default=None
         Minimum number of bins per feature when ``adaptive=True``.
     max_output_dim : int or None, default=None

@@ -122,6 +122,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         columns produced per input feature (bins for PLE/binning, centers for the feature maps,
         basis functions for the splines). The B/M/I splines clamp it into their supported
         ``[5, 50]`` range. Used as the fixed per-feature width when ``adaptive`` is False.
+        When ``adaptive`` is True *and* both ``min_output_dim`` and ``max_output_dim`` are
+        set, ``output_dim`` is ignored entirely: the per-feature width is chosen freely within
+        ``[min_output_dim, max_output_dim]``.
     degree : int, default=3
         Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
         (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.
@@ -147,7 +150,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     adaptive : bool, default=False
         Whether adaptive-capable methods size each feature's output dimension from the data
         (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
-        Fixed-width methods (e.g. plain scalers) ignore this flag.
+        Fixed-width methods (e.g. plain scalers) ignore this flag. When True and both bounds
+        are set, ``output_dim`` itself has no effect (see above).
     min_output_dim : int, default=5
         Lower bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
         fixed-width methods and when ``adaptive`` is False.

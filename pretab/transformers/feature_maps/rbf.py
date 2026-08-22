@@ -34,7 +34,9 @@ class RBFExpansionTransformer(BaseCenterExpansion):
     adaptive : bool, default=False
         If True (with `target_aware=True`), the per-feature number of centers may
         vary within `[min_output_dim, max_output_dim]` instead of being fixed to
-        `output_dim`. Has no effect on the `quantile` / `uniform` paths.
+        `output_dim`. Has no effect on the `quantile` / `uniform` paths. When both
+        `min_output_dim` and `max_output_dim` are set, `output_dim` is ignored
+        entirely.
 
     min_output_dim : int or None, default=None
         Lower bound on the per-feature number of centers in adaptive mode.

@@ -81,7 +81,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
     adaptive : bool, default=False
         If True, the per-feature output dimension may vary within
-        ``[min_output_dim, max_output_dim]``.
+        ``[min_output_dim, max_output_dim]``. When both bounds are set,
+        ``output_dim`` is ignored entirely.
 
     min_output_dim : int or None, default=None
         Lower bound on the per-feature output dimension used in adaptive mode.
