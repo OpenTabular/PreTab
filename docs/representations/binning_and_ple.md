@@ -52,8 +52,7 @@ X2 = t.fit_transform(x, y)   # y is required
 ```
 
 Constructor highlights: `output_dim`, `placement_strategy="cart"`, `task="regression"`,
-`adaptive`, `random_state=51`, and the tree controls `max_depth`, `min_samples_split`,
-`min_samples_leaf`.
+`adaptive`, and `random_state=51`.
 
 ```{important}
 PLE **requires** the target. It places its edges using `y`, so it must be fit with a target

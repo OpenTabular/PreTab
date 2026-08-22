@@ -64,12 +64,6 @@ class PLETransformer(
         Maximum number of bins per feature when ``adaptive=True``.
     random_state : int or None, default=51
         Random state for reproducible tree fitting.
-    max_depth : int or None, default=None
-        Maximum depth of the decision tree.
-    min_samples_split : int, default=2
-        Minimum number of samples required to split an internal node.
-    min_samples_leaf : int, default=1
-        Minimum number of samples required at a leaf node.
 
     Attributes
     ----------
@@ -100,10 +94,6 @@ class PLETransformer(
     - PLE requires finite input: NaN values raise an error. Missing-value handling
       is the responsibility of an upstream imputation step, for example through
       the ``Preprocessor`` imputation parameters.
-    - The ``max_depth`` / ``min_samples_split`` / ``min_samples_leaf`` parameters
-      are retained for backward-compatible construction but no longer affect
-      threshold placement: the selected ``placement_strategy`` fits its own model
-      with its own settings. They are slated for reconciliation in a later cleanup.
 
     Examples
     --------
@@ -128,9 +118,6 @@ class PLETransformer(
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = 51,
-        max_depth: int | None = None,
-        min_samples_split: int = 2,
-        min_samples_leaf: int = 1,
     ):
         self.output_dim = output_dim
         self.placement_strategy = placement_strategy
@@ -139,9 +126,6 @@ class PLETransformer(
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
         self.random_state = random_state
-        self.max_depth = max_depth
-        self.min_samples_split = min_samples_split
-        self.min_samples_leaf = min_samples_leaf
 
     def __sklearn_tags__(self):
         """Declare the required-target tag; PLE requires finite input."""
