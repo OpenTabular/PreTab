@@ -39,8 +39,8 @@ Feature maps
    RandomFourierFeaturesTransformer
    NystroemFeaturesTransformer
 
-Binning and piecewise-linear encoding
--------------------------------------
+Binning and PLE
+---------------
 
 .. autosummary::
    :toctree: _autosummary

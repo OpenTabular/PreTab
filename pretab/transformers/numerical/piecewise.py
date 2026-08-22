@@ -85,20 +85,25 @@ class PLETransformer(
 
     Notes
     -----
-    The number of output columns per feature equals ``len(thresholds) + 1`` and
-    is therefore data-dependent: a feature whose tree finds fewer splits will
-    expand into fewer columns than a feature with many splits. ``output_dim`` is
-    an upper bound (bin cap), not an exact width; this is a documented exception
-    to the exact-width contract that the fixed-basis families follow.
-
-    PLE requires finite input: NaN values raise an error. Missing-value handling
-    is the responsibility of an upstream imputation step (for example the
-    ``Preprocessor`` imputation parameters), not of this transformer.
-
-    The ``max_depth`` / ``min_samples_split`` / ``min_samples_leaf`` parameters
-    are retained for backward-compatible construction but no longer affect
-    threshold placement: the ``placement_strategy`` selector fits its own model
-    with its own settings. They are slated for reconciliation in a later cleanup.
+    - The number of output columns per feature equals ``len(thresholds) + 1`` and
+      is therefore data-dependent: a feature whose placement model finds fewer
+      useful splits will expand into fewer columns than a feature with many splits.
+      ``output_dim`` is an upper bound on the number of bins, not an exact output
+      width; this is a documented exception to the exact-width contract used by
+      fixed-basis representations.
+    - Compared with the original PLE implementation, PreTab retains the same
+      piecewise-linear encoding principle while extending its use as a
+      scikit-learn-compatible transformer. It supports target-aware threshold
+      placement with CART or LightGBM and naturally permits feature-specific
+      representation widths when fewer than the requested number of thresholds
+      are discovered.
+    - PLE requires finite input: NaN values raise an error. Missing-value handling
+      is the responsibility of an upstream imputation step, for example through
+      the ``Preprocessor`` imputation parameters.
+    - The ``max_depth`` / ``min_samples_split`` / ``min_samples_leaf`` parameters
+      are retained for backward-compatible construction but no longer affect
+      threshold placement: the selected ``placement_strategy`` fits its own model
+      with its own settings. They are slated for reconciliation in a later cleanup.
 
     Examples
     --------
@@ -171,7 +176,7 @@ class PLETransformer(
             X,
             dtype=np.float64,  # type: ignore
             ensure_2d=True,
-            ensure_all_finite=True,
+            ensure_all_finite=True, # type: ignore
         )
         y = np.asarray(y).ravel()
 
@@ -238,7 +243,7 @@ class PLETransformer(
             X,
             dtype=np.float64,  # type: ignore
             ensure_2d=True,
-            ensure_all_finite=True,
+            ensure_all_finite=True, # type: ignore
         )
 
         if X.shape[1] != self.n_features_in_:

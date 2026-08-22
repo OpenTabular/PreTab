@@ -57,11 +57,14 @@ class NumericBinningTransformer(RepresentationSpecMixin, AliasResolverMixin, Tra
 
     Notes
     -----
-    The input must be numeric: string / categorical data raises a
-    :class:`~pretab.exceptions.PretabDataError`. Encode such columns with a
-    categorical method (e.g. ``"int"`` or ``"one-hot"``) before binning. Values
-    seen at transform time that fall outside the fitted range are clamped into
-    the outer bins.
+    - The input must be numeric: string / categorical data raises a
+      :class:`~pretab.exceptions.PretabDataError`. Encode such columns with a
+      categorical method (e.g. ``"int"`` or ``"one-hot"``) before binning. Values
+      seen at transform time that fall outside the fitted range are clamped into
+      the outer bins.
+    - Unlike scikit-learn's ``KBinsDiscretizer``, this transformer can also accept
+      explicit user-defined bin edges, which is useful when bins should follow
+      domain-specific boundaries rather than being learned from the data.
 
     Examples
     --------
