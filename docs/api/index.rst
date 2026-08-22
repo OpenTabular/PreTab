@@ -1,3 +1,5 @@
+:orphan:
+
 API reference
 =============
 
@@ -6,10 +8,4 @@ The complete public API of PreTab, organized by role. Start with the
 :doc:`representations` for the transformers, use :doc:`search_and_cross_fitting`
 for leakage-safe selection, and see :doc:`extension` to build your own.
 
-.. toctree::
-   :maxdepth: 2
-
-   preprocessor
-   representations
-   search_and_cross_fitting
-   extension
+The four sections are listed directly under **API Reference** in the sidebar.

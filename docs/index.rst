@@ -57,7 +57,10 @@
    :maxdepth: 2
    :hidden:
 
-   api/index
+   api/preprocessor
+   api/representations
+   api/search_and_cross_fitting
+   api/extension
 
 .. toctree::
    :caption: Developer Guide
