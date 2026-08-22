@@ -140,5 +140,5 @@ def test_ple_feature_names_out():
 
     names = transformer.get_feature_names_out(["age", "income"])
     assert len(names) == transformer.get_n_features_out()
-    assert all("_ple_piece" in name for name in names)
+    assert all("_ple" in name for name in names)
     assert names[0].startswith("age")

@@ -230,7 +230,7 @@ def test_get_feature_names_out_does_not_duplicate_feature_name(sample_data):
     names = list(pre.get_feature_names_out())
     assert names
     assert all("__" not in name for name in names)
-    assert "num_num1_ple_piece0" in names
+    assert "num_num1_ple0" in names
     lineage_names = [record.output_feature for record in pre.get_feature_lineage()]
     assert lineage_names == names
 

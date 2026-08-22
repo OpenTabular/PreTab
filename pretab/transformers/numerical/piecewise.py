@@ -328,7 +328,7 @@ class PLETransformer(
         Returns
         -------
         feature_names_out : ndarray of str
-            One name per output column, formatted ``{name}_ple_piece{j}``.
+            One name per output column, formatted ``{name}_ple{j}``.
         """
         check_is_fitted(self, ["thresholds_", "n_features_in_"])
 
@@ -338,7 +338,7 @@ class PLETransformer(
         feature_names_out = []
         for name, n_bins in zip(input_features, self.n_bins_per_feature_, strict=False):
             for j in range(n_bins):
-                feature_names_out.append(f"{name}_ple_piece{j}")
+                feature_names_out.append(f"{name}_ple{j}")
 
         return np.array(feature_names_out)
 
