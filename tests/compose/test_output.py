@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from pretab.compose.output import attach_embeddings, build_output_dict, format_output
+from pretab.compose.output import attach_embeddings, build_output_dict, format_output, resolve_embedding_dimensions
 from pretab.exceptions import IncompatibleParamsError, PretabDataError
 
 
@@ -49,6 +49,26 @@ def test_attach_embeddings_rejects_wrong_row_count():
     """Regression guard for issue #34: a mismatched row count must raise."""
     with pytest.raises(PretabDataError, match="has 2 row"):
         attach_embeddings({}, np.ones((2, 3)), expected=True, embedding_dimensions={"embedding_1": 3}, n_samples=100)
+
+
+def test_resolve_embedding_dimensions_array():
+    dims = resolve_embedding_dimensions(np.ones((5, 3)), n_samples=5)
+    assert dims == {"embedding_1": 3}
+
+
+def test_resolve_embedding_dimensions_list():
+    dims = resolve_embedding_dimensions([np.ones((5, 3)), np.ones((5, 2))], n_samples=5)
+    assert dims == {"embedding_1": 3, "embedding_2": 2}
+
+
+def test_resolve_embedding_dimensions_rejects_row_mismatch():
+    with pytest.raises(PretabDataError, match="has 20 row"):
+        resolve_embedding_dimensions(np.ones((20, 8)), n_samples=100)
+
+
+def test_resolve_embedding_dimensions_rejects_1d():
+    with pytest.raises(PretabDataError, match="2D"):
+        resolve_embedding_dimensions(np.ones(100), n_samples=100)
 
 
 def test_format_output_array_returns_input_unchanged():

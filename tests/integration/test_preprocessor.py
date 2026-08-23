@@ -69,6 +69,33 @@ def test_multiple_embeddings(sample_data):
     assert out["embedding_2"].shape[1] == 7
 
 
+def test_fit_rejects_embeddings_with_mismatched_row_count(sample_data):
+    """Regression guard: a row-count mismatch must raise at fit, not later at transform."""
+    X, y = sample_data
+    embeddings = np.random.rand(len(X) // 2, 4)
+
+    with pytest.raises(PretabDataError, match="row"):
+        Preprocessor().fit(X, y, embeddings=embeddings)
+
+
+def test_fit_rejects_1d_embeddings(sample_data):
+    """Regression guard: 1D embeddings must raise PretabDataError, not a bare IndexError."""
+    X, y = sample_data
+    embeddings = np.ones(len(X))
+
+    with pytest.raises(PretabDataError, match="2D"):
+        Preprocessor().fit(X, y, embeddings=embeddings)
+
+
+def test_fit_rejects_one_mismatched_array_in_a_list(sample_data):
+    """Regression guard: each array in a list of embeddings is checked against len(X)."""
+    X, y = sample_data
+    embeddings = [np.random.rand(len(X), 3), np.random.rand(len(X) - 1, 7)]
+
+    with pytest.raises(PretabDataError, match="row"):
+        Preprocessor().fit(X, y, embeddings=embeddings)
+
+
 def test_embeddings_are_required_after_embedding_aware_fit(sample_data):
     X, y = sample_data
     embeddings = np.random.rand(len(X), 4)

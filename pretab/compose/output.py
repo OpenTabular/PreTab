@@ -21,6 +21,7 @@ __all__ = [
     "build_output_dict",
     "compute_output_report",
     "format_output",
+    "resolve_embedding_dimensions",
     "to_dataframe_output",
     "validate_embedding_request",
 ]
@@ -165,6 +166,49 @@ def build_output_dict(transformed, slices, *, as_sparse=False) -> dict:
     return result
 
 
+def _validate_embedding_array(arr, name: str, *, expected_width=None, n_samples=None):
+    """Validate one embedding array is 2D with the expected width and row count."""
+    arr = np.asarray(arr)
+    if arr.ndim != 2:
+        raise PretabDataError(
+            f"{name} must be 2D (n_samples, n_dims); got shape {arr.shape}.\n"
+            "Fix: reshape the embedding array to 2 dimensions."
+        )
+    if expected_width is not None and arr.shape[1] != expected_width:
+        raise PretabDataError(
+            f"{name} has {arr.shape[1]} column(s) but {expected_width} were fitted.\n"
+            "Fix: pass an embedding array with the same width used at fit time."
+        )
+    if n_samples is not None and arr.shape[0] != n_samples:
+        raise PretabDataError(
+            f"{name} has {arr.shape[0]} row(s) but X has {n_samples}.\n"
+            "Fix: pass an embedding array with one row per sample in X."
+        )
+    return arr
+
+
+def resolve_embedding_dimensions(embeddings, n_samples: int) -> dict:
+    """Validate embeddings at fit time and return their ``name -> width`` mapping.
+
+    Each array (or each array in a list) must be 2D and have exactly ``n_samples``
+    rows, i.e. one row per sample in ``X``. Catches the same shape mistakes at
+    ``fit`` time that :func:`attach_embeddings` catches at ``transform`` time,
+    instead of only surfacing them (or a bare ``IndexError`` for 1D input) later.
+
+    Raises
+    ------
+    PretabDataError
+        If an array is not 2D or its row count does not match ``n_samples``.
+    """
+    arrays = [embeddings] if isinstance(embeddings, np.ndarray) else list(embeddings)
+    dimensions = {}
+    for idx, arr in enumerate(arrays):
+        name = f"embedding_{idx + 1}"
+        arr = _validate_embedding_array(arr, name, n_samples=n_samples)
+        dimensions[name] = arr.shape[1]
+    return dimensions
+
+
 def attach_embeddings(result: dict, embeddings, *, expected: bool, embedding_dimensions=None, n_samples=None) -> dict:
     """Attach external embedding blocks to a transformed-output dict.
 
@@ -192,23 +236,8 @@ def attach_embeddings(result: dict, embeddings, *, expected: bool, embedding_dim
         )
     for idx, arr in enumerate(arrays):
         name = f"embedding_{idx + 1}"
-        arr = np.asarray(arr)
-        if arr.ndim != 2:
-            raise PretabDataError(
-                f"{name} must be 2D (n_samples, n_dims); got shape {arr.shape}.\n"
-                "Fix: reshape the embedding array to 2 dimensions."
-            )
         expected_width = embedding_dimensions.get(name) if embedding_dimensions is not None else None
-        if expected_width is not None and arr.shape[1] != expected_width:
-            raise PretabDataError(
-                f"{name} has {arr.shape[1]} column(s) but {expected_width} were fitted.\n"
-                "Fix: pass an embedding array with the same width used at fit time."
-            )
-        if n_samples is not None and arr.shape[0] != n_samples:
-            raise PretabDataError(
-                f"{name} has {arr.shape[0]} row(s) but X has {n_samples}.\n"
-                "Fix: pass an embedding array with one row per sample in X."
-            )
+        arr = _validate_embedding_array(arr, name, expected_width=expected_width, n_samples=n_samples)
         result[name] = arr.astype(np.float32)
     return result
 

@@ -21,7 +21,13 @@ from .compose.inspection import (
     clean_feature_names,
     get_output_slices,
 )
-from .compose.output import compute_output_report, format_output, to_dataframe_output, validate_embedding_request
+from .compose.output import (
+    compute_output_report,
+    format_output,
+    resolve_embedding_dimensions,
+    to_dataframe_output,
+    validate_embedding_request,
+)
 from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
 from .core.logging import configure_logging, get_logger
 from .core.parameters import UNSET
@@ -466,11 +472,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.embedding_dimensions_ = {}
         if embeddings is not None:
             self.embeddings_ = True
-            if isinstance(embeddings, np.ndarray):
-                self.embedding_dimensions_["embedding_1"] = embeddings.shape[1]
-            elif isinstance(embeddings, list):
-                for i, e in enumerate(embeddings):
-                    self.embedding_dimensions_[f"embedding_{i + 1}"] = e.shape[1]
+            self.embedding_dimensions_ = resolve_embedding_dimensions(embeddings, n_samples=len(X))
 
         numerical_features, categorical_features = detect_column_types(
             X,
