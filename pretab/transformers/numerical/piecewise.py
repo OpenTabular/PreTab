@@ -161,7 +161,7 @@ class PLETransformer(
             X,
             dtype=np.float64,  # type: ignore
             ensure_2d=True,
-            ensure_all_finite=True, # type: ignore
+            ensure_all_finite=True,  # type: ignore
         )
         y = np.asarray(y).ravel()
 
@@ -228,7 +228,7 @@ class PLETransformer(
             X,
             dtype=np.float64,  # type: ignore
             ensure_2d=True,
-            ensure_all_finite=True, # type: ignore
+            ensure_all_finite=True,  # type: ignore
         )
 
         if X.shape[1] != self.n_features_in_:

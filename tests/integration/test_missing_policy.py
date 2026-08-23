@@ -259,4 +259,3 @@ def test_add_missing_indicator_no_longer_requires_imputation_enabled(frame_with_
         add_missing_indicator=True,
     ).fit(frame_with_nan, y)
     assert p.total_output_dim_ > 0
-
