@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..core.parameters import validate_placement
-from ..exceptions import IncompatibleParamsError, invalid_param_error
+from ..exceptions import invalid_param_error
 from .registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
@@ -104,10 +104,6 @@ class PreprocessorConfig:
         InvalidParamError
             If the ``target_aware`` / ``placement_strategy`` combination is
             invalid (via :func:`~pretab.core.parameters.validate_placement`).
-        IncompatibleParamsError
-            If ``add_missing_indicator`` is requested while both imputation
-            strategies are disabled, since the indicator is produced by the
-            imputation step.
         """
         validate_placement(target_aware, placement_strategy)
         if missing_policy is not None and missing_policy not in MISSING_POLICIES:
@@ -117,11 +113,6 @@ class PreprocessorConfig:
                 missing_policy,
                 "must be None or one of 'error', 'propagate', 'impute', 'impute_with_indicator', 'separate_state'",
                 valid=set(MISSING_POLICIES),
-            )
-        if add_missing_indicator and numerical_imputation is None and categorical_imputation is None:
-            raise IncompatibleParamsError(
-                "add_missing_indicator=True requires numerical_imputation or categorical_imputation "
-                "to be set; the missing-value indicator is produced by the imputation step."
             )
         return cls(
             numerical_method=_normalize_method(numerical_method, NUMERICAL_METHODS, NUMERICAL_ALIASES),
@@ -184,6 +175,10 @@ class PreprocessorConfig:
         booleans and the imputer ``strategy``. When ``missing_policy`` is ``None``
         the explicit ``*_imputation`` / ``add_missing_indicator`` parameters stay
         authoritative (historical behaviour); otherwise ``missing_policy`` decides.
+        ``add_missing_indicator=True`` with imputation disabled for this column
+        kind routes through the standalone ``MissingStateIndicator`` (via
+        ``separate_state``) instead of the imputer's own indicator, since
+        ``SimpleImputer.add_indicator`` only takes effect when the imputer runs.
         """
         strategy = (
             (self.numerical_imputation or "median")
@@ -192,10 +187,11 @@ class PreprocessorConfig:
         )
         if self.missing_policy is None:
             configured = self.numerical_imputation if is_numerical else self.categorical_imputation
+            add_imputer = configured is not None
             return {
-                "add_imputer": configured is not None,
-                "add_indicator": self.add_missing_indicator,
-                "separate_state": False,
+                "add_imputer": add_imputer,
+                "add_indicator": self.add_missing_indicator and add_imputer,
+                "separate_state": self.add_missing_indicator and not add_imputer,
                 "strategy": strategy,
             }
         if self.missing_policy in ("error", "propagate"):

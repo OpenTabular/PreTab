@@ -199,3 +199,64 @@ def test_separate_state_lineage_distinguishes_missing_indicator(frame_with_nan, 
 def test_invalid_missing_policy_raises(frame_with_nan, y):
     with pytest.raises(InvalidParamError):
         _bspline(missing_policy="nonsense").fit(frame_with_nan, y)
+
+
+# --- add_missing_indicator with imputation disabled ----------------------------
+
+
+def test_add_missing_indicator_with_imputation_none_emits_standalone_column(frame_with_nan, y):
+    """Regression guard: add_missing_indicator=True must work even when the
+    imputer for that column kind is disabled, per the documented "standalone
+    indicator when imputation is disabled" contract."""
+    p = Preprocessor(
+        numerical_method="minmax",
+        numerical_imputation=None,
+        add_missing_indicator=True,
+    ).fit(frame_with_nan, y)
+
+    names = list(p.get_feature_names_out())
+    missing_cols = [n for n in names if n.endswith("__missing")]
+    assert len(missing_cols) == len(frame_with_nan.columns)
+
+
+def test_add_missing_indicator_with_imputation_none_still_propagates_nan(frame_with_nan, y):
+    """The representation branch is unaffected: NaN still reaches the transformer
+    unchanged, only the standalone indicator is added alongside it."""
+    p = Preprocessor(
+        numerical_method="minmax",
+        numerical_imputation=None,
+        add_missing_indicator=True,
+    ).fit(frame_with_nan, y)
+
+    out = p.transform(frame_with_nan, return_array=True)
+    assert np.isnan(out).any()
+
+
+def test_add_missing_indicator_numerical_only_disabled(y):
+    """Regression guard: a numerical-only imputation=None combined with a
+    categorical column that has no missing values must still produce the
+    standalone numerical indicator (previously silently dropped)."""
+    frame = pd.DataFrame({"a": [1.0, 2.0, np.nan, 4.0], "c": ["x", "y", "x", "y"]})
+    p = Preprocessor(
+        numerical_method="minmax",
+        categorical_method="int",
+        numerical_imputation=None,
+        add_missing_indicator=True,
+    ).fit(frame, y[:4])
+
+    names = list(p.get_feature_names_out())
+    assert any(n.endswith("__missing") for n in names)
+
+
+def test_add_missing_indicator_no_longer_requires_imputation_enabled(frame_with_nan, y):
+    """add_missing_indicator=True with both imputations disabled used to raise
+    IncompatibleParamsError; it must now fit successfully via standalone
+    indicators for every column."""
+    p = Preprocessor(
+        numerical_method="minmax",
+        numerical_imputation=None,
+        categorical_imputation=None,
+        add_missing_indicator=True,
+    ).fit(frame_with_nan, y)
+    assert p.total_output_dim_ > 0
+
