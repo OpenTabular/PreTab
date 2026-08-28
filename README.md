@@ -88,10 +88,12 @@ print({k: v.shape for k, v in X.items()})
 
 ## Available Transformers
 
-PreTab groups its transformers into three families. Each one follows the standard `fit` /
-`transform` API and is importable from `pretab.transformers`.
+PreTab groups its transformers by representation taxonomy. Each one follows the standard
+`fit` / `transform` API and is importable from `pretab.transformers` (the stable, flat public
+import); advanced users can also reach them through the namespace shown per table
+(`pretab.expansion.spline`, `pretab.expansion.functional`, and so on).
 
-### Splines
+### Spline expansions
 
 | Transformer                        | Basis                                 | Best for                               |
 | ----------------------------------- | -------------------------------------- | ---------------------------------------- |
@@ -104,7 +106,7 @@ PreTab groups its transformers into three families. Each one follows the standar
 | `TensorProductSplineTransformer`    | Tensor-product spline (multivariate)  | Smooth interactions across 2+ features |
 | `ThinPlateSplineTransformer`        | Thin-plate spline (multivariate)      | Smooth surfaces across 2+ features     |
 
-### Feature maps
+### Functional expansions
 
 | Transformer                        | Basis                                   | Best for                              |
 | ------------------------------------ | ------------------------------------------ | ---------------------------------------- |
@@ -113,15 +115,26 @@ PreTab groups its transformers into three families. Each one follows the standar
 | `SigmoidExpansionTransformer`        | Sigmoid basis                           | Smooth saturating features            |
 | `TanhExpansionTransformer`           | Tanh basis                              | Zero-centered saturating features     |
 | `FourierFeatureTransformer`          | Sine/cosine basis                       | Periodic or cyclic numerical effects  |
+
+### Kernel approximation
+
+| Transformer                        | Basis                                   | Best for                              |
+| ------------------------------------ | ------------------------------------------ | ---------------------------------------- |
 | `RandomFourierFeaturesTransformer`   | Random Fourier features (multivariate)  | Scalable RBF-kernel approximation     |
 | `NystroemFeaturesTransformer`        | Nystroem kernel map (multivariate)      | Landmark-based kernel approximation   |
 
-### Encoding and binning
+### Numerical encoding
 
 | Transformer                    | Method                                  | Best for                              |
 | ------------------------------- | ------------------------------------------ | ---------------------------------------- |
 | `PLETransformer`                | Piecewise-linear encoding (supervised)  | Strong numerical encoding for models  |
 | `NumericBinningTransformer`     | Uniform/quantile binning, tree-driven   | Discretizing numerical columns        |
+| `PeriodicEncodingTransformer`   | Sine/cosine cyclic encoding             | Values that wrap around a known period |
+
+### Categorical encoding and embeddings
+
+| Transformer                    | Method                                  | Best for                              |
+| ------------------------------- | ------------------------------------------ | ---------------------------------------- |
 | `ContinuousOrdinalTransformer`  | Integer (ordinal) encoding              | Compact codes for categoricals        |
 | `LanguageEmbeddingTransformer`  | Pretrained language embeddings          | High-cardinality, semantic columns    |
 
@@ -131,7 +144,9 @@ PreTab groups its transformers into three families. Each one follows the standar
 > **Note:** Inside the `Preprocessor` you select these by short name, for example `"ple"`,
 > `"rbf"`, `"one-hot"`, `"pretrained"`. See
 > [Representations](https://pretab.readthedocs.io/en/latest/representations/overview.html) for
-> the full catalogue and [comparison table](https://pretab.readthedocs.io/en/latest/representations/comparison_table.html).
+> the full catalogue, including exact input/output shapes and per-parameter effects, and the
+> [comparison table](https://pretab.readthedocs.io/en/latest/representations/comparison_table.html)
+> to filter by capability.
 
 ## 📚 Documentation
 

@@ -1,5 +1,5 @@
 from .b_spline import BSplineTransformer
-from .base_spline import BaseSplineTransformer
+from .base import BaseSplineTransformer
 from .cubic_regression import CubicRegressionSplineTransformer
 from .i_spline import ISplineTransformer
 from .m_spline import MSplineTransformer

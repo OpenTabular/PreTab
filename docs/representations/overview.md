@@ -10,31 +10,44 @@ data.
 ::::{grid} 1 1 2 2
 :gutter: 3
 
-:::{grid-item-card} Splines
-:link: splines
+:::{grid-item-card} Spline expansions
+:link: spline_expansions
 :link-type: doc
 Smooth, locally-supported bases: B, M, I, cubic regression, natural cubic, penalized
 (P-spline), and the multivariate tensor-product and thin-plate splines.
 :::
 
-:::{grid-item-card} Feature maps
-:link: feature_maps
+:::{grid-item-card} Functional expansions
+:link: functional_expansions
 :link-type: doc
-Basis functions from machine learning: radial (RBF), ReLU, sigmoid, tanh, deterministic
-Fourier, and the kernel approximations (random Fourier features, Nyström).
+Basis functions from machine learning: radial (RBF), ReLU, sigmoid, tanh, and deterministic
+Fourier features.
 :::
 
-:::{grid-item-card} Binning and PLE
-:link: binning_and_ple
+:::{grid-item-card} Kernel approximation
+:link: kernel_approximation
 :link-type: doc
-Discretization: numeric binning with several encodings, and supervised piecewise-linear
-encoding (PLE).
+Multivariate kernel machines without the full kernel matrix: random Fourier features and
+Nyström.
 :::
 
-:::{grid-item-card} Categorical
-:link: categorical
+:::{grid-item-card} Numerical encoding
+:link: numerical_encoding
 :link-type: doc
-Ordinal and one-hot encoding, plus pretrained language embeddings for high-cardinality text.
+Discretization and recoding: numeric binning, supervised piecewise-linear encoding (PLE), and
+periodic encoding.
+:::
+
+:::{grid-item-card} Categorical encoding
+:link: categorical_encoding
+:link-type: doc
+Ordinal and one-hot encoding for categories, handling unseen values without raising.
+:::
+
+:::{grid-item-card} Embeddings
+:link: embeddings
+:link-type: doc
+Pretrained language embeddings for high-cardinality text categories.
 :::
 
 ::::
@@ -85,7 +98,9 @@ the primary sources for each, so the representations are traceable to their lite
 
 ## Where to go next
 
-- [Splines](splines.md), [Feature maps](feature_maps.md), [Binning and PLE](binning_and_ple.md),
-  [Categorical](categorical.md) for the families.
+- [Spline expansions](spline_expansions.md), [Functional expansions](functional_expansions.md),
+  [Kernel approximation](kernel_approximation.md), [Numerical encoding](numerical_encoding.md),
+  [Categorical encoding](categorical_encoding.md), [Embeddings](embeddings.md), and
+  [Preprocessing utilities](preprocessing_utilities.md) for the families.
 - [Comparison table](comparison_table.md) to filter by capability.
 - [Choosing a method](choosing_a_method.md) for guidance and failure modes.

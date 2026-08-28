@@ -175,7 +175,7 @@ class SplineBasisMixin(BasePreTabTransformer):
         Places ``output_dim - degree - 1`` interior knots (via
         :meth:`_place_interior_knots`) and brackets them with ``degree + 1``
         repeated boundary knots on each side -- the B/M/I convention used by
-        :class:`~pretab.transformers.splines.base_spline.BaseSplineTransformer`.
+        :class:`~pretab.expansion.spline.base.BaseSplineTransformer`.
         The resulting marginal B-spline basis then has exactly ``output_dim``
         (non-bias) columns: ``len(knots) - degree - 1 == output_dim``. On the
         adaptive selector path ``min_interior`` / ``max_interior`` clamp the

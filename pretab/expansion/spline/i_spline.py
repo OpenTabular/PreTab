@@ -12,7 +12,7 @@ import numpy as np
 from scipy.interpolate import BSpline
 
 from ...core.parameters import UNSET
-from .base_spline import BaseSplineTransformer
+from .base import BaseSplineTransformer
 
 
 class ISplineTransformer(BaseSplineTransformer):
@@ -25,7 +25,7 @@ class ISplineTransformer(BaseSplineTransformer):
     (``knot_locations``) > target-aware (``placement_strategy``) > automatic
     (``output_dim`` with ``placement_strategy``).
 
-    See :class:`~pretab.transformers.splines.base_spline.BaseSplineTransformer`
+    See :class:`~pretab.expansion.spline.base.BaseSplineTransformer`
     for the full parameter description. ``include_bias`` defaults to False here.
     Because I-splines start at zero, a bias term may be useful for a non-zero
     intercept.

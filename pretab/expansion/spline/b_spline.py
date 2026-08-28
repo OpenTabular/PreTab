@@ -11,7 +11,7 @@ import numpy as np
 from scipy.interpolate import BSpline
 
 from ...core.parameters import UNSET
-from .base_spline import BaseSplineTransformer
+from .base import BaseSplineTransformer
 
 
 class BSplineTransformer(BaseSplineTransformer):
@@ -23,7 +23,7 @@ class BSplineTransformer(BaseSplineTransformer):
     automatic (``output_dim`` with ``placement_strategy``). Multi-column input
     is expanded column by column and the results are stacked horizontally.
 
-    See :class:`~pretab.transformers.splines.base_spline.BaseSplineTransformer`
+    See :class:`~pretab.expansion.spline.base.BaseSplineTransformer`
     for the full parameter description. ``include_bias`` defaults to False: a
     B-spline basis over a clamped knot vector is a partition of unity (every row
     sums to 1), so prepending a bias column makes it an exact linear combination

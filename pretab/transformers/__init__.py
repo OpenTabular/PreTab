@@ -1,24 +1,21 @@
-from .categorical import (
+from ..embedding import LanguageEmbeddingTransformer
+from ..encoding.categorical import (
     ContinuousOrdinalTransformer,
-    LanguageEmbeddingTransformer,
     OneHotFromOrdinalTransformer,
 )
-from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
-from .feature_maps import (
+from ..encoding.numerical import (
+    NumericBinningTransformer,
+    PeriodicEncodingTransformer,
+    PLETransformer,
+)
+from ..expansion.functional import (
     FourierFeatureTransformer,
-    NystroemFeaturesTransformer,
-    RandomFourierFeaturesTransformer,
     RBFExpansionTransformer,
     ReLUExpansionTransformer,
     SigmoidExpansionTransformer,
     TanhExpansionTransformer,
 )
-from .numerical import (
-    NumericBinningTransformer,
-    PeriodicEncodingTransformer,
-    PLETransformer,
-)
-from .splines import (
+from ..expansion.spline import (
     BSplineTransformer,
     CubicRegressionSplineTransformer,
     ISplineTransformer,
@@ -28,6 +25,11 @@ from .splines import (
     TensorProductSplineTransformer,
     ThinPlateSplineTransformer,
 )
+from ..kernel_approximation import (
+    NystroemFeaturesTransformer,
+    RandomFourierFeaturesTransformer,
+)
+from ..preprocessing import MissingStateIndicator, NoTransformer, ToFloatTransformer
 
 __all__ = [
     "BSplineTransformer",

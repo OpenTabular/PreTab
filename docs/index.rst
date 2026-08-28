@@ -33,10 +33,13 @@
    representations/overview
    representations/comparison_table
    representations/choosing_a_method
-   representations/splines
-   representations/feature_maps
-   representations/binning_and_ple
-   representations/categorical
+   representations/spline_expansions
+   representations/functional_expansions
+   representations/kernel_approximation
+   representations/numerical_encoding
+   representations/categorical_encoding
+   representations/embeddings
+   representations/preprocessing_utilities
    representations/references
 
 .. toctree::
