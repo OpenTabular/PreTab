@@ -30,7 +30,13 @@ for a B-spline on column `x0`.
 ## B-spline
 
 The B-spline is the default general-purpose smooth basis. Its functions are non-negative,
-sum to one, and each spans only `degree + 1` knot intervals.
+sum to one, and each spans only `degree + 1` knot intervals. For knots $\tau$ and degree $p$,
+the basis follows the standard Cox-de Boor recursion,
+
+$$
+B_{i,0}(x) = \begin{cases} 1 & \tau_i \le x < \tau_{i+1} \\ 0 & \text{otherwise} \end{cases}, \qquad
+B_{i,p}(x) = \frac{x - \tau_i}{\tau_{i+p} - \tau_i} B_{i,p-1}(x) + \frac{\tau_{i+p+1} - x}{\tau_{i+p+1} - \tau_{i+1}} B_{i+1,p-1}(x).
+$$
 
 ```python
 import numpy as np
@@ -82,12 +88,21 @@ These two share the B-spline machinery but target special shapes.
 
 M-spline
 : A non-negative spline basis (`include_bias=False`). Useful when the components themselves
-  should be non-negative, for example as a density-like basis.
+  should be non-negative, for example as a density-like basis. Built by rescaling each B-spline
+  basis function so it integrates to one over its support,
+
+  $$
+  M_k(x) = \frac{p + 1}{\tau_{k+p+1} - \tau_k}\, B_k(x).
+  $$
 
 I-spline
 : The integral of an M-spline, giving a **monotone** basis. A model with non-negative
   coefficients on an I-spline basis is guaranteed monotone in the input, which is valuable when
   domain knowledge says a relationship cannot reverse.
+
+  $$
+  I_k(x) = \int_{\tau_k}^{x} M_k(t)\, dt.
+  $$
 
 ```python
 import numpy as np
@@ -114,12 +129,23 @@ smoothing penalty through `get_penalty_matrix()`.
 
 Cubic regression spline
 : A cubic basis parameterized at the knots (`cubicspline`), convenient for GAM-style additive
-  models. Requires `output_dim >= 3`.
+  models. Requires `output_dim >= 3`. The basis stacks the polynomial terms with one truncated
+  cubic term per interior knot $\kappa_j$,
+
+  $$
+  \big(x,\ x^2,\ x^3,\ (x - \kappa_1)_+^3,\ \dots,\ (x - \kappa_K)_+^3\big), \qquad (z)_+ = \max(0, z).
+  $$
 
 Natural cubic spline
 : A cubic spline constrained to be **linear beyond the boundary knots** (`naturalspline`).
   The linear tails reduce the wild behaviour ordinary cubics show near the edges of the data.
-  Requires `output_dim >= 2`.
+  Requires `output_dim >= 2`. For knots $\xi_1, \dots, \xi_T$ ($\xi_1$, $\xi_T$ the boundary
+  knots), the basis stacks $x$ with one constrained term per interior knot $\xi_k$,
+
+  $$
+  d_k(x) = \frac{(x - \xi_k)_+^3 - (x - \xi_T)_+^3}{\xi_T - \xi_k}, \qquad
+  N_k(x) = d_k(x) - \frac{\xi_T - \xi_k}{\xi_T - \xi_1} d_1(x) - \frac{\xi_k - \xi_1}{\xi_T - \xi_1} d_T(x).
+  $$
 
 ```python
 import numpy as np
@@ -142,7 +168,17 @@ tails behave far better than an unconstrained cubic there.
 
 The P-spline combines a B-spline basis with a difference penalty on adjacent coefficients,
 following Eilers and Marx. Instead of controlling smoothness only through the number of knots,
-it uses many knots and a penalty of order `diff_order` to keep the fit smooth.
+it uses many knots and a penalty of order `diff_order` to keep the fit smooth. The basis
+functions $B_k$ are exactly the B-spline basis above; fitting a linear model with coefficients
+$\beta$ on top penalizes the loss with
+
+$$
+\lambda\, \beta^\top D^\top D\, \beta,
+$$
+
+where $D$ is the `diff_order`-th order difference operator (the same matrix returned by
+`get_penalty_matrix()`) and $\lambda$ is chosen by the downstream penalized model, not by
+`PSplineTransformer` itself.
 
 ```python
 import numpy as np
@@ -176,7 +212,15 @@ through `Preprocessor`.
 ### Tensor-product spline
 
 Builds a joint basis over multiple inputs as the tensor product of per-axis bases, capturing
-interactions on a smooth grid. It exposes an anisotropic penalty per marginal via
+interactions on a smooth grid. Each per-axis marginal is a B-spline basis (above), and the
+joint basis function for multi-index $(k_1, \dots, k_d)$ over $d$ input columns $x_1, \dots, x_d$
+is their product,
+
+$$
+\Phi_{k_1, \dots, k_d}(x_1, \dots, x_d) = \prod_{j=1}^{d} B_{k_j}(x_j).
+$$
+
+It exposes an anisotropic penalty per marginal via
 `get_penalty_matrix(feature_index=...)`.
 
 ```python
@@ -200,7 +244,16 @@ explodes.
 ### Thin-plate spline
 
 A thin-plate regression spline, the smooth-surface method from generalized additive models. It
-places landmarks (by default with k-means) and forms a low-rank basis.
+places landmarks (by default with k-means) and forms a low-rank basis from the leading
+eigenvectors of a projected radial-kernel matrix between the data and the landmarks. The radial
+kernel $\eta(r)$ depends on the input dimension $d$:
+
+$$
+\eta(r) = \begin{cases} r^3 & d = 1 \\ r^2 \log r & d = 2 \\ r & d \ge 3 \end{cases}
+$$
+
+where $r = \lVert x - z_j \rVert$ is the distance from $x$ to landmark $z_j$. This follows the
+low-rank thin-plate regression spline of Wood (2003).
 
 ```python
 import numpy as np
