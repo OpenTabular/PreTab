@@ -27,6 +27,7 @@ from sklearn.preprocessing import (
     StandardScaler,
 )
 
+from ..embedding.language import LanguageEmbeddingTransformer
 from ..encoding.categorical.one_hot import OneHotFromOrdinalTransformer
 from ..encoding.categorical.ordinal import ContinuousOrdinalTransformer
 from ..encoding.numerical.binning import NumericBinningTransformer
@@ -50,9 +51,6 @@ from ..expansion.spline.natural_cubic import NaturalCubicSplineTransformer
 from ..expansion.spline.p_spline import PSplineTransformer
 from ..kernel_approximation.nystroem import NystroemFeaturesTransformer
 from ..kernel_approximation.random_fourier import RandomFourierFeaturesTransformer
-from ..transformers.categorical.language_embedding import (
-    LanguageEmbeddingTransformer,
-)
 from ..transformers.encoders.floats import NoTransformer
 
 __all__ = [

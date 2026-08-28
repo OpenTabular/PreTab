@@ -1,3 +1,4 @@
+from ..embedding import LanguageEmbeddingTransformer
 from ..encoding.categorical import (
     ContinuousOrdinalTransformer,
     OneHotFromOrdinalTransformer,
@@ -28,7 +29,6 @@ from ..kernel_approximation import (
     NystroemFeaturesTransformer,
     RandomFourierFeaturesTransformer,
 )
-from .categorical import LanguageEmbeddingTransformer
 from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
 
 __all__ = [
