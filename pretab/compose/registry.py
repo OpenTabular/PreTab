@@ -48,14 +48,12 @@ from ..expansion.spline.multivariate.thin_plate import (
 )
 from ..expansion.spline.natural_cubic import NaturalCubicSplineTransformer
 from ..expansion.spline.p_spline import PSplineTransformer
+from ..kernel_approximation.nystroem import NystroemFeaturesTransformer
+from ..kernel_approximation.random_fourier import RandomFourierFeaturesTransformer
 from ..transformers.categorical.language_embedding import (
     LanguageEmbeddingTransformer,
 )
 from ..transformers.encoders.floats import NoTransformer
-from ..transformers.feature_maps.kernel_approx import (
-    NystroemFeaturesTransformer,
-    RandomFourierFeaturesTransformer,
-)
 
 __all__ = [
     "CATEGORICAL_ALIASES",

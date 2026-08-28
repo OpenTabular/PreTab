@@ -24,12 +24,12 @@ from ..expansion.spline import (
     TensorProductSplineTransformer,
     ThinPlateSplineTransformer,
 )
-from .categorical import LanguageEmbeddingTransformer
-from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
-from .feature_maps import (
+from ..kernel_approximation import (
     NystroemFeaturesTransformer,
     RandomFourierFeaturesTransformer,
 )
+from .categorical import LanguageEmbeddingTransformer
+from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
 
 __all__ = [
     "BSplineTransformer",
