@@ -27,6 +27,8 @@ from sklearn.preprocessing import (
     StandardScaler,
 )
 
+from ..encoding.categorical.one_hot import OneHotFromOrdinalTransformer
+from ..encoding.categorical.ordinal import ContinuousOrdinalTransformer
 from ..encoding.numerical.binning import NumericBinningTransformer
 from ..encoding.numerical.ple import PLETransformer
 from ..expansion.functional.fourier import FourierFeatureTransformer
@@ -49,8 +51,6 @@ from ..expansion.spline.p_spline import PSplineTransformer
 from ..transformers.categorical.language_embedding import (
     LanguageEmbeddingTransformer,
 )
-from ..transformers.categorical.legacy import OneHotFromOrdinalTransformer
-from ..transformers.categorical.ordinal import ContinuousOrdinalTransformer
 from ..transformers.encoders.floats import NoTransformer
 from ..transformers.feature_maps.kernel_approx import (
     NystroemFeaturesTransformer,

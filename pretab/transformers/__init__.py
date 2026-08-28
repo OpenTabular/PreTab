@@ -1,3 +1,7 @@
+from ..encoding.categorical import (
+    ContinuousOrdinalTransformer,
+    OneHotFromOrdinalTransformer,
+)
 from ..encoding.numerical import (
     NumericBinningTransformer,
     PeriodicEncodingTransformer,
@@ -20,11 +24,7 @@ from ..expansion.spline import (
     TensorProductSplineTransformer,
     ThinPlateSplineTransformer,
 )
-from .categorical import (
-    ContinuousOrdinalTransformer,
-    LanguageEmbeddingTransformer,
-    OneHotFromOrdinalTransformer,
-)
+from .categorical import LanguageEmbeddingTransformer
 from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
 from .feature_maps import (
     NystroemFeaturesTransformer,
