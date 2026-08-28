@@ -124,6 +124,13 @@ one extra column when `include_original=True`. Higher `harmonics` lets the encod
 finer-grained sub-cycles (for example distinguishing morning from afternoon within a day), at
 the cost of a wider output.
 
+```{warning}
+PreTab has no mechanism to detect the period automatically from the data. `period` is a
+required constructor argument with no default, and `fit` only validates that values fall
+within `[0, period]`, it never infers the cycle length. You must know and supply the period
+yourself (24 for hour of day, 7 for day of week, 12 for month of year, and so on).
+```
+
 ```{important}
 Valid input is the **closed interval** `[0, period]`: both endpoints are accepted, and by
 construction they map to the identical `(sin, cos)` pair, since `x=0` and `x=period` are the
