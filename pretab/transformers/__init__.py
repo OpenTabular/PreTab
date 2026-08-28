@@ -29,7 +29,7 @@ from ..kernel_approximation import (
     NystroemFeaturesTransformer,
     RandomFourierFeaturesTransformer,
 )
-from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
+from ..preprocessing import MissingStateIndicator, NoTransformer, ToFloatTransformer
 
 __all__ = [
     "BSplineTransformer",

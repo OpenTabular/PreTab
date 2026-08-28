@@ -51,7 +51,7 @@ from ..expansion.spline.natural_cubic import NaturalCubicSplineTransformer
 from ..expansion.spline.p_spline import PSplineTransformer
 from ..kernel_approximation.nystroem import NystroemFeaturesTransformer
 from ..kernel_approximation.random_fourier import RandomFourierFeaturesTransformer
-from ..transformers.encoders.floats import NoTransformer
+from ..preprocessing.floats import NoTransformer
 
 __all__ = [
     "CATEGORICAL_ALIASES",

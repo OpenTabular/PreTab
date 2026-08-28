@@ -16,8 +16,8 @@ from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
-from ..transformers.encoders.floats import ToFloatTransformer
-from ..transformers.encoders.missing import MissingStateIndicator
+from ..preprocessing.floats import ToFloatTransformer
+from ..preprocessing.missing import MissingStateIndicator
 from .config import PreprocessorConfig
 from .registry import (
     CATEGORICAL_ALIASES,
