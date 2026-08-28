@@ -10,6 +10,39 @@ import pytest
 
 import pretab
 
+# The stable public transformer facade. Every name here must stay importable from
+# ``pretab.transformers`` no matter how the internal modules are relocated during the
+# 1.0.0 layout refactor. Pinning the exact set makes an accidental drop or rename fail
+# loudly instead of silently shrinking ``__all__``.
+FACADE_TRANSFORMERS = frozenset(
+    {
+        "BSplineTransformer",
+        "ContinuousOrdinalTransformer",
+        "CubicRegressionSplineTransformer",
+        "FourierFeatureTransformer",
+        "ISplineTransformer",
+        "LanguageEmbeddingTransformer",
+        "MSplineTransformer",
+        "MissingStateIndicator",
+        "NaturalCubicSplineTransformer",
+        "NoTransformer",
+        "NumericBinningTransformer",
+        "NystroemFeaturesTransformer",
+        "OneHotFromOrdinalTransformer",
+        "PLETransformer",
+        "PSplineTransformer",
+        "PeriodicEncodingTransformer",
+        "RBFExpansionTransformer",
+        "RandomFourierFeaturesTransformer",
+        "ReLUExpansionTransformer",
+        "SigmoidExpansionTransformer",
+        "TanhExpansionTransformer",
+        "TensorProductSplineTransformer",
+        "ThinPlateSplineTransformer",
+        "ToFloatTransformer",
+    }
+)
+
 
 def test_public_names_are_exported():
     for name in ("Preprocessor", "PretabWarning", "configure_logging", "set_verbosity", "__version__"):
@@ -31,6 +64,17 @@ def test_transformers_public_surface_is_resolvable():
     assert transformers.__all__
     for name in transformers.__all__:
         assert hasattr(transformers, name)
+
+
+def test_transformers_facade_is_frozen():
+    transformers = importlib.import_module("pretab.transformers")
+    assert set(transformers.__all__) == FACADE_TRANSFORMERS
+
+
+@pytest.mark.parametrize("name", sorted(FACADE_TRANSFORMERS))
+def test_facade_transformer_is_an_importable_class(name):
+    transformers = importlib.import_module("pretab.transformers")
+    assert isinstance(getattr(transformers, name), type)
 
 
 def test_legacy_pipeline_package_is_removed():
