@@ -1,3 +1,13 @@
+from ..expansion.spline import (
+    BSplineTransformer,
+    CubicRegressionSplineTransformer,
+    ISplineTransformer,
+    MSplineTransformer,
+    NaturalCubicSplineTransformer,
+    PSplineTransformer,
+    TensorProductSplineTransformer,
+    ThinPlateSplineTransformer,
+)
 from .categorical import (
     ContinuousOrdinalTransformer,
     LanguageEmbeddingTransformer,
@@ -17,16 +27,6 @@ from .numerical import (
     NumericBinningTransformer,
     PeriodicEncodingTransformer,
     PLETransformer,
-)
-from .splines import (
-    BSplineTransformer,
-    CubicRegressionSplineTransformer,
-    ISplineTransformer,
-    MSplineTransformer,
-    NaturalCubicSplineTransformer,
-    PSplineTransformer,
-    TensorProductSplineTransformer,
-    ThinPlateSplineTransformer,
 )
 
 __all__ = [

@@ -53,7 +53,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
         .. note::
            The tensor-product spline is a penalized (difference-penalty) spline
-           per marginal, exactly like :class:`~pretab.transformers.splines.p_spline.PSplineTransformer`,
+           per marginal, exactly like :class:`~pretab.expansion.spline.p_spline.PSplineTransformer`,
            so it assumes **equally-spaced** knots and is *unsupervised-only*:
            target-aware placement does not apply and only ``"uniform"`` /
            ``"quantile"`` spacing is accepted.

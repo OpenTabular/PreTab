@@ -21,9 +21,9 @@ import pytest
 
 from pretab.exceptions import InvalidParamError
 from pretab.preprocessor import Preprocessor
-from pretab.transformers.splines.b_spline import BSplineTransformer
-from pretab.transformers.splines.i_spline import ISplineTransformer
-from pretab.transformers.splines.m_spline import MSplineTransformer
+from pretab.expansion.spline.b_spline import BSplineTransformer
+from pretab.expansion.spline.i_spline import ISplineTransformer
+from pretab.expansion.spline.m_spline import MSplineTransformer
 
 OUTPUT_DIM = 6
 
