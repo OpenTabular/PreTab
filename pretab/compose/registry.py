@@ -27,6 +27,11 @@ from sklearn.preprocessing import (
     StandardScaler,
 )
 
+from ..expansion.functional.fourier import FourierFeatureTransformer
+from ..expansion.functional.rbf import RBFExpansionTransformer
+from ..expansion.functional.relu import ReLUExpansionTransformer
+from ..expansion.functional.sigmoid import SigmoidExpansionTransformer
+from ..expansion.functional.tanh import TanhExpansionTransformer
 from ..expansion.spline.b_spline import BSplineTransformer
 from ..expansion.spline.cubic_regression import CubicRegressionSplineTransformer
 from ..expansion.spline.i_spline import ISplineTransformer
@@ -45,15 +50,10 @@ from ..transformers.categorical.language_embedding import (
 from ..transformers.categorical.legacy import OneHotFromOrdinalTransformer
 from ..transformers.categorical.ordinal import ContinuousOrdinalTransformer
 from ..transformers.encoders.floats import NoTransformer
-from ..transformers.feature_maps.fourier import FourierFeatureTransformer
 from ..transformers.feature_maps.kernel_approx import (
     NystroemFeaturesTransformer,
     RandomFourierFeaturesTransformer,
 )
-from ..transformers.feature_maps.rbf import RBFExpansionTransformer
-from ..transformers.feature_maps.relu import ReLUExpansionTransformer
-from ..transformers.feature_maps.sigmoid import SigmoidExpansionTransformer
-from ..transformers.feature_maps.tanh import TanhExpansionTransformer
 from ..transformers.numerical.binning import NumericBinningTransformer
 from ..transformers.numerical.piecewise import PLETransformer
 

@@ -1,3 +1,10 @@
+from ..expansion.functional import (
+    FourierFeatureTransformer,
+    RBFExpansionTransformer,
+    ReLUExpansionTransformer,
+    SigmoidExpansionTransformer,
+    TanhExpansionTransformer,
+)
 from ..expansion.spline import (
     BSplineTransformer,
     CubicRegressionSplineTransformer,
@@ -15,13 +22,8 @@ from .categorical import (
 )
 from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
 from .feature_maps import (
-    FourierFeatureTransformer,
     NystroemFeaturesTransformer,
     RandomFourierFeaturesTransformer,
-    RBFExpansionTransformer,
-    ReLUExpansionTransformer,
-    SigmoidExpansionTransformer,
-    TanhExpansionTransformer,
 )
 from .numerical import (
     NumericBinningTransformer,
