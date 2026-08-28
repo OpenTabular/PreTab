@@ -111,6 +111,8 @@ To set expectations, PreTab deliberately does not do the following.
 ## Where to go next
 
 - [Comparison table](comparison_table.md) to filter by capability.
-- [Splines](splines.md), [Feature maps](feature_maps.md),
-  [Binning and PLE](binning_and_ple.md), [Categorical](categorical.md) for the details.
+- [Spline expansions](spline_expansions.md), [Functional expansions](functional_expansions.md),
+  [Kernel approximation](kernel_approximation.md), [Numerical encoding](numerical_encoding.md),
+  [Categorical encoding](categorical_encoding.md), and [Embeddings](embeddings.md) for the
+  details.
 - [Comparing representations](../tutorials/comparing_representations.md) to measure the choice.

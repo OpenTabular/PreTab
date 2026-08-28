@@ -37,7 +37,7 @@ source of truth, and these tables mirror it.
 | Yeo-Johnson | `yeo-johnson` | univariate | forbidden | yes |
 | Passthrough | `none` | univariate | forbidden | yes |
 
-## Numerical: splines
+## Spline expansions
 
 | Method | Key | Scope | Target | Adaptive | Penalty | Selectable |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -56,7 +56,7 @@ standalone, not selected per column through `Preprocessor`. The alias `thinplate
 `tprs`.
 ```
 
-## Numerical: feature maps
+## Functional expansions
 
 | Method | Key | Scope | Target | Adaptive | Selectable |
 | --- | --- | --- | --- | --- | --- |
@@ -65,15 +65,26 @@ standalone, not selected per column through `Preprocessor`. The alias `thinplate
 | Sigmoid expansion | `sigmoid` | univariate | optional | yes | yes |
 | Tanh expansion | `tanh` | univariate | optional | yes | yes |
 | Fourier features | `fourier` | univariate | forbidden | no | yes |
+
+## Kernel approximation
+
+| Method | Key | Scope | Target | Adaptive | Selectable |
+| --- | --- | --- | --- | --- | --- |
 | Random Fourier features | `rff` | multivariate | forbidden | no | no |
 | Nyström kernel map | `nystroem` | multivariate | forbidden | no | no |
 
-## Numerical: discretization
+```{note}
+Random Fourier features and Nyström model the whole input matrix jointly and are used
+standalone, not selected per column through `Preprocessor`.
+```
+
+## Numerical encoding
 
 | Method | Key | Scope | Target | Adaptive | Selectable |
 | --- | --- | --- | --- | --- | --- |
 | Numeric binning | `custombin` | univariate | forbidden | no | yes |
 | Piecewise-linear encoding (PLE) | `ple` | univariate | required | yes | yes |
+| Periodic encoding | n/a | univariate | forbidden | no | no |
 
 ```{important}
 PLE is the only numerical method that **requires** the target. It always places its bins
@@ -81,22 +92,37 @@ against `y`, so it must be fit with a target and is best used with cross-fitting
 [Target awareness](../core_concepts/target_awareness.md).
 ```
 
-## Categorical
+```{note}
+Periodic encoding has no registry key: it takes a required per-feature `period`, so it is not
+selectable through `Preprocessor`. Instantiate `PeriodicEncodingTransformer` directly.
+```
+
+## Categorical encoding
 
 | Method | Key | Scope | Target | Selectable |
 | --- | --- | --- | --- | --- |
 | Ordinal (integer) encoding | `int` | univariate | forbidden | yes |
 | One-hot encoding | `one-hot` | univariate | forbidden | yes |
 | One-hot from ordinal | `onehot_from_ordinal` | univariate | forbidden | yes |
-| Pretrained language embedding | `pretrained` | univariate | forbidden | yes |
 | Passthrough | `none` | univariate | forbidden | yes |
 
 ```{note}
-`pretrained` requires the optional `embeddings` extra. The alias `ohe` resolves to `one-hot`.
+The alias `ohe` resolves to `one-hot`.
+```
+
+## Embeddings
+
+| Method | Key | Scope | Target | Selectable |
+| --- | --- | --- | --- | --- |
+| Pretrained language embedding | `pretrained` | univariate | forbidden | yes |
+
+```{note}
+`pretrained` requires the optional `embeddings` extra.
 ```
 
 ## Where to go next
 
 - [Choosing a method](choosing_a_method.md) for guidance on which of these to reach for.
-- [Splines](splines.md), [Feature maps](feature_maps.md),
-  [Binning and PLE](binning_and_ple.md), [Categorical](categorical.md) for the details.
+- [Spline expansions](spline_expansions.md), [Functional expansions](functional_expansions.md),
+  [Kernel approximation](kernel_approximation.md), [Numerical encoding](numerical_encoding.md),
+  [Categorical encoding](categorical_encoding.md), [Embeddings](embeddings.md) for the details.

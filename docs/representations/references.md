@@ -53,5 +53,5 @@ basis for `PLETransformer`.
 ## Where to go next
 
 - [Representations overview](overview.md) to return to the catalogue.
-- [Splines](splines.md), [Feature maps](feature_maps.md),
-  [Binning and PLE](binning_and_ple.md) for the methods these sources describe.
+- [Spline expansions](spline_expansions.md), [Kernel approximation](kernel_approximation.md),
+  [Numerical encoding](numerical_encoding.md) for the methods these sources describe.

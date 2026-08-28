@@ -1,4 +1,4 @@
-# Splines
+# Spline expansions
 
 Splines are piecewise-polynomial bases with local support. They turn a single numerical column
 into a set of smooth, overlapping basis functions, so a linear model on top can bend to follow
@@ -150,7 +150,7 @@ want to model jointly.
 
 ## Where to go next
 
-- [Feature maps](feature_maps.md) for non-spline bases.
+- [Functional expansions](functional_expansions.md) for non-spline bases.
 - [Multivariate features tutorial](../tutorials/multivariate_features.md) for a worked joint
   model.
 - [References](references.md) for the primary spline literature.

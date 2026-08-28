@@ -112,6 +112,8 @@ The thin-plate spline handles the geographic interaction while PLE handles the s
 
 ## Where to go next
 
-- [Splines](../representations/splines.md) for the tensor-product and thin-plate details.
-- [Feature maps](../representations/feature_maps.md) for the kernel approximations.
+- [Spline expansions](../representations/spline_expansions.md) for the tensor-product and
+  thin-plate details.
+- [Kernel approximation](../representations/kernel_approximation.md) for random Fourier
+  features and Nyström.
 - [References](../representations/references.md) for the underlying theory.

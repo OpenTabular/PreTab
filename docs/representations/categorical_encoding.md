@@ -1,9 +1,9 @@
-# Categorical
+# Categorical encoding
 
-Categorical features range from a handful of labels to free text with thousands of distinct
-values. PreTab covers the spectrum: compact integer encoding, explicit one-hot, and pretrained
-language embeddings for high-cardinality text. All of them handle unseen categories without
-raising.
+Categorical encoding maps a category to codes or indicators a model can consume directly.
+PreTab covers compact integer encoding and explicit one-hot encoding, both of which handle
+unseen categories without raising. For high-cardinality text where the labels themselves carry
+meaning, see [Embeddings](embeddings.md) instead.
 
 ## Integer (ordinal) encoding
 
@@ -41,34 +41,7 @@ encodes an already integer-coded column.
 ```{warning}
 One-hot width grows with cardinality. A column with thousands of categories produces thousands
 of columns. Use the [output budget](../core_concepts/outputs_and_inspection.md) to cap it, or
-prefer integer encoding or embeddings for high-cardinality columns.
-```
-
-## Language embeddings
-
-For high-cardinality text categories (product titles, free-text tags, descriptions), a
-pretrained sentence embedding captures semantic similarity that integer or one-hot encoding
-cannot. Similar labels land near each other in the embedding space.
-
-```python
-from pretab.transformers import LanguageEmbeddingTransformer
-
-t = LanguageEmbeddingTransformer(model_name="paraphrase-MiniLM-L3-v2")
-X2 = t.fit_transform(x)
-```
-
-Constructor highlights: `model_name="paraphrase-MiniLM-L3-v2"`, or pass a preloaded `model`.
-The registry key is `pretrained`.
-
-```{important}
-Language embeddings require the optional `embeddings` extra, which pulls in
-`sentence-transformers`. Install it with `pip install "pretab[embeddings]"`. Without it,
-requesting `pretrained` raises a clear `OptionalDependencyError`.
-```
-
-```{tip}
-Embeddings shine when category labels carry meaning as text. If the labels are opaque codes
-with no semantic content, integer encoding is simpler and just as effective.
+prefer integer encoding or [embeddings](embeddings.md) for high-cardinality columns.
 ```
 
 ## Choosing a categorical method
@@ -77,10 +50,10 @@ with no semantic content, integer encoding is simpler and just as effective.
 | --- | --- |
 | Low cardinality, unordered | One-hot |
 | Fed to a tree or embedding layer | Integer |
-| High-cardinality meaningful text | Language embedding |
+| High-cardinality meaningful text | [Language embedding](embeddings.md) |
 
 ## Where to go next
 
+- [Embeddings](embeddings.md) for high-cardinality text categories.
 - [Missing values](../core_concepts/missing_values.md) for categorical imputation.
 - [Configuration](../core_concepts/configuration.md) to set categorical methods per column.
-- [Installation](../getting_started/installation.md) for the `embeddings` extra.
