@@ -11,16 +11,27 @@ other in the embedding space.
 from pretab.transformers import LanguageEmbeddingTransformer
 
 t = LanguageEmbeddingTransformer(model_name="paraphrase-MiniLM-L3-v2")
-X2 = t.fit_transform(x)
+X = [["red running shoes"], ["blue jacket"], ["red running shoes"]]   # 3 rows, 1 column
+t.fit_transform(X).shape
+# (3, embedding_dim_): one row per input; embedding_dim_ is set from the loaded
+# model's own dimensionality once fitted, e.g. via t.embedding_dim_
 ```
 
-Constructor highlights: `model_name="paraphrase-MiniLM-L3-v2"`, or pass a preloaded `model`.
-The registry key is `pretrained`.
+Constructor highlights: `model_name="paraphrase-MiniLM-L3-v2"`, or pass a preloaded `model`
+(any object exposing an `encode(X)` method, useful for tests or a custom embedding backend
+without pulling in `sentence-transformers`). The registry key is `pretrained`.
 
 ```{important}
 Language embeddings require the optional `embeddings` extra, which pulls in
 `sentence-transformers`. Install it with `pip install "pretab[embeddings]"`. Without it,
 requesting `pretrained` raises a clear `OptionalDependencyError`.
+```
+
+```{note}
+The output width is fixed by the underlying model, not by any PreTab parameter, and is exposed
+after fitting as `embedding_dim_`. It does not depend on `n_samples` or on how many distinct
+categories are present. Swapping `model_name` for a different model changes the output width
+accordingly.
 ```
 
 ```{tip}

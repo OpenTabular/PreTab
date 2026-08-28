@@ -50,13 +50,6 @@ Ordinal and one-hot encoding for categories, handling unseen values without rais
 Pretrained language embeddings for high-cardinality text categories.
 :::
 
-:::{grid-item-card} Preprocessing utilities
-:link: preprocessing_utilities
-:link-type: doc
-Supporting transformers `Preprocessor` wires in automatically: pass-through, type conversion,
-and missing-value flagging.
-:::
-
 ::::
 
 ## Shared terminology

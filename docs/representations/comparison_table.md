@@ -41,9 +41,9 @@ source of truth, and these tables mirror it.
 
 | Method | Key | Scope | Target | Adaptive | Penalty | Selectable |
 | --- | --- | --- | --- | --- | --- | --- |
-| B-spline | `bspline` | univariate | optional | yes | no | yes |
-| M-spline | `mspline` | univariate | optional | yes | no | yes |
-| I-spline | `ispline` | univariate | optional | yes | no | yes |
+| B-spline | `bspline` | univariate | optional | yes | yes | yes |
+| M-spline | `mspline` | univariate | optional | yes | yes | yes |
+| I-spline | `ispline` | univariate | optional | yes | yes | yes |
 | Cubic regression spline | `cubicspline` | univariate | optional | yes | yes | yes |
 | Natural cubic spline | `naturalspline` | univariate | optional | yes | yes | yes |
 | Penalized spline (P-spline) | `pspline` | univariate | forbidden | yes | yes | yes |

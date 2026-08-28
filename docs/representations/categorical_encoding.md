@@ -11,14 +11,19 @@ The default categorical method maps each category to an integer. It is compact a
 as an input to models that consume category indices, such as embedding layers.
 
 ```python
+import numpy as np
 from pretab.transformers import ContinuousOrdinalTransformer
 
+X = np.array([["a"], ["b"], ["a"], ["c"]])   # (4, 1)
 t = ContinuousOrdinalTransformer()
-X2 = t.fit_transform(x)
+t.fit_transform(X).ravel()
+# array([1, 2, 1, 3])  codes start at 1; output shape stays (4, 1)
+t.transform(np.array([["unseen"]])).ravel()
+# array([0])  unseen categories map to the reserved 0 code
 ```
 
-Unseen categories at transform time map to a reserved slot rather than raising, so a model in
-production never crashes on a new label.
+Unseen categories at transform time map to a reserved slot (code `0`) rather than raising, so a
+model in production never crashes on a new label.
 
 ```{note}
 Integer encoding imposes an order on the codes. Feed it to models that treat the code as an
@@ -32,16 +37,24 @@ One-hot encoding produces one indicator column per category, the right choice wh
 downstream model should treat categories as unordered.
 
 ```python
+import pandas as pd
+from pretab import Preprocessor
+
+df = pd.DataFrame({"color": ["red", "blue", "green", "red"]})
 pre = Preprocessor(categorical_method="one-hot")
+pre.fit(df)
+pre.get_feature_names_out()
+# array(['cat_color_blue', 'cat_color_green', 'cat_color_red'], dtype=object)
 ```
 
 The alias `ohe` resolves to `one-hot`. There is also `onehot_from_ordinal`, which one-hot
 encodes an already integer-coded column.
 
 ```{warning}
-One-hot width grows with cardinality. A column with thousands of categories produces thousands
-of columns. Use the [output budget](../core_concepts/outputs_and_inspection.md) to cap it, or
-prefer integer encoding or [embeddings](embeddings.md) for high-cardinality columns.
+One-hot width grows with cardinality: a column with `k` distinct categories produces `k`
+output columns (3 in the example above). A column with thousands of categories produces
+thousands of columns. Use the [output budget](../core_concepts/outputs_and_inspection.md) to
+cap it, or prefer integer encoding or [embeddings](embeddings.md) for high-cardinality columns.
 ```
 
 ## Choosing a categorical method

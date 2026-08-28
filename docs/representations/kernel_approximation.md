@@ -14,10 +14,13 @@ cost of the approximation does not grow with the number of training points the w
 kernel method's does.
 
 ```python
+import numpy as np
 from pretab.transformers import RandomFourierFeaturesTransformer
 
+X = np.random.default_rng(0).uniform(size=(200, 3))   # (200, 3): the whole feature block
 t = RandomFourierFeaturesTransformer(n_components=100, gamma=1.0)
-X2 = t.fit_transform(X)
+t.fit_transform(X).shape
+# (200, 100): n_components columns, independent of the number of input features
 ```
 
 Constructor highlights: `n_components=100`, `gamma=1.0`, `random_state`.
@@ -36,14 +39,26 @@ more accurate than random Fourier features at a given output width because the l
 to the data rather than being drawn at random.
 
 ```python
+import numpy as np
 from pretab.transformers import NystroemFeaturesTransformer
 
+X = np.random.default_rng(0).uniform(size=(200, 3))
 t = NystroemFeaturesTransformer(n_components=100, kernel="rbf")
-X2 = t.fit_transform(X)
+t.fit_transform(X).shape
+# (200, 100)
 ```
 
 Constructor highlights: `n_components=100`, `kernel="rbf"`, `gamma=None`, `degree=3`,
 `coef0=1`, `random_state`.
+
+```{warning}
+Nyström samples its landmarks from the training rows, so `n_components` cannot exceed
+`n_samples`. If you fit on fewer rows than `n_components` (for example a small
+cross-validation fold), scikit-learn silently clamps `n_components` down to `n_samples` and
+emits a `UserWarning` rather than raising: the fitted output width is `min(n_components,
+n_samples_seen_in_fit)`. Random Fourier features have no such limit, since they draw a random
+basis instead of sampling training rows.
+```
 
 ```{note}
 Both methods approximate the same idea from different angles: random Fourier features draw a

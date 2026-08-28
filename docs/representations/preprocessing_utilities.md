@@ -19,20 +19,33 @@ methods, letting a column skip representation entirely while still satisfying th
 scikit-learn transformer API.
 
 ```python
+import numpy as np
 from pretab.transformers import NoTransformer
 
+X = np.zeros((5, 3))   # (5, 3)
 t = NoTransformer()
-X2 = t.fit_transform(X)  # X2 is X, unmodified
+t.fit_transform(X).shape
+# (5, 3): identical to the input, values and width both unchanged
 ```
 
 `ToFloatTransformer` casts its input to floating point. `Preprocessor` appends it after
 one-hot encoding so the categorical block has the same dtype as the rest of the design matrix.
 
 ```python
+import numpy as np
 from pretab.transformers import ToFloatTransformer
 
+X = np.array([[1], [2], [3]])   # (3, 1), integer dtype
 t = ToFloatTransformer()
-t.fit_transform(X).dtype  # dtype('float64')
+out = t.fit_transform(X)
+out.shape, out.dtype
+# ((3, 1), dtype('float64')): width unchanged, only the dtype changes
+```
+
+```{note}
+Neither utility has an `output_dim`-style width parameter: unlike every expansion or encoding
+family elsewhere in this section, the output always has the exact same number of columns as
+the input.
 ```
 
 ## Missing-value flagging

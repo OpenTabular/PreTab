@@ -120,7 +120,7 @@ See PreTab lift a linear model, baseline vs. PreTab.
 :::{grid-item-card} Representations
 :link: representations/overview
 :link-type: doc
-The full catalogue of splines, feature maps, and encoders.
+The full catalogue of spline and functional expansions, kernel approximations, and encoders.
 :::
 
 :::{grid-item-card} API reference

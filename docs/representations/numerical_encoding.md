@@ -12,22 +12,34 @@ Numeric binning splits a feature into intervals and encodes which interval each 
 into. You choose how the edges are placed and how the result is encoded.
 
 ```python
+import numpy as np
 from pretab.transformers import NumericBinningTransformer
 
-t = NumericBinningTransformer(output_dim=8, encode="onehot", placement_strategy="quantile")
+X = np.random.default_rng(0).uniform(size=(100, 1))   # (100, 1)
+onehot = NumericBinningTransformer(output_dim=8, encode="onehot", placement_strategy="quantile")
+onehot.fit_transform(X).shape
+# (100, 8): one column per bin
+
+ordinal = NumericBinningTransformer(output_dim=8, encode="ordinal", placement_strategy="quantile")
+ordinal.fit_transform(X).shape
+# (100, 1): a single integer column, regardless of output_dim
 ```
 
-The `encode` parameter selects the output form.
+The `encode` parameter selects the output form, and it changes the output **width**, not just
+the values: `"onehot"` produces `output_dim` columns, while `"ordinal"` and `"soft"` behave
+differently from each other despite both accepting the same `output_dim`.
 
 `"ordinal"`
-: A single integer column giving the bin index.
+: A single integer column giving the bin index (output width is always 1, independent of
+  `output_dim`).
 
 `"onehot"`
-: One indicator column per bin.
+: One indicator column per bin (output width equals `output_dim`).
 
 `"soft"`
 : A soft assignment that spreads each value across neighbouring bins, so the boundaries are not
-  hard. This keeps a little of the smoothness that hard binning discards.
+  hard (output width equals `output_dim`, same shape as `"onehot"` but with fractional
+  membership instead of a single 1).
 
 Edge placement follows `placement_strategy`: `"uniform"` for equal-width bins, `"quantile"`
 for equal-frequency bins. See
@@ -46,10 +58,16 @@ position within its bin**. The result is a piecewise-linear function that bends 
 the target changes, following the tabular deep-learning work of Gorishniy and colleagues.
 
 ```python
+import numpy as np
 from pretab.transformers import PLETransformer
 
-t = PLETransformer(output_dim=12, task="regression")
-X2 = t.fit_transform(x, y)   # y is required
+X = np.random.default_rng(0).uniform(size=(100, 1))
+y = np.random.default_rng(0).integers(0, 2, size=100)
+t = PLETransformer(output_dim=12, task="classification")
+t.fit_transform(X, y).shape
+# (100, 12): output_dim is exact here (no adaptive clamping)
+t.total_output_dim_
+# 12
 ```
 
 Constructor highlights: `output_dim`, `placement_strategy="cart"`, `task="regression"`,
@@ -59,6 +77,13 @@ Constructor highlights: `output_dim`, `placement_strategy="cart"`, `task="regres
 PLE **requires** the target. It places its edges using `y`, so it must be fit with a target
 and should be fit leakage-safely, ideally with cross-fitting. See
 [Target awareness](../core_concepts/target_awareness.md).
+```
+
+```{warning}
+Because PLE always reads `y` to place its bins, fitting it directly on data you will also train
+on emits a `LeakageWarning`. Fit it inside a scikit-learn `Pipeline` or wrap it in
+`pretab.CrossFittedTransformer` so the bin edges never see the rows they will later transform
+for training.
 ```
 
 ### Why piecewise-linear rather than one-hot
@@ -82,13 +107,29 @@ keeps the boundary continuous, so December and January sit next to each other in
 opposite ends of a number line.
 
 ```python
+import numpy as np
 from pretab.transformers import PeriodicEncodingTransformer
 
-t = PeriodicEncodingTransformer(period=12, harmonics=2)  # e.g. month of year
+X = np.array([[0], [6], [12], [18], [24]])   # hour-of-day style values
+t = PeriodicEncodingTransformer(period=24, harmonics=2)  # e.g. hour of day
+t.fit_transform(X).shape
+# (5, 4): 2 columns (sin, cos) per harmonic
 ```
 
 Constructor highlights: `period` (required, the cycle length), `harmonics=1`,
 `include_original=False`.
+
+**Parameter impact.** Output width is `2 * harmonics` (one sine/cosine pair per harmonic), plus
+one extra column when `include_original=True`. Higher `harmonics` lets the encoding represent
+finer-grained sub-cycles (for example distinguishing morning from afternoon within a day), at
+the cost of a wider output.
+
+```{important}
+Valid input is the **closed interval** `[0, period]`: both endpoints are accepted, and by
+construction they map to the identical `(sin, cos)` pair, since `x=0` and `x=period` are the
+same point on the cycle. Values outside `[0, period]` raise a `PretabDataError` at fit and
+transform, there is no silent wrap-around or clamping.
+```
 
 ```{note}
 Periodic encoding is a standalone time-series utility. It is not wired into `Preprocessor`
