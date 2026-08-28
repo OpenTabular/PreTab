@@ -51,7 +51,13 @@ on. The same applies to ReLU, sigmoid, and tanh below whenever `target_aware=Tru
 ## ReLU, sigmoid, and tanh expansions
 
 These place a set of thresholds along the range and apply an activation at each, mirroring a
-single hidden layer.
+single hidden layer. For a feature $x$ and center $c_k$ (with `scale` $s$ for sigmoid and tanh),
+
+$$
+\text{ReLU: } \phi_k(x) = \max(0,\ x - c_k), \qquad
+\text{Sigmoid: } \phi_k(x) = \frac{1}{1 + \exp\!\big(-(x - c_k)/s\big)}, \qquad
+\text{Tanh: } \phi_k(x) = \tanh\!\big((x - c_k)/s\big).
+$$
 
 ReLU
 : Piecewise-linear ramps. Excellent for sharp, threshold-like effects.
@@ -79,7 +85,18 @@ example a fee that applies only above a limit.
 ## Fourier features
 
 The Fourier map represents a feature with sines and cosines at a set of frequencies, ideal for
-signals with cyclical structure.
+signals with cyclical structure. For a feature $x$ with fitted origin $x_0$ (the observed
+minimum) and angular frequency $\omega_k$,
+
+$$
+\phi_k(x) = \big(\sin(\omega_k (x - x_0)),\ \cos(\omega_k (x - x_0))\big).
+$$
+
+The fundamental frequency is set from the feature's observed range at fit time
+($2\pi / \text{range}$), and `frequency_strategy` controls how the $\omega_k$ are spread above
+it: `"harmonic"` uses integer multiples $k \cdot \omega_1$; `"log_spaced"` uses octaves
+$2^{k-1} \cdot \omega_1$; `"random"` draws frequencies from a half-normal distribution scaled by
+$\omega_1$.
 
 ```python
 import numpy as np

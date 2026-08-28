@@ -11,7 +11,16 @@ selectable per column through `Preprocessor`.
 Approximates a shift-invariant kernel (by default the RBF kernel) with random projections,
 following Rahimi and Recht. This makes kernel-style models scale to large datasets, since the
 cost of the approximation does not grow with the number of training points the way an exact
-kernel method's does.
+kernel method's does. For an input vector $x$, each output column draws a random weight vector
+$w_k \sim \mathcal{N}(0,\ 2\gamma I)$ and offset $b_k \sim \mathrm{Uniform}(0, 2\pi)$ at fit time,
+then computes
+
+$$
+\phi_k(x) = \sqrt{\frac{2}{n_{\text{components}}}}\ \cos\!\big(w_k^\top x + b_k\big).
+$$
+
+The inner product $\phi(x)^\top \phi(x')$ approximates the RBF kernel
+$\exp(-\gamma \lVert x - x' \rVert^2)$ in expectation over the random draw.
 
 ```python
 import numpy as np
@@ -36,7 +45,17 @@ performance is still improving.
 Approximates a kernel by sampling landmark points from the training data and projecting onto
 them, following Williams and Seeger. It supports several kernels through `kernel`, and is often
 more accurate than random Fourier features at a given output width because the landmarks adapt
-to the data rather than being drawn at random.
+to the data rather than being drawn at random. For landmarks $z_1, \dots, z_m$ (the sampled
+training rows) and kernel function $K$, let $k_m(x) = \big(K(x, z_1), \dots, K(x, z_m)\big)$ be
+the vector of kernel evaluations between $x$ and every landmark. The output is
+
+$$
+\phi(x) = K_{mm}^{-1/2}\ k_m(x),
+$$
+
+where $K_{mm}$ is the $m \times m$ kernel matrix between the landmarks themselves, and
+$K_{mm}^{-1/2}$ is computed once at fit time via its eigendecomposition. The inner product
+$\phi(x)^\top \phi(x')$ approximates $K(x, x')$.
 
 ```python
 import numpy as np
