@@ -1,3 +1,8 @@
+from ..encoding.numerical import (
+    NumericBinningTransformer,
+    PeriodicEncodingTransformer,
+    PLETransformer,
+)
 from ..expansion.functional import (
     FourierFeatureTransformer,
     RBFExpansionTransformer,
@@ -24,11 +29,6 @@ from .encoders import MissingStateIndicator, NoTransformer, ToFloatTransformer
 from .feature_maps import (
     NystroemFeaturesTransformer,
     RandomFourierFeaturesTransformer,
-)
-from .numerical import (
-    NumericBinningTransformer,
-    PeriodicEncodingTransformer,
-    PLETransformer,
 )
 
 __all__ = [

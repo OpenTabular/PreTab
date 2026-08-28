@@ -27,6 +27,8 @@ from sklearn.preprocessing import (
     StandardScaler,
 )
 
+from ..encoding.numerical.binning import NumericBinningTransformer
+from ..encoding.numerical.ple import PLETransformer
 from ..expansion.functional.fourier import FourierFeatureTransformer
 from ..expansion.functional.rbf import RBFExpansionTransformer
 from ..expansion.functional.relu import ReLUExpansionTransformer
@@ -54,8 +56,6 @@ from ..transformers.feature_maps.kernel_approx import (
     NystroemFeaturesTransformer,
     RandomFourierFeaturesTransformer,
 )
-from ..transformers.numerical.binning import NumericBinningTransformer
-from ..transformers.numerical.piecewise import PLETransformer
 
 __all__ = [
     "CATEGORICAL_ALIASES",
