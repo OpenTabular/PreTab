@@ -46,8 +46,8 @@ source of truth, and these tables mirror it.
 | I-spline | `ispline` | univariate | optional | yes | yes | yes |
 | Cubic regression spline | `cubicspline` | univariate | optional | yes | yes | yes |
 | Natural cubic spline | `naturalspline` | univariate | optional | yes | yes | yes |
-| Penalized spline (P-spline) | `pspline` | univariate | forbidden | yes | yes | yes |
-| Tensor-product spline | `tensorspline` | multivariate | forbidden | yes | yes | no |
+| Penalized spline (P-spline) | `pspline` | univariate | forbidden | no | yes | yes |
+| Tensor-product spline | `tensorspline` | multivariate | forbidden | no | yes | no |
 | Thin-plate spline | `tprs` | multivariate | forbidden | no | yes | no |
 
 ```{note}
@@ -108,6 +108,12 @@ selectable through `Preprocessor`. Instantiate `PeriodicEncodingTransformer` dir
 
 ```{note}
 The alias `ohe` resolves to `one-hot`.
+```
+
+```{warning}
+`onehot_from_ordinal` (`OneHotFromOrdinalTransformer`) is deprecated and emits a
+`DeprecationWarning`. Use `"one-hot"` instead, which wraps scikit-learn's `OneHotEncoder`
+directly.
 ```
 
 ## Embeddings

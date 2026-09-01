@@ -47,8 +47,13 @@ pre.get_feature_names_out()
 # array(['cat_color_blue', 'cat_color_green', 'cat_color_red'], dtype=object)
 ```
 
-The alias `ohe` resolves to `one-hot`. There is also `onehot_from_ordinal`, which one-hot
-encodes an already integer-coded column.
+The alias `ohe` resolves to `one-hot`.
+
+```{warning}
+`onehot_from_ordinal` (`OneHotFromOrdinalTransformer`) one-hot encodes an already
+integer-coded column, but it is deprecated and emits a `DeprecationWarning`. Use `"one-hot"`
+instead.
+```
 
 ```{warning}
 One-hot width grows with cardinality: a column with `k` distinct categories produces `k`

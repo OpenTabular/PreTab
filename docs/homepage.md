@@ -21,8 +21,8 @@ Encoding (PLE).
 :::
 
 :::{grid-item-card} 🌤 Categorical preprocessing
-Ordinal and one-hot encodings, pretrained language embeddings, and helpers such as
-`OneHotFromOrdinalTransformer`.
+Ordinal and one-hot encodings, plus pretrained language embeddings for high-cardinality or
+semantic columns.
 :::
 
 :::{grid-item-card} 🔧 Composable pipelines
