@@ -14,8 +14,8 @@ just test     # poetry run pytest --cov=pretab tests/
 To run a subset while developing, invoke pytest directly.
 
 ```bash
-poetry run pytest tests/transformers/            # one area
-poetry run pytest tests/transformers/test_bspline.py::test_output_shape   # one test
+poetry run pytest tests/expansion/            # one area
+poetry run pytest tests/expansion/spline/test_b_spline.py -k output_shape   # one test
 poetry run pytest -k "spline and not tensor"     # by keyword
 ```
 
@@ -27,7 +27,8 @@ directory.
 | Directory | Covers |
 | --- | --- |
 | `tests/core/` | Base classes, adaptive resolution, supervised logic, logging. |
-| `tests/transformers/` | Every representation, per family. |
+| `tests/expansion/`, `tests/encoding/`, `tests/kernel_approximation/`, `tests/embedding/` | Every representation family, split by kind (splines and functional expansions, numerical/categorical encoders, kernel approximations, language embeddings). |
+| `tests/transformers/` | Cross-family contracts: sklearn compatibility, feature names, output dimensions, parameter aliases, encoder counts. |
 | `tests/placement/` | Knot and edge placement strategies. |
 | `tests/compose/` | Registry, feature detection, config resolution, serialization. |
 | `tests/extension/` | The public extensibility surface and conformance. |
@@ -80,7 +81,9 @@ your test suite keeps a future refactor from silently breaking compatibility wit
 
 ## Before you push
 
-Run the full local gate, which mirrors CI.
+Run `just check` and `just test` locally; together they cover most of what CI checks, though
+CI additionally runs across the full Python 3.10-3.13 matrix, builds the package, and
+enforces a branch-coverage threshold.
 
 ```bash
 just test     # tests with coverage

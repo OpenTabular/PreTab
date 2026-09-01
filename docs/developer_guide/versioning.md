@@ -4,7 +4,8 @@ pretab follows [Semantic Versioning 2.0](https://semver.org/) and uses
 [Conventional Commits](https://www.conventionalcommits.org/) to automate version bumps and
 changelog generation via [commitizen](https://commitizen-tools.github.io/commitizen/).
 
-While the major version is `0`, the public API may change between minor releases.
+From `1.0.0` onward, `feat!:` and `BREAKING CHANGE:` commits bump the major version, following
+standard SemVer.
 
 ## Version format
 
@@ -18,16 +19,15 @@ MAJOR.MINOR.PATCH
 | `MINOR` | New backwards-compatible feature (`feat:`)                                 |
 | `PATCH` | Backwards-compatible bug fix (`fix:`) or performance improvement (`perf:`) |
 
-Release candidates use the suffix `rcN`, e.g. `0.1.0rc1`.
+Release candidates use the suffix `rcN`, e.g. `1.0.0rc1`.
 
 The version is defined **in one place only**, `pyproject.toml`, and read at runtime via
 `importlib.metadata` in `pretab/_version.py`, so it never needs to be hard-coded in the
 package.
 
 ```{note}
-`major_version_zero = true` is set in the commitizen config, so breaking changes bump the
-**minor** version (e.g. `0.2.0` → `0.3.0`) rather than the major version while pretab is
-pre-1.0.
+`major_version_zero` is `false` in the commitizen config, so `feat!:` / `BREAKING CHANGE:`
+commits bump the **major** version, in line with standard SemVer.
 ```
 
 ## Commit types and their effect
@@ -61,7 +61,7 @@ Or write the message directly:
 
 ```bash
 git commit -m "feat(feature-maps): add Gaussian RBF centers"
-git commit -m "fix(preprocessor): validate n_bins > 0"
+git commit -m "fix(preprocessor): validate output_dim > 0"
 ```
 
 The `commit-msg` pre-commit hook validates every commit message against the conventional

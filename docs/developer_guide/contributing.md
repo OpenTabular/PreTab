@@ -48,7 +48,7 @@ poetry run pre-commit install --hook-type commit-msg --hook-type pre-commit --ho
 
 ```bash
 just test     # full suite with coverage
-just check    # lint, format, type-check, all pre-commit hooks (what CI runs)
+just check    # ruff format, ruff lint, and pyright, via the pre-commit and pre-push hooks
 just docs     # build HTML docs (warnings treated as errors)
 ```
 
@@ -70,8 +70,10 @@ time:
 | `pre-push`   | `pyright` type checking (slower, so deferred to push). Also runs in CI. |
 
 ```{important}
-Run `just check` before opening a PR. It executes the commit and push stage hooks against
-every file, giving you the same signal CI will see.
+Run `just check` before opening a PR. It runs every `pre-commit`- and `pre-push`-stage hook
+(ruff format, ruff lint, pyright, and file hygiene checks) against every file. It does not
+validate the commit message itself, that is the `commit-msg` hook, checked when you actually
+run `git commit` or `just commit`.
 ```
 
 Individual recipes are available when you want to run one step:
