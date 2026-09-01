@@ -8,15 +8,21 @@ they combine.
 ## Resolution: the `output_dim` width
 
 `output_dim` is the main capacity control. It sets the number of non-bias output columns per
-input feature: bins for PLE and binning, centers for the feature maps, and basis functions
-for the splines. A larger value captures finer structure at the cost of more columns and a
-higher chance of overfitting. A smaller value is more compact and regularizes the
-representation.
+input feature: basis functions for the splines, centers for the feature maps, and bins for
+PLE. A larger value captures finer structure at the cost of more columns and a higher chance
+of overfitting. A smaller value is more compact and regularizes the representation.
 
 ```{note}
 When you configure through the `Preprocessor`, its single `output_dim` (default `7`) is
 forwarded to **every** numerical method. Per-transformer defaults only apply when you build a
 transformer directly, for example `RBFExpansionTransformer()`.
+```
+
+```{warning}
+Numeric binning (`custombin`) is the one exception: `output_dim` sets the number of *bins*,
+but with the default `encode="ordinal"` each input feature still emits a single output
+column holding the bin index. Pass `encode="onehot"` or `encode="soft"` if you want
+`output_dim` to also control the output width.
 ```
 
 ### Spline width has a floor
@@ -93,8 +99,10 @@ placement subsystem so no transformer re-implements it, and it is driven by two 
 
 ```{warning}
 The unsupervised and target-aware rows are mutually exclusive. Combining them, for example
-`target_aware=True` with `placement_strategy="quantile"`, raises an error. Leave
-`placement_strategy` unset to get the sensible default for whichever mode you picked.
+`target_aware=True` with `placement_strategy="quantile"`, raises an error.
+`Preprocessor.placement_strategy` defaults to `"cart"` (paired with `target_aware=True`), so
+switching to `target_aware=False` also means passing `placement_strategy="uniform"` or
+`"quantile"` explicitly, otherwise the mismatched default raises an error.
 ```
 
 Target-aware placement is a supervised decision and carries leakage considerations. See

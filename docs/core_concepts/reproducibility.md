@@ -13,12 +13,14 @@ output, for example in tests or published experiments.
 ```python
 from pretab import Preprocessor
 
-pre = Preprocessor(numerical_method="rff", random_state=0)
+pre = Preprocessor(numerical_method="rbf", random_state=0)
 ```
 
 ```{note}
 With a fixed `random_state`, repeated fits on the same data produce identical output. Methods
-with no stochastic component ignore the seed.
+with no stochastic component ignore the seed. The standalone kernel approximations
+(`RandomFourierFeaturesTransformer`, `NystroemFeaturesTransformer`) accept `random_state`
+directly; they are fit outside `Preprocessor` since they operate on the whole feature block.
 ```
 
 ## Portable serialization

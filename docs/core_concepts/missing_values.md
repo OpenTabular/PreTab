@@ -31,15 +31,19 @@ pre = Preprocessor(
 
 ```{note}
 Setting an imputation strategy to `None` disables imputation for that column kind. The
-missing values then reach the transformer directly: scikit-learn scalers tolerate `NaN`,
-while finite-only representations such as PLE, the splines, the feature maps, and binning
-raise a typed error. That is intentional, an expansion of an undefined value has no meaning.
+missing values then reach the transformer directly: scikit-learn scalers, the splines, and
+the feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) tolerate `NaN` and pass it straight into
+the basis, so an affected row's output is itself undefined. Genuinely finite-only
+representations such as PLE, numeric binning, periodic encoding, Fourier features, and the
+kernel approximations (`rff`, `nystroem`) raise a typed error instead. That is intentional, an
+expansion of an undefined value has no meaning for those methods.
 ```
 
-```{warning}
-Requesting `add_missing_indicator=True` while both imputation strategies are disabled raises
-`IncompatibleParamsError`. An indicator without a filled value leaves the basis with nothing
-to expand.
+```{note}
+Requesting `add_missing_indicator=True` while imputation is disabled for that column kind does
+not raise. It routes through the same `__missing` indicator branch used by
+`missing_policy="separate_state"` below, since `SimpleImputer`'s own indicator only takes
+effect when the imputer runs.
 ```
 
 ## Fit on train, apply to test

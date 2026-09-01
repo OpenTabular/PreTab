@@ -28,10 +28,12 @@ on raw columns cannot.
 - **Scaling composes with representation.** A numeric column is imputed and scaled first
   (preprocessing), then expanded into a basis (representation). `Preprocessor` wires this
   order for you.
-- **Representations are self-describing.** Every fitted representation carries a typed
+- **Representations are self-describing.** Every fitted PreTab representation carries a typed
   [`RepresentationSpec`](../api/preprocessor.rst) and per-output-column
   [lineage](outputs_and_inspection.md), so you always know which input and which component
-  produced each output column.
+  produced each output column. Plain scikit-learn transformers used through
+  `feature_preprocessing` (`StandardScaler`, `OneHotEncoder`, and so on) do not implement
+  `get_representation_spec`; lineage falls back to step metadata for those columns instead.
 - **Some representations use the target.** Placing bins or knots where the target actually
   changes is a supervised decision, which is why leakage safety is a first-class concern.
 
@@ -73,6 +75,10 @@ lineage then maps each output column back to its source, making a fitted PreTab 
 fully inspectable and serializable.
 
 ```python
+from pretab.transformers import NaturalCubicSplineTransformer
+import numpy as np
+
+transformer = NaturalCubicSplineTransformer(output_dim=6).fit(np.random.randn(100, 1))
 spec = transformer.get_representation_spec()
 spec.family, spec.output_features, spec.locations
 ```
