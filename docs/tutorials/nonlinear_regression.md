@@ -120,7 +120,7 @@ print(f"MAE: {mean_absolute_error(y_test, pred):.2f}")
 ```
 
 ```text
-features: 41
+features: 40
 R2:  0.979
 MAE: 1.85
 ```
@@ -138,7 +138,7 @@ in the [sklearn pipeline tutorial](sklearn_pipeline.md).
 
 ## What actually changed
 
-The `Preprocessor` expands four raw columns into 41 features. Inspect the resolved layout with
+The `Preprocessor` expands four raw columns into 40 features. Inspect the resolved layout with
 `get_feature_info`:
 
 ```python
@@ -148,14 +148,14 @@ pre.get_feature_info()
 ```text
 feature  kind         pipeline                        dim   cats
 ----------------------------------------------------------------
-age      numerical    imputer -> minmax -> bspline     13      -
+age      numerical    imputer -> minmax -> bspline     12      -
 income   numerical    imputer -> minmax -> ple         12      -
 tenure   numerical    imputer -> minmax -> rbf         12      -
 city     categorical  imputer -> onehot -> to_float     4      4
 ```
 
 Each numeric column is imputed, scaled, then expanded into a basis the linear model can weight
-independently: 13 spline coefficients for `age`, 12 PLE bins for `income`, and 12 RBF bumps for
+independently: 12 spline coefficients for `age`, 12 PLE bins for `income`, and 12 RBF bumps for
 `tenure`, while `city` becomes four one-hot columns. To trace any single output column back to
 its source, use [feature lineage](../core_concepts/outputs_and_inspection.md).
 

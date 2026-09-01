@@ -81,8 +81,10 @@ naming is bespoke, override `get_feature_names_out` directly instead.
 
 ## Validate against the contract
 
-Before registering, run the conformance suite. It checks that your class round-trips, respects
-NaN handling, produces stable names, and honours its declared metadata.
+Before registering, run the conformance suite. It checks that your class is constructible with
+defaults, raises `NotFittedError` before `fit`, returns deterministic output across a
+`clone` and refit, and produces a `RepresentationSpec` and feature names consistent with its
+declared metadata.
 
 ```python
 from pretab import check_representation

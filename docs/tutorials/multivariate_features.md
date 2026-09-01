@@ -15,7 +15,8 @@ Four methods operate on several inputs together rather than per column.
 
 `tprs`
 : Thin-plate regression spline. A smooth surface over two or more inputs, from the generalized
-  additive model literature.
+  additive model literature. It also accepts a single input, though a univariate spline family
+  is usually a more natural fit there.
 
 `rff`
 : Random Fourier features. A scalable approximation to a shift-invariant kernel.
