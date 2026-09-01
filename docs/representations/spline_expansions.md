@@ -76,10 +76,12 @@ Increase `output_dim` for more wiggle, decrease it to regularize.
 ```
 
 ```{note}
-Every spline in this family also exposes `get_penalty_matrix(feature_index=0, diff_order=2)`,
-a `D^T D` second-difference penalty matrix of shape `(output_dim, output_dim)` (plus the bias
+Every spline in this family exposes `get_penalty_matrix(feature_index=0, diff_order=2)`, a
+`D^T D` second-difference penalty matrix of shape `(output_dim, output_dim)` (plus the bias
 row/column left unpenalized when `include_bias=True`). It is not limited to the "penalized"
-splines further down this page.
+splines further down this page. Note that `diff_order` is specific to this B/M/I family; the
+cubic, natural cubic, P-spline, tensor-product, and thin-plate variants expose
+`get_penalty_matrix(feature_index=0)` with their own fixed penalty construction instead.
 ```
 
 ## M-spline and I-spline

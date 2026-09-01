@@ -74,9 +74,12 @@ Very small samples
   and rely on a scaled input.
 
 Extrapolation beyond the fitted range
-: Bases are fitted on the training range. Splines, PLE, and feature maps are undefined or flat
-  outside it, so they do not extrapolate. If your test data lies well beyond training, no
-  expansion recovers the missing signal. See the edge-case behaviour below.
+: Bases are fitted on the training range, and PreTab's default policy is to extrapolate: a
+  value beyond the fitted range is passed straight into the basis rather than clamped, so the
+  spline or feature map keeps evaluating past its knots or centers. If your test data lies well
+  beyond training, that extrapolated value carries no real signal. Set
+  `policy=RepresentationPolicy(out_of_range="clip")` (or `"warn"` / `"error"`) if you would
+  rather cap or catch out-of-range inputs. See the edge-case behaviour below.
 
 Pure noise features
 : Expanding a feature that carries no signal only gives the model more ways to fit noise. Drop
@@ -91,11 +94,16 @@ feature does not carry the signal, no representation will create it. Measure, do
 
 PreTab is explicit about degenerate inputs rather than failing silently.
 
-- **Constant column**: methods that need spread degrade gracefully to a trivial, valid output
-  rather than raising.
-- **Out-of-range input at transform**: values beyond the fitted range are clamped or produce a
-  flat response, consistent with the fitted basis, never an extrapolated fantasy.
-- **Unseen category**: unknown categories map to a reserved slot rather than an error.
+- **Constant column**: the splines that need spread (B/M/I, cubic, natural cubic, P-spline,
+  tensor-product) raise a typed error rather than fitting a meaningless basis. Numeric
+  binning falls back to a single bin instead of raising, and PLE and the feature maps place
+  all their bins or centers at the same value, a degenerate but still valid basis.
+- **Out-of-range input at transform**: by default, values beyond the fitted range extrapolate
+  (the basis keeps evaluating past its knots or centers); set the `out_of_range` policy to
+  `"clip"`, `"warn"`, or `"error"` for a different, explicit behaviour.
+- **Unseen category**: `ContinuousOrdinalTransformer` (`"int"`) maps an unseen category to a
+  reserved code rather than raising; one-hot encoding (`"one-hot"`) instead emits an all-zero
+  row for it.
 - **NaN into a finite-only method**: raises a typed error unless imputation is configured. See
   [Missing values](../core_concepts/missing_values.md).
 

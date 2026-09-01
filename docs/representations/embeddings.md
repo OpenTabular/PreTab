@@ -18,8 +18,11 @@ t.fit_transform(X).shape
 ```
 
 Constructor highlights: `model_name="paraphrase-MiniLM-L3-v2"`, or pass a preloaded `model`
-(any object exposing an `encode(X)` method, useful for tests or a custom embedding backend
-without pulling in `sentence-transformers`). The registry key is `pretrained`.
+(useful for tests or a custom embedding backend without pulling in `sentence-transformers`).
+Any object with a `.encode(X)` method works for the `transform` step; `embedding_dim_` is
+read from `get_sentence_embedding_dimension()` when the model exposes it (as a real
+`SentenceTransformer` does), falling back to a `dim` attribute, or to `0` if neither is
+present. The registry key is `pretrained`.
 
 ```{important}
 Language embeddings require the optional `embeddings` extra, which pulls in
