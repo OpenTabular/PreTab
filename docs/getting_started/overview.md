@@ -51,8 +51,9 @@ The real question is what PreTab adds where scope overlaps with scikit-learn's o
 ```{note}
 Piecewise-linear encoding (`ple`) and the neural-style basis maps (`rbf`, `relu`, `sigmoid`,
 `tanh`, deterministic `fourier`) have no scikit-learn equivalent. `rff` and `nystroem` are thin
-wrappers around scikit-learn's own `RBFSampler` and `Nystroem`, exposed through the same
-`Preprocessor` interface as every other method.
+wrappers around scikit-learn's own `RBFSampler` and `Nystroem`; unlike the other methods on
+this page, they operate on the whole feature block at once, so they are standalone
+transformers rather than a per-column `Preprocessor` choice.
 ```
 
 ## When to reach for PreTab

@@ -61,8 +61,9 @@ The valid combinations are fixed:
 
 ```{warning}
 Mixing the two rows, for example `target_aware=True` with `placement_strategy="quantile"`,
-raises an error rather than silently guessing. Leave `placement_strategy` unset to get the
-sensible default for whichever mode you chose.
+raises an error rather than silently guessing. `placement_strategy` defaults to `"cart"`
+(paired with the `target_aware=True` default), so switching to `target_aware=False` also
+means passing `placement_strategy="uniform"` or `"quantile"` explicitly.
 ```
 
 See [Resolution and placement](../core_concepts/resolution_and_placement.md) for the full
