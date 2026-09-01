@@ -7,19 +7,24 @@ This project adheres to [Semantic Versioning](https://semver.org/) and uses
 
 Going forward, this file is updated automatically by `cz bump` on each release.
 
-## Unreleased
+## v1.0.0rc3 (2026-09-01)
+
+### Fix
+
+- **tests**: sort imports in test_adaptive_output_dim
+- add missing indicator
+- validate embedding during fit
+- remove unused ple parameters
 
 ### Refactor
 
-- Reorganized the `pretab` package by representation taxonomy: spline and functional
-  expansions now live under `pretab.expansion`, numeric and categorical encoders under
-  `pretab.encoding`, kernel approximations under `pretab.kernel_approximation`, language
-  embeddings under `pretab.embedding`, and supporting utilities under `pretab.preprocessing`.
-  `pretab.transformers` remains the stable, flat public import for every transformer class;
-  no class was renamed and no public behavior changed.
-- Restructured the representations documentation and API reference to match the new
-  taxonomy, adding dedicated pages for kernel approximation, embeddings, and preprocessing
-  utilities.
+- **preprocessing**: move floats and missing encoders to pretab.preprocessing
+- **embedding**: move language embedding to pretab.embedding
+- **kernel-approximation**: split kernel approximations into pretab.kernel_approximation
+- **encoding**: move categorical encoders to pretab.encoding.categorical
+- **encoding**: move numerical encoders to pretab.encoding.numerical
+- **expansion**: move functional expansions to pretab.expansion.functional
+- **expansion**: move spline transformers to pretab.expansion.spline
 
 ## v1.0.0rc2 (2026-08-21)
 
