@@ -271,6 +271,14 @@ Constructor highlights: `n_components=10`, `landmark_strategy="kmeans"`, `rank_s
 `include_bias=False`, `random_state`.
 
 ```{warning}
+Unlike the other spline families on this page, `get_penalty_matrix()` on
+`ThinPlateSplineTransformer` is experimental: the retained eigenvalues are not guaranteed
+non-negative, so the returned penalty is not guaranteed positive semi-definite, and a
+`ConfigWarning` is raised on every call. `transform()` is unaffected; avoid this penalty for
+actual smoothing regularization until it is fully fixed.
+```
+
+```{warning}
 The tensor-product and thin-plate splines are multivariate. They are standalone transformers
 and are not available as a per-column `numerical_method`. Fit them directly on the columns you
 want to model jointly.
