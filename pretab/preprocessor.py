@@ -741,8 +741,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return dims
 
     def _output_itemsize(self) -> int:
-        """Bytes per element of the dense transformed array (float64 for now)."""
-        return np.dtype(np.float64).itemsize
+        """Bytes per element of the dense transformed array.
+
+        Reflects the configured ``dtype`` when set (the cast :meth:`transform`
+        actually applies); falls back to ``float64``, the natural output dtype
+        of most representations when no cast is requested.
+        """
+        return np.dtype(self.dtype if self.dtype is not None else np.float64).itemsize
 
     def estimate_output_shape(self, X) -> tuple:
         """Estimate the shape of the dense transformed array for ``X``.

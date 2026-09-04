@@ -55,6 +55,25 @@ def test_estimate_memory_is_rows_times_cols_times_itemsize(frame, y):
     assert pre.estimate_memory(frame) == n_rows * n_cols * np.dtype(np.float64).itemsize
 
 
+def test_estimate_memory_reflects_configured_dtype(frame, y):
+    # Regression test: _output_itemsize() used to hardcode float64 regardless of
+    # `dtype`, so estimate_memory() was 2x too high for a float32 configuration.
+    pre = _bspline(dtype=np.float32).fit(frame, y)
+    out = pre.transform(frame, return_array=True)
+    assert isinstance(out, np.ndarray)
+    assert out.dtype == np.float32
+    assert pre.estimate_memory(frame) == out.nbytes
+
+
+def test_max_dense_memory_does_not_false_positive_reject_float32(frame, y):
+    # A budget that only fits the real float32 output (not the float64 estimate
+    # the old bug would have used) must still be accepted, not rejected.
+    pre = _bspline(dtype=np.float32).fit(frame, y)
+    real_out = pre.transform(frame, return_array=True)
+    assert isinstance(real_out, np.ndarray)
+    _bspline(dtype=np.float32, max_dense_memory=real_out.nbytes, overflow_policy="error").fit(frame, y)
+
+
 def test_estimate_shape_scales_with_new_rows(frame, y):
     pre = _bspline().fit(frame, y)
     bigger = pd.concat([frame] * 3, ignore_index=True)
