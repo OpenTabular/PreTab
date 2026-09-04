@@ -142,3 +142,59 @@ def test_ple_feature_names_out():
     assert len(names) == transformer.get_n_features_out()
     assert all("_ple" in name for name in names)
     assert names[0].startswith("age")
+
+
+def test_ple_is_bounded_in_zero_one():
+    # Every column, including the first/last (boundary) bins, must stay in
+    # [0, 1]: no more raw, unbounded feature values leaking into the encoding.
+    rng = np.random.RandomState(11)
+    X = rng.uniform(-50.0, 500.0, size=(200, 1))
+    y = rng.rand(200)
+
+    transformer = PLETransformer(output_dim=5).fit(X, y)
+    Xt = transformer.transform(X)
+
+    assert Xt.min() >= 0.0
+    assert Xt.max() <= 1.0
+
+
+def test_ple_is_continuous_at_every_threshold():
+    # Regression test: rc3 had a large discontinuity right at each learned
+    # threshold, because the first/last bins held the raw feature value while
+    # the middle bins were normalized to [0, 1]. Sweeping a fine grid across
+    # every threshold must never show a jump bigger than a couple of grid
+    # steps' worth of change.
+    rng = np.random.RandomState(12)
+    X = np.linspace(0.0, 100.0, 4000).reshape(-1, 1)
+    y = X.ravel() + rng.normal(0, 0.5, size=4000)
+
+    transformer = PLETransformer(output_dim=5).fit(X, y)
+    Xt = transformer.transform(X)
+
+    step = X[1, 0] - X[0, 0]
+    jumps = np.abs(np.diff(Xt, axis=0)).max(axis=1)
+    # A continuous, piecewise-linear ramp changes by roughly step / bin_width
+    # per sample; allow a generous multiple of the grid step as the ceiling so
+    # this only fails on a real discontinuity, not normal ramp slope.
+    assert jumps.max() < 50 * step, f"largest consecutive jump was {jumps.max()!r}"
+
+
+def test_ple_boundary_bins_ramp_like_middle_bins():
+    # The first and last bins must use the same [0, 1] ramp formula as the
+    # middle bins (against the training [x_min, x_max] edge), not a raw value.
+    X = np.linspace(0.0, 30.0, 3000).reshape(-1, 1)
+    y = X.ravel()
+
+    transformer = PLETransformer(output_dim=3, task="regression").fit(X, y)
+    thresholds = transformer.thresholds_[0]
+    assert len(thresholds) >= 1
+
+    first_threshold = thresholds[0]
+    just_below = np.array([[first_threshold - 1e-3]])
+    encoded = transformer.transform(just_below)
+    # Approaching the first threshold from below, the first column should be
+    # close to 1.0 (the top of its own ramp). A tight tolerance matters here:
+    # the old, buggy raw-value encoding would also happen to exceed a loose
+    # bound like "> 0.9" for a threshold this large, without actually being
+    # close to 1.0.
+    assert encoded[0, 0] == pytest.approx(1.0, abs=1e-2)
