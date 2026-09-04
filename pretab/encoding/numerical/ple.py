@@ -70,6 +70,10 @@ class PLETransformer(
     ----------
     thresholds_ : list of ndarray
         Sorted threshold values for each feature.
+    edges_ : list of ndarray
+        Full per-feature bin-edge vector, ``[x_min, *thresholds, x_max]`` from the
+        training data, used to normalize every bin (including the first and last)
+        to ``[0, 1]``.
     n_features_in_ : int
         Number of features seen during ``fit``.
     n_bins_per_feature_ : list of int
@@ -170,6 +174,7 @@ class PLETransformer(
 
         self.n_features_in_ = X.shape[1]
         self.thresholds_ = []
+        self.edges_ = []
         self.n_bins_per_feature_ = []
 
         n_bins = self._resolve_param("output_dim", default=6)
@@ -203,6 +208,7 @@ class PLETransformer(
             thresholds = adapter.get_thresholds(X[:, i], y, min_thresholds, max_thresholds)
 
             self.thresholds_.append(thresholds)
+            self.edges_.append(np.concatenate(([X[:, i].min()], thresholds, [X[:, i].max()])))
             self.n_bins_per_feature_.append(len(thresholds) + 1)
 
         self.total_output_dim_ = int(sum(self.n_bins_per_feature_))
@@ -242,20 +248,24 @@ class PLETransformer(
         for col in range(X.shape[1]):
             feature = X[:, col].copy()
             thresholds = self.thresholds_[col]
+            edges = self.edges_[col]
 
-            ple_encoded = self._apply_piecewise_linear_vectorized(feature, thresholds)
+            ple_encoded = self._apply_piecewise_linear_vectorized(feature, thresholds, edges)
             all_transformed.append(ple_encoded)
 
         return np.hstack(all_transformed).astype(np.float32)
 
-    def _apply_piecewise_linear_vectorized(self, feature: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
+    def _apply_piecewise_linear_vectorized(
+        self, feature: np.ndarray, thresholds: np.ndarray, edges: np.ndarray
+    ) -> np.ndarray:
         """Apply the vectorized piecewise linear encoding for one feature.
 
-        The encoding for each sample works as follows:
-
-        - First bin (below ``thresholds[0]``): the raw value.
-        - Middle bins: the value normalized to ``[0, 1]`` within the bin.
-        - Last bin (above ``thresholds[-1]``): the raw value.
+        Every bin, including the first and last, is normalized to ``[0, 1]`` against
+        its own ``[lower, upper)`` edge (the fitted training range stands in for the
+        missing outer threshold on the two boundary bins), so the encoding is
+        continuous at every threshold, not just the interior ones. Values outside
+        the fitted ``[edges[0], edges[-1]]`` range are clipped into ``[0, 1]``
+        rather than left unbounded.
 
         Every bin below the active bin is filled with ``1.0``; bins above it stay
         ``0.0``.
@@ -264,7 +274,13 @@ class PLETransformer(
         n_bins = len(thresholds) + 1
 
         if len(thresholds) == 0:
-            return feature.reshape(-1, 1).astype(np.float32)
+            lower, upper = edges[0], edges[-1]
+            width = upper - lower
+            if width > 1e-10:
+                values = np.clip((feature - lower) / width, 0.0, 1.0)
+            else:
+                values = np.full(n_samples, 0.5)
+            return values.reshape(-1, 1).astype(np.float32)
 
         ple_encoded = np.zeros((n_samples, n_bins), dtype=np.float32)
 
@@ -277,27 +293,16 @@ class PLETransformer(
                 continue
 
             values = feature[mask]
+            lower_edge = edges[bin_idx]
+            upper_edge = edges[bin_idx + 1]
+            bin_width = upper_edge - lower_edge
 
-            if bin_idx == 0:
-                # First bin: raw value, no lower bins to fill.
-                ple_encoded[mask, bin_idx] = values
-
-            elif bin_idx == n_bins - 1:
-                # Last bin: raw value, all lower bins set to 1.
-                ple_encoded[mask, bin_idx] = values
-                ple_encoded[mask, :bin_idx] = 1.0
-
+            if bin_width > 1e-10:
+                ple_encoded[mask, bin_idx] = np.clip((values - lower_edge) / bin_width, 0.0, 1.0)
             else:
-                # Middle bin: normalize the value to [0, 1] within the bin.
-                lower_threshold = thresholds[bin_idx - 1]
-                upper_threshold = thresholds[bin_idx]
-                bin_width = upper_threshold - lower_threshold
+                ple_encoded[mask, bin_idx] = 0.5
 
-                if bin_width > 1e-10:
-                    ple_encoded[mask, bin_idx] = (values - lower_threshold) / bin_width
-                else:
-                    ple_encoded[mask, bin_idx] = 0.5
-
+            if bin_idx > 0:
                 ple_encoded[mask, :bin_idx] = 1.0
 
         return ple_encoded
