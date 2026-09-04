@@ -3,17 +3,29 @@
 :class:`RepresentationPolicy` names, in one place, how every transformer reacts
 to the recurring edge cases that would otherwise diverge silently per family:
 
-* ``missing`` -- how ``NaN`` inputs are treated (``"error"`` / ``"propagate"``).
 * ``constant`` -- zero-variance input columns (``"error"`` / ``"warn"`` / ``"allow"``).
 * ``out_of_range`` -- values at ``transform`` outside the fitted range
   (``"error"`` / ``"warn"`` / ``"clip"`` / ``"extrapolate"``).
-* ``invalid`` -- non-finite ``inf`` / ``-inf`` inputs (``"error"`` / ``"propagate"``).
 
 The defaults reproduce the library's historical behaviour (constant columns pass
-through, ranges extrapolate, non-finite values raise), so enabling the policy
-object changes nothing until a stricter choice is requested. Transformers may
-narrow specific axes through class-level override attributes without exposing a
-new constructor parameter (see :class:`~pretab.core.base.BasePreTabTransformer`).
+through, ranges extrapolate), so enabling the policy object changes nothing
+until a stricter choice is requested. Transformers may narrow specific axes
+through class-level override attributes without exposing a new constructor
+parameter (see :class:`~pretab.core.base.BasePreTabTransformer`).
+
+Missing values and non-finite (``inf`` / ``-inf``) inputs are handled elsewhere:
+see ``Preprocessor.missing_policy`` for missing-value handling, and note that
+``inf`` / ``-inf`` always raise during input validation regardless of any
+policy (there is no configurable axis for it).
+
+.. note::
+   ``out_of_range`` is not yet reachable from any public API: no transformer
+   constructor accepts a ``policy`` argument, and ``Preprocessor.policy`` is
+   only used for its own top-level ``constant`` check, never threaded into
+   ``PreprocessorConfig`` or the transformers it builds. Wiring this through
+   (transformer constructors, the registry's ``allowed_args``, and
+   ``PreprocessorConfig``) is deferred to a follow-up; see the "Spline
+   expansions" section of ``dev/todo/release-1.0.0/bugfixes-1.0.0.md``.
 """
 
 from __future__ import annotations
@@ -32,16 +44,12 @@ __all__ = [
     "resolve_out_of_range",
 ]
 
-_MISSING_CHOICES = ("error", "propagate")
 _CONSTANT_CHOICES = ("error", "warn", "allow")
 _OUT_OF_RANGE_CHOICES = ("error", "warn", "clip", "extrapolate")
-_INVALID_CHOICES = ("error", "propagate")
 
 _CHOICES = {
-    "missing": _MISSING_CHOICES,
     "constant": _CONSTANT_CHOICES,
     "out_of_range": _OUT_OF_RANGE_CHOICES,
-    "invalid": _INVALID_CHOICES,
 }
 
 
@@ -51,21 +59,14 @@ class RepresentationPolicy:
 
     Parameters
     ----------
-    missing : {"error", "propagate"}, default="propagate"
-        ``"propagate"`` lets ``NaN`` pass through to a downstream imputer;
-        ``"error"`` raises on any missing value.
     constant : {"error", "warn", "allow"}, default="allow"
         Reaction to a zero-variance (constant) input column.
     out_of_range : {"error", "warn", "clip", "extrapolate"}, default="extrapolate"
         Reaction to ``transform``-time values outside the fitted range.
-    invalid : {"error", "propagate"}, default="error"
-        Reaction to non-finite (``inf`` / ``-inf``) input values.
     """
 
-    missing: str = "propagate"
     constant: str = "allow"
     out_of_range: str = "extrapolate"
-    invalid: str = "error"
 
     def __post_init__(self):
         for name, choices in _CHOICES.items():

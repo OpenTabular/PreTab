@@ -79,12 +79,21 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         X = np.asarray(X)
         self.n_features_in_ = X.shape[1] if X.ndim > 1 else 1
         self.model_ = self._resolve_model()
-        # Read the embedding dim without calling encode() so call-count stays
-        # predictable; fall back to the 'dim' attribute used by test stubs.
+        # Prefer reading the embedding dim without calling encode(), so the
+        # common SentenceTransformer / 'dim'-stub paths keep a predictable call
+        # count; only fall back to probing when neither hook is available.
         if hasattr(self.model_, "get_sentence_embedding_dimension"):
             self.embedding_dim_ = int(self.model_.get_sentence_embedding_dimension())
+        elif hasattr(self.model_, "dim"):
+            self.embedding_dim_ = int(self.model_.dim)
         else:
-            self.embedding_dim_ = int(getattr(self.model_, "dim", 0))
+            # Neither introspection hook is available (e.g. a bare custom
+            # ``encode()``-only model): probe with a placeholder input, since
+            # this is the only generic way to learn the output width. Without
+            # this, embedding_dim_ silently defaulted to 0 while transform()
+            # still produced real-width output, a length mismatch.
+            probe = np.asarray(self.model_.encode(["__pretab_probe__"], convert_to_numpy=True))
+            self.embedding_dim_ = int(probe.shape[-1])
         return self
 
     def transform(self, X):
