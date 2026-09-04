@@ -42,6 +42,8 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     diff_order : int, default=2
         Order of the finite difference penalty used to enforce smoothness along each input dimension.
+        Must be a positive integer and small enough that the marginal basis width supports it
+        (``diff_order <= output_dim - 1``, roughly); both are validated at ``fit``.
 
     include_bias : bool, default=False
         If True, prepend a constant column to each marginal basis before the
@@ -177,6 +179,8 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
                 f"output_dim must be >= degree + 1 = {self.degree + 1} for the tensor-product "
                 f"spline basis, got {output_dim}"
             )
+        if not isinstance(self.diff_order, (int, np.integer)) or self.diff_order < 1:
+            raise InvalidParamError(f"diff_order must be a positive integer (>= 1); got {self.diff_order!r}.")
 
         self.dim_ = X.shape[1]
         self.knots_ = []
@@ -193,7 +197,15 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
                 X[:, d], y, output_dim, self.degree, strategy, None, None, min_interior, max_interior
             )
             basis = self._basis_matrix(X[:, d], knots)
-            penalty = self._difference_penalty(len(knots) - self.degree - 1)
+            n_basis = len(knots) - self.degree - 1
+            if self.diff_order > n_basis - 1:
+                raise InvalidParamError(
+                    f"diff_order={self.diff_order} is too large for a marginal basis of width "
+                    f"{n_basis} (output_dim={output_dim}); the finite-difference penalty needs "
+                    f"diff_order <= {n_basis - 1} to stay non-trivial. Lower diff_order or raise "
+                    "output_dim."
+                )
+            penalty = self._difference_penalty(n_basis)
             if self.include_bias:
                 penalty = np.pad(penalty, ((1, 0), (1, 0)))
             self.knots_.append(knots)
@@ -238,13 +250,16 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         penalties : list of ndarray
             One full penalty matrix per marginal direction, each formed as a
             Kronecker product of a marginal difference penalty with identity
-            matrices for the remaining dimensions.
+            matrices for the remaining dimensions, in dimension order so the
+            result lines up with the ``einsum`` + ``reshape`` flatten order used
+            by :meth:`transform` (dimension 0 slowest/outermost, the last
+            dimension fastest/innermost).
         """
         kron_penalties = []
         for i, Si in enumerate(self.penalties_):
-            mats = [np.eye(size) for j, size in enumerate(self.marginal_sizes_) if j != i]
-            P = Si
-            for M in mats:
+            mats = [Si if j == i else np.eye(size) for j, size in enumerate(self.marginal_sizes_)]
+            P = mats[0]
+            for M in mats[1:]:
                 P = np.kron(P, M)
             kron_penalties.append(P)
         return kron_penalties

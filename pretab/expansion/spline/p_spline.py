@@ -40,6 +40,8 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     diff_order : int, default=2
         The order of the difference penalty used to compute the smoothness penalty matrix.
         For example, 2 corresponds to a second-order difference penalty (encouraging smooth second derivatives).
+        Must be a positive integer and small enough that the fitted basis width supports it
+        (``diff_order <= output_dim - 1``, roughly); both are validated at ``fit``.
 
     include_bias : bool, default=False
         If True, prepend a constant intercept column per feature. The bias term is
@@ -148,6 +150,8 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
             raise InvalidParamError(
                 f"output_dim must be >= degree + 1 = {self.degree + 1} for the p-spline basis, got {output_dim}"
             )
+        if not isinstance(self.diff_order, (int, np.integer)) or self.diff_order < 1:
+            raise InvalidParamError(f"diff_order must be a positive integer (>= 1); got {self.diff_order!r}.")
 
         self.knots_ = []
         self.penalty_ = []
@@ -164,6 +168,13 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
                 x, y, output_dim, self.degree, strategy, None, None, min_interior, max_interior
             )
             n_basis = len(knots) - self.degree - 1
+            if self.diff_order > n_basis - 1:
+                raise InvalidParamError(
+                    f"diff_order={self.diff_order} is too large for a basis of width {n_basis} "
+                    f"(output_dim={output_dim}); the finite-difference penalty needs "
+                    f"diff_order <= {n_basis - 1} to stay non-trivial. Lower diff_order or "
+                    "raise output_dim."
+                )
             D = np.eye(n_basis)
             for _ in range(self.diff_order):
                 D = np.diff(D, n=1, axis=0)

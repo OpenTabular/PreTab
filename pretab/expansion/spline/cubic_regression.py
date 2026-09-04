@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
@@ -179,6 +181,8 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
 
         self.knots_ = []
         self.n_basis_ = []
+        self.x_min_ = []
+        self.x_max_ = []
         for i in range(X.shape[1]):
             xi = X[:, i]
             knots = self._place_interior_knots(
@@ -186,6 +190,9 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
             )
             self.knots_.append(knots)
             self.n_basis_.append(self._bspline_basis(xi, knots).shape[1])
+            finite_xi, _ = self._finite_column(xi, None)
+            self.x_min_.append(float(finite_xi.min()))
+            self.x_max_.append(float(finite_xi.max()))
 
         self.n_knots_ = [len(knots) for knots in self.knots_]
         return self
@@ -208,6 +215,11 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
     def get_penalty_matrix(self, feature_index=0):
         """Return the curvature penalty matrix for a fitted feature.
 
+        Penalizes the integrated squared second derivative of every basis
+        column over the fitted feature range, including the polynomial
+        ``x**2`` / ``x**3`` columns (only ``x`` and the bias have an
+        identically-zero second derivative and so are unpenalized).
+
         Parameters
         ----------
         feature_index : int, default=0
@@ -221,18 +233,36 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
         """
         check_is_fitted(self, "n_basis_")
         n_basis = self.n_basis_[feature_index]
+        knots = self.knots_[feature_index]
+        x_min = self.x_min_[feature_index]
+        x_max = self.x_max_[feature_index]
+
+        # Every basis column's second derivative is piecewise linear in x, with
+        # kinks only at the knots, so a single-panel Simpson's rule per
+        # knot-delimited segment integrates every pairwise product exactly.
+        breakpoints = np.unique(np.concatenate(([x_min, x_max], np.clip(knots, x_min, x_max))))
+        breakpoints.sort()
+
         P = np.zeros((n_basis, n_basis))
-        offset = 4 if self.include_bias else 3
-        for i in range(offset, n_basis):
-            for j in range(offset, n_basis):
-                ki = self.knots_[feature_index][i - offset]
-                kj = self.knots_[feature_index][j - offset]
-                P[i, j] = self._spline_penalty_entry(ki, kj, self.knots_[feature_index])
+        for lo, hi in itertools.pairwise(breakpoints):
+            if hi <= lo:
+                continue
+            xs = np.array([lo, 0.5 * (lo + hi), hi])
+            weights = (hi - lo) / 6.0 * np.array([1.0, 4.0, 1.0])
+            D = np.column_stack([self._second_derivative(xs, i, knots) for i in range(n_basis)])
+            P += (D * weights[:, None]).T @ D
         return P
 
-    def _spline_penalty_entry(self, ki, kj, knots):
-        kmax = max(ki, kj)
-        upper = knots[-1]
-        x_vals = np.linspace(kmax, upper, 100)
-        integrand = 36 * (x_vals - ki) * (x_vals - kj)
-        return np.trapezoid(integrand, x_vals)
+    def _second_derivative(self, x, basis_index, knots):
+        """Second derivative of one basis column, evaluated at ``x``."""
+        poly_offset = 1 if self.include_bias else 0
+        col = basis_index - poly_offset
+        if col <= 0:
+            return np.zeros_like(x, dtype=float)  # bias / x: identically zero
+        if col == 1:
+            return np.full_like(x, 2.0, dtype=float)  # x**2
+        if col == 2:
+            return 6.0 * x  # x**3
+        knot = knots[col - 3]
+        return 6.0 * np.maximum(x - knot, 0.0)
+

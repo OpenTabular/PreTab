@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from sklearn.exceptions import NotFittedError
 
-from pretab.exceptions import InsufficientSamplesError, InvalidParamError
+from pretab.exceptions import ConfigWarning, InsufficientSamplesError, InvalidParamError
 from pretab.transformers import ThinPlateSplineTransformer
 
 
@@ -30,10 +30,23 @@ def test_tprs_penalty_shape_and_symmetry():
     X = np.random.rand(25, 1)
     transformer = ThinPlateSplineTransformer(n_components=7, random_state=0)
     transformer.fit(X)
-    P = transformer.get_penalty_matrix()
+    with pytest.warns(ConfigWarning, match="experimental"):
+        P = transformer.get_penalty_matrix()
 
     assert P.shape[0] == P.shape[1]
     assert np.allclose(P, P.T, atol=1e-6)
+
+
+def test_tprs_penalty_matrix_warns_experimental():
+    # Regression test: the retained eigenvalues used as the penalty diagonal are
+    # not guaranteed non-negative (confirmed non-PSD in 10/10 random trials by
+    # the external audit), so this is marked experimental with a warning rather
+    # than silently returned as if it were a safe, PSD smoothing penalty.
+    rng = np.random.RandomState(0)
+    X = rng.uniform(size=(60, 3))
+    transformer = ThinPlateSplineTransformer(n_components=6, random_state=0).fit(X)
+    with pytest.warns(ConfigWarning, match="experimental"):
+        transformer.get_penalty_matrix()
 
 
 def test_tprs_multivariate_is_supported():

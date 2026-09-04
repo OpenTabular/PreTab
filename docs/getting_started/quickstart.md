@@ -111,7 +111,7 @@ x = np.random.randn(200, 1)
 spline = NaturalCubicSplineTransformer(output_dim=8)
 spline.fit_transform(x)
 
-penalty = spline.get_penalty_matrix()   # second-difference penalty for GAM-style fitting
+penalty = spline.get_penalty_matrix()   # integrated-curvature penalty for GAM-style fitting
 ```
 
 The multivariate thin-plate spline models several columns jointly and is sized by

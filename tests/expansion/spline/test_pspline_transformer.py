@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from sklearn.exceptions import NotFittedError
 
+from pretab.exceptions import InvalidParamError
 from pretab.transformers import PSplineTransformer
 
 
@@ -48,6 +49,19 @@ def test_pspline_penalty_matrix_shape_and_symmetry():
 
     assert P.shape[0] == P.shape[1]
     assert np.allclose(P, P.T, atol=1e-6)
+
+
+@pytest.mark.parametrize("diff_order", [-1, 0])
+def test_pspline_rejects_nonpositive_diff_order(diff_order):
+    X = np.linspace(0, 1, 30).reshape(-1, 1)
+    with pytest.raises(InvalidParamError, match="diff_order must be a positive integer"):
+        PSplineTransformer(output_dim=8, diff_order=diff_order).fit(X)
+
+
+def test_pspline_rejects_diff_order_too_large_for_output_dim():
+    X = np.linspace(0, 1, 30).reshape(-1, 1)
+    with pytest.raises(InvalidParamError, match="diff_order=50 is too large"):
+        PSplineTransformer(output_dim=8, diff_order=50).fit(X)
 
 
 def test_pspline_feature_names_out():
