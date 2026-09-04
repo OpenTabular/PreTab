@@ -232,8 +232,10 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         """
         check_is_fitted(self, "knots_")
         knots = self.knots_[feature_index]
-        B = self._basis(np.linspace(knots[0], knots[-1], 200), knots)
-        B_dd = np.gradient(np.gradient(B, axis=0), axis=0)
+        x_grid = np.linspace(knots[0], knots[-1], 200)
+        B = self._basis(x_grid, knots)
+        B_d = np.gradient(B, x_grid, axis=0)
+        B_dd = np.gradient(B_d, x_grid, axis=0)
 
         n_basis = B.shape[1]
         P = np.zeros((n_basis, n_basis))
@@ -242,6 +244,6 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         for i in range(offset, n_basis):
             for j in range(offset, n_basis):
                 integrand = B_dd[:, i] * B_dd[:, j]
-                P[i, j] = np.trapezoid(integrand, np.linspace(knots[0], knots[-1], 200))
+                P[i, j] = np.trapezoid(integrand, x_grid)
 
         return P

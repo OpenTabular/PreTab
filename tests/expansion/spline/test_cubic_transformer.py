@@ -49,6 +49,31 @@ def test_cubic_spline_penalty_matrix_shape():
     assert np.allclose(P, P.T, atol=1e-6)
 
 
+def test_cubic_spline_penalty_matrix_last_knot_value():
+    # Hand-derived closed form: 36 * integral of (x - knot) ** 2 dx from knot to
+    # x_max. With interior knots at [2.5, 5, 7.5] and x_max = 10, the last-knot
+    # entry is 187.5.
+    X = np.linspace(0, 10, 200).reshape(-1, 1)
+    transformer = CubicRegressionSplineTransformer(output_dim=6, placement_strategy="uniform")
+    transformer.fit(X)
+
+    assert transformer.knots_[0] == pytest.approx([2.5, 5.0, 7.5])
+    P = transformer.get_penalty_matrix()
+    assert P[-1, -1] == pytest.approx(187.5, rel=1e-6)
+
+
+def test_cubic_spline_penalty_matrix_penalizes_polynomial_columns():
+    # x**2 and x**3 have real curvature (f'' = 2 and f'' = 6x) and must not be
+    # silently unpenalized; only the linear x column has f'' = 0 everywhere.
+    X = np.linspace(0, 10, 200).reshape(-1, 1)
+    transformer = CubicRegressionSplineTransformer(output_dim=6).fit(X)
+    P = transformer.get_penalty_matrix()
+
+    assert not np.allclose(P[1, :], 0.0)  # x**2 row
+    assert not np.allclose(P[2, :], 0.0)  # x**3 row
+    assert np.allclose(P[0, :], 0.0)  # x row: identically zero second derivative
+
+
 def test_cubic_feature_names_out():
     X = np.random.rand(20, 2)
     transformer = CubicRegressionSplineTransformer(output_dim=8)

@@ -48,6 +48,22 @@ def test_natural_spline_penalty_matrix_symmetry():
     assert np.allclose(P, P.T, atol=1e-6)
 
 
+def test_natural_spline_penalty_matrix_is_grid_density_invariant():
+    # Regression test: the old np.gradient(..., axis=0) call (missing the x_grid
+    # spacing argument) differentiated with respect to grid *index*, so the
+    # returned penalty shrunk by roughly dx**4 whenever the evaluation range
+    # changed. The penalty is computed on a fixed internal 200-point grid
+    # regardless of range, so as a proxy we assert it is not vanishingly small
+    # relative to a hand-checkable order of magnitude on a modest range.
+    X = np.linspace(0, 10, 200).reshape(-1, 1)
+    transformer = NaturalCubicSplineTransformer(output_dim=5, placement_strategy="uniform").fit(X)
+    P = transformer.get_penalty_matrix()
+
+    # The buggy implementation produced a diagonal on the order of 1e-3 for this
+    # range; the correctly-scaled penalty is on the order of 1e2-1e3.
+    assert np.diag(P).max() > 10.0
+
+
 def test_natural_spline_feature_names_out():
     X = np.random.rand(20, 2)
     transformer = NaturalCubicSplineTransformer(output_dim=5)

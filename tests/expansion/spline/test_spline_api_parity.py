@@ -7,7 +7,7 @@ output is preserved) and that they are actually wired through ``fit``.
 import numpy as np
 import pytest
 
-from pretab.exceptions import IncompatibleParamsError
+from pretab.exceptions import ConfigWarning, IncompatibleParamsError
 from pretab.transformers import (
     CubicRegressionSplineTransformer,
     NaturalCubicSplineTransformer,
@@ -142,6 +142,7 @@ def test_tensor_penalty_matrix_signature_parity():
 def test_thinplate_penalty_matrix_accepts_feature_index():
     X = np.linspace(0, 1, 40).reshape(-1, 1)
     transformer = ThinPlateSplineTransformer(n_components=6, include_bias=True, random_state=0).fit(X)
-    P = transformer.get_penalty_matrix(feature_index=0)
+    with pytest.warns(ConfigWarning, match="experimental"):
+        P = transformer.get_penalty_matrix(feature_index=0)
     assert P.shape == (7, 7)
     assert np.allclose(P[0, :], 0.0) and np.allclose(P[:, 0], 0.0)

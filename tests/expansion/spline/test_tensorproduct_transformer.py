@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from sklearn.exceptions import NotFittedError
 
+from pretab.exceptions import InvalidParamError
 from pretab.transformers import TensorProductSplineTransformer
 
 
@@ -39,6 +40,46 @@ def test_tensorproduct_spline_penalty_matrices():
     for P in penalties:
         assert P.shape[0] == P.shape[1]
         assert np.allclose(P, P.T, atol=1e-6)
+
+
+def test_tensorproduct_spline_penalty_matrices_match_true_quadratic_form():
+    # Regression test: get_penalty_matrices() used to always place the marginal
+    # penalty leftmost in the Kronecker chain, which only matched the
+    # einsum+reshape flatten order used by transform() for dimension 0.
+    rng = np.random.default_rng(0)
+    X = rng.random((100, 3))
+    transformer = TensorProductSplineTransformer(output_dim=5).fit(X)
+    sizes = transformer.marginal_sizes_
+    penalties = transformer.get_penalty_matrices()
+
+    beta = rng.normal(size=sizes)
+    beta_flat = beta.ravel()
+
+    for dim, P in enumerate(penalties):
+        D = transformer.penalties_[dim]
+        # True smoothness along `dim`: apply D on that axis, summed over every
+        # combination of the other axes' indices.
+        true_value = 0.0
+        for index in np.ndindex(*sizes):
+            for index2 in np.ndindex(*sizes):
+                if any(index[k] != index2[k] for k in range(len(sizes)) if k != dim):
+                    continue
+                true_value += beta[index] * D[index[dim], index2[dim]] * beta[index2]
+        lib_value = beta_flat @ P @ beta_flat
+        assert lib_value == pytest.approx(true_value, rel=1e-8), f"mismatch for dim={dim}"
+
+
+@pytest.mark.parametrize("diff_order", [-1, 0])
+def test_tensorproduct_rejects_nonpositive_diff_order(diff_order):
+    X = np.random.default_rng(0).random((30, 2))
+    with pytest.raises(InvalidParamError, match="diff_order must be a positive integer"):
+        TensorProductSplineTransformer(output_dim=6, diff_order=diff_order).fit(X)
+
+
+def test_tensorproduct_rejects_diff_order_too_large_for_output_dim():
+    X = np.random.default_rng(0).random((30, 2))
+    with pytest.raises(InvalidParamError, match="diff_order=50 is too large"):
+        TensorProductSplineTransformer(output_dim=6, diff_order=50).fit(X)
 
 
 def test_tensorproduct_feature_names_out():

@@ -48,12 +48,15 @@ source of truth, and these tables mirror it.
 | Natural cubic spline | `naturalspline` | univariate | optional | yes | yes | yes |
 | Penalized spline (P-spline) | `pspline` | univariate | forbidden | no | yes | yes |
 | Tensor-product spline | `tensorspline` | multivariate | forbidden | no | yes | no |
-| Thin-plate spline | `tprs` | multivariate | forbidden | no | yes | no |
+| Thin-plate spline | `tprs` | multivariate | forbidden | no | experimental | no |
 
 ```{note}
 The multivariate splines (`tensorspline`, `tprs`) model several inputs jointly and are used
 standalone, not selected per column through `Preprocessor`. The alias `thinplate` resolves to
-`tprs`.
+`tprs`. `ThinPlateSplineTransformer.get_penalty_matrix()` is experimental: it is not guaranteed
+positive semi-definite (the retained eigenvalues of the projected landmark kernel can be
+negative) and emits a `ConfigWarning` on every call. `transform()` is unaffected; only the
+penalty is experimental.
 ```
 
 ## Functional expansions

@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 from scipy.linalg import eigh
 from scipy.spatial.distance import cdist
@@ -6,7 +8,7 @@ from sklearn.cluster import KMeans
 from sklearn.utils import check_random_state
 from sklearn.utils.validation import check_is_fitted
 
-from ....exceptions import InsufficientSamplesError, InvalidParamError
+from ....exceptions import ConfigWarning, InsufficientSamplesError, InvalidParamError
 from ..mixins import SplineBasisMixin
 
 _LANDMARK_STRATEGIES = ("kmeans", "subsample")
@@ -56,7 +58,8 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
         The retained eigenvalues of the projected landmark kernel.
     penalty_ : ndarray
         Diagonal smoothing penalty of ``eigvals_`` (with an unpenalized leading
-        row/column when ``include_bias=True``).
+        row/column when ``include_bias=True``). **Experimental**: not guaranteed
+        positive semi-definite, see :meth:`get_penalty_matrix`.
     d_ : int
         Number of input features (also ``n_features_in_``).
     n_basis_ : list of int
@@ -202,6 +205,14 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
     def get_penalty_matrix(self, feature_index=0):
         """Return the smoothing penalty matrix for the fitted basis.
 
+        .. warning::
+           **Experimental.** The retained eigenvalues of the projected landmark
+           kernel are not guaranteed to be non-negative, so this penalty is not
+           guaranteed positive semi-definite. Using it for penalized-regression
+           smoothing can make an otherwise convex problem non-convex. This does
+           not affect :meth:`transform`, only this penalty. A warning is emitted
+           on every call until this is fully fixed.
+
         Parameters
         ----------
         feature_index : int, default=0
@@ -215,4 +226,11 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
             leading row/column when ``include_bias=True``).
         """
         check_is_fitted(self, "penalty_")
+        warnings.warn(
+            "ThinPlateSplineTransformer.get_penalty_matrix() is experimental: the "
+            "retained eigenvalues are not guaranteed non-negative, so the returned "
+            "penalty is not guaranteed positive semi-definite.",
+            ConfigWarning,
+            stacklevel=2,
+        )
         return self.penalty_
