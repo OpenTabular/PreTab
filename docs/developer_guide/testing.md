@@ -42,6 +42,39 @@ representation, update the pinned values in the same commit and call it out in t
 request, so the change is reviewed rather than hidden.
 ```
 
+## Testing mathematical correctness, not just shape
+
+A representation-heavy library like PreTab has a failure mode that shape and dtype checks
+cannot catch: a basis function, penalty matrix, or encoding can be computed with the wrong
+formula and still produce output of the right shape, the right dtype, and finite values. A
+test that only asserts `X.shape == (n, k)` or `np.isfinite(out).all()` will pass on both the
+correct and the incorrect implementation.
+
+When a representation has a closed-form mathematical property, test that property directly
+instead of (or in addition to) its shape:
+
+- **Known identities.** A B-spline basis should sum to `1` at every point (partition of
+  unity); an M-spline should integrate to `1` over its own support; an I-spline should be
+  monotonically non-decreasing and bounded in `[0, 1]`.
+- **Independent reference values.** A penalty matrix or a hand-derivable formula (a
+  particular basis value at a particular knot, say) can be checked against a value computed
+  a different way, for example a fine numerical quadrature or a direct closed-form
+  substitution, not just re-derived with the same code path the implementation itself uses.
+- **Boundary behaviour.** Values at, or just past, a fitted range's edge are where
+  clipping-versus-extrapolation bugs and off-by-one integration bounds hide. Test a value
+  exactly at the boundary and one just beyond it, not only values safely inside the range.
+- **Realistic missing-data shapes.** A mixed object array with an actual `NaN`/`None` among
+  string categories (the ordinary shape of a pandas column with missing values) is a
+  different code path than an all-numeric array with `NaN`, and needs its own test if a
+  transformer declares `allow_nan=True`.
+
+```{warning}
+Shape/symmetry/finiteness assertions are still useful as a first line of defense, but they
+are not sufficient proof that a mathematical implementation is correct: they pass equally
+well on a subtly wrong formula as on a correct one. Pair them with at least one value-level
+assertion for anything that has a defined mathematical property to check against.
+```
+
 ## Markers
 
 The suite defines a `smoke` marker for fast end-to-end sanity checks that run as a dedicated CI

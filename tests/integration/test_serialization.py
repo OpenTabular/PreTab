@@ -197,6 +197,80 @@ def test_from_spec_refuses_disallowed_module(frame, target):
         Preprocessor.from_spec(spec)
 
 
+def test_from_spec_refuses_builtins_module():
+    """``builtins`` must not be resolvable at all (closes the arbitrary-call hole).
+
+    Previously ``builtins`` was an allowed top-level module, so a crafted
+    ``__dataclass__``/``__estimator__`` tag naming ``builtins:open`` could call
+    ``open(**attacker_fields)`` with attacker-controlled keyword arguments,
+    including creating/truncating an arbitrary file. This asserts the module is
+    refused outright, and that no file is created as a side effect of the
+    refused load.
+    """
+    import os
+    import tempfile
+
+    target_path = os.path.join(tempfile.gettempdir(), "pretab_test_should_not_exist.txt")
+    if os.path.exists(target_path):
+        os.remove(target_path)
+
+    malicious_spec = {
+        "schema_version": SCHEMA_VERSION,
+        "state": {
+            "__dict__": [
+                [
+                    "evil",
+                    {
+                        "__dataclass__": {
+                            "class": "builtins:open",
+                            "fields": {"file": target_path, "mode": "w"},
+                        }
+                    },
+                ]
+            ]
+        },
+    }
+    with pytest.raises(PretabSerializationError, match="disallowed module"):
+        Preprocessor.from_spec(malicious_spec)
+    assert not os.path.exists(target_path)
+
+
+def test_from_spec_refuses_estimator_not_a_base_estimator():
+    """An allowed-module class that isn't a ``BaseEstimator`` must still be refused.
+
+    Proves the ``__estimator__`` check is a structural ``issubclass`` check, not
+    just a module-prefix check: ``numpy`` is an allowed module, but
+    ``numpy.ndarray`` is not a scikit-learn estimator.
+    """
+    spec = {
+        "schema_version": SCHEMA_VERSION,
+        "state": {"__dict__": [["evil", {"__estimator__": {"class": "numpy:ndarray", "state": {}}}]]},
+    }
+    with pytest.raises(PretabSerializationError, match="not a scikit-learn BaseEstimator"):
+        Preprocessor.from_spec(spec)
+
+
+def test_from_spec_refuses_dataclass_not_in_allowlist():
+    """An allowed-module, genuinely-a-dataclass class must still be refused unless
+    it is one of the specifically approved dataclasses.
+
+    ``PreprocessorConfig`` is a real, internal PreTab dataclass (module "pretab",
+    would pass a module-prefix check) that is deliberately not part of a fitted
+    ``Preprocessor``'s serialized state, so it must not be reconstructable via a
+    spec either.
+    """
+    spec = {
+        "schema_version": SCHEMA_VERSION,
+        "state": {
+            "__dict__": [
+                ["evil", {"__dataclass__": {"class": "pretab.compose.config:PreprocessorConfig", "fields": {}}}]
+            ]
+        },
+    }
+    with pytest.raises(PretabSerializationError, match="disallowed dataclass"):
+        Preprocessor.from_spec(spec)
+
+
 def test_from_spec_rejects_bad_source_type():
     with pytest.raises(PretabSerializationError):
         Preprocessor.from_spec(12345)

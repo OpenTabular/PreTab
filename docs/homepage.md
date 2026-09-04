@@ -1,12 +1,15 @@
 # PreTab
 
-**PreTab** is a modular, extensible, and [scikit-learn](https://scikit-learn.org/)-compatible
-preprocessing library for tabular data. It supports **all `sklearn` transformers** out of the
-box and extends them with a rich set of custom encoders, splines, and neural basis expansions.
+**PreTab** is a modular, [scikit-learn](https://scikit-learn.org/)-compatible representation
+and preprocessing library for tabular data. Its focus is feature representation and
+expansion: splines, neural basis maps, piecewise-linear encoding, kernel approximations, and
+language embeddings, each shipped as a standalone transformer that speaks the standard
+`fit` / `transform` API. Every PreTab transformer subclasses `BaseEstimator` and
+`TransformerMixin`, so it drops into a `Pipeline` or `ColumnTransformer` alongside any
+sklearn-native transformer you already use.
 
 ```{note}
-These docs are for PreTab {{ version }}. The project is under active development and the
-public API may evolve while the major version is `0`.
+These docs are for PreTab {{ version }}.
 ```
 
 ## Highlights
