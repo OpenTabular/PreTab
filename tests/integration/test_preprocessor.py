@@ -5,7 +5,7 @@ from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 from sklearn.utils.validation import check_is_fitted
 
-from pretab.exceptions import IncompatibleParamsError, PretabDataError
+from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
 
 
@@ -361,3 +361,9 @@ def test_documented_categorical_method_is_accepted(sample_data, method):
         # Requires already-integer-coded categorical input.
         X = X.assign(cat1=pd.factorize(X["cat1"])[0], cat2=pd.factorize(X["cat2"])[0])
     Preprocessor(numerical_method="none", categorical_method=method).fit(X, y)
+
+
+def test_unknown_feature_preprocessing_key_raises(sample_data):
+    X, y = sample_data
+    with pytest.raises(InvalidParamError, match="feature_preprocessing"):
+        Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)

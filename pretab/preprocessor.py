@@ -485,6 +485,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         X = to_dataframe(X)
 
+        if self.feature_preprocessing:
+            unknown_features = set(self.feature_preprocessing) - set(X.columns)
+            if unknown_features:
+                raise invalid_param_error(
+                    type(self).__name__,
+                    "feature_preprocessing",
+                    sorted(unknown_features),
+                    "every key must name a column present in X",
+                    valid=X.columns,
+                )
+
         if self.missing_policy == "error":
             self._reject_missing(X)
 
