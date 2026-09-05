@@ -265,4 +265,3 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
             return 6.0 * x  # x**3
         knot = knots[col - 3]
         return 6.0 * np.maximum(x - knot, 0.0)
-

@@ -28,7 +28,6 @@ policy (there is no configurable axis for it).
    expansions" section of ``dev/todo/release-1.0.0/bugfixes-1.0.0.md``.
 """
 
-
 from __future__ import annotations
 
 import warnings
