@@ -4938,4 +4938,4 @@ lightgbm = ["lightgbm"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.14"
-content-hash = "2a0bad6485988b0c36e131940e3f5df70bb2624604cfecb76ddd25b49eb1cab6"
+content-hash = "2ecd3046883c17c5faaa826140973e7ca64106ce4081afae5a550197fc2268b8"

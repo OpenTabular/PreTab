@@ -1,6 +1,19 @@
 # Installation
 
-pretab supports Python 3.10 to 3.13.
+pretab supports Python 3.10 to 3.13, with the following minimum core dependency versions:
+
+| Dependency | Minimum |
+| --- | --- |
+| `numpy` | 1.24 |
+| `pandas` | 2.0 |
+| `scipy` | 1.10 |
+| `scikit-learn` | 1.6 |
+
+```{note}
+`scikit-learn>=1.6` is required for the `__sklearn_tags__` tag-dispatch API pretab's
+transformers use. A dedicated CI job installs exactly these minimum versions and runs the
+test suite against them, so this floor is verified, not just declared.
+```
 
 ## From PyPI
 

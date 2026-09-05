@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.integrate import trapezoid
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
@@ -244,6 +245,6 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         for i in range(offset, n_basis):
             for j in range(offset, n_basis):
                 integrand = B_dd[:, i] * B_dd[:, j]
-                P[i, j] = np.trapezoid(integrand, x_grid)
+                P[i, j] = trapezoid(integrand, x_grid)
 
         return P
