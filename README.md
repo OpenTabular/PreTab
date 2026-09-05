@@ -185,7 +185,7 @@ pip install "pretab[all]"          # both of the above
 ```bash
 git clone https://github.com/OpenTabular/PreTab
 cd PreTab
-pip install -e ".[dev]"
+poetry install
 ```
 
 ## Usage
