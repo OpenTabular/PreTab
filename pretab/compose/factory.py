@@ -136,7 +136,7 @@ def get_numerical_transformer_steps(
                 "must name a scaler or disable scaling",
                 valid={*scalers, "none"},
             )
-    if scaling in scalers and scaling != method:
+    if scaling in scalers and scaling != method and method != "none":
         steps.append(scalers[scaling])
 
     if method not in NUMERICAL_METHODS:

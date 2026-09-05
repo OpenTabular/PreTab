@@ -363,6 +363,16 @@ def test_documented_categorical_method_is_accepted(sample_data, method):
     Preprocessor(numerical_method="none", categorical_method=method).fit(X, y)
 
 
+def test_numerical_method_none_leaves_values_untouched():
+    # Regression test: numerical_method="none" used to still run MinMaxScaler
+    # before the no-op, contradicting the documented "leave unchanged" meaning.
+    X = pd.DataFrame({"a": [1.0, 2.0, 3.0, 100.0]})
+    pre = Preprocessor(numerical_method="none").fit(X)
+    out = pre.transform(X)
+    assert isinstance(out, np.ndarray)
+    np.testing.assert_array_equal(out.ravel(), X["a"].to_numpy())
+
+
 def test_unknown_feature_preprocessing_key_raises(sample_data):
     X, y = sample_data
     with pytest.raises(InvalidParamError, match="feature_preprocessing"):
