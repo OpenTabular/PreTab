@@ -15,7 +15,8 @@ dynamic = ["dependencies"]
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=2.0"]
 lightgbm = ["lightgbm>=4.0"]
-all = ["sentence-transformers>=2.0", "lightgbm>=4.0"]
+polars = ["polars>=0.20"]
+all = ["sentence-transformers>=2.0", "lightgbm>=4.0", "polars>=0.20"]
 
 [project.urls]
 homepage = "https://github.com/OpenTabular/PreTab"

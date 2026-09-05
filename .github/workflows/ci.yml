@@ -281,6 +281,8 @@ jobs:
             module: sentence_transformers
           - extra: lightgbm
             module: lightgbm
+          - extra: polars
+            module: polars
 
     steps:
       - uses: actions/checkout@v4

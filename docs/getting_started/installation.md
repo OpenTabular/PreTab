@@ -44,6 +44,20 @@ supervised knot, center, and threshold selection:
 pip install "pretab[lightgbm]"
 ```
 
+The `polars` extra enables `set_output(transform="polars")`, so `Preprocessor.transform`
+returns a `polars.DataFrame` instead of a NumPy array or dict:
+
+```bash
+pip install "pretab[polars]"
+```
+
+```{note}
+`polars` is only needed for the `set_output(transform="polars")` output path; every other
+output (`output_structure="matrix"`/`"blocks"`, `output_format="dense"`/`"sparse"`,
+`set_output(transform="pandas")`) works without it. Requesting `"polars"` output without the
+extra installed raises a clear `OptionalDependencyError`.
+```
+
 Use the convenience `all` extra to install every optional dependency at once:
 
 ```bash

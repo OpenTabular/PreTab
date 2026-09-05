@@ -121,8 +121,10 @@ pre.set_output(transform="pandas")   # or "polars"
 ```
 
 ```{note}
-Polars output is loaded lazily. If polars is not installed, requesting it raises a clear
-`OptionalDependencyError` rather than failing deep in the call stack.
+Polars output requires the optional `polars` extra (`pip install "pretab[polars]"`) and is
+loaded lazily: if polars is not installed, requesting it raises a clear
+`OptionalDependencyError` rather than failing deep in the call stack. See
+[Installation](../getting_started/installation.md#optional-extras).
 ```
 
 ## Choosing your output settings

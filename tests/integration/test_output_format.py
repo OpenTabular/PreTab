@@ -199,15 +199,32 @@ def test_set_output_default_with_blocks_structure_is_dict(frame, y):
 
 
 def test_set_output_polars_without_polars_raises(frame, y):
-    import importlib.util
+    # Unit-test to_dataframe_output directly (rather than through the full
+    # Preprocessor.set_output stack): sklearn's own polars detection elsewhere
+    # in that stack also probes sys.modules and breaks under a blanket
+    # sys.modules["polars"] = None patch, unrelated to the behavior under test.
+    import unittest.mock
 
-    p = _bspline().fit(frame, y).set_output(transform="polars")
-    if importlib.util.find_spec("polars") is None:
-        with pytest.raises(OptionalDependencyError):
-            p.transform(frame)
-    else:
-        out = p.transform(frame)
-        assert out.shape == (len(frame), p.total_output_dim_)
+    from pretab.compose.output import to_dataframe_output
+
+    with unittest.mock.patch.dict("sys.modules", {"polars": None}):
+        with pytest.raises(OptionalDependencyError, match="polars"):
+            to_dataframe_output(np.zeros((2, 2)), ["a", "b"], "polars")
+
+
+def test_set_output_polars_dataframe_is_correct(frame, y):
+    pl = pytest.importorskip("polars")
+
+    arr = _bspline().fit(frame, y).transform(frame, return_array=True)
+    assert isinstance(arr, np.ndarray)
+
+    p = _bspline().fit(frame, y)
+    out = p.set_output(transform="polars").transform(frame)
+
+    assert isinstance(out, pl.DataFrame)
+    assert out.shape == (len(frame), p.total_output_dim_)
+    assert out.columns == list(p.get_feature_names_out())
+    np.testing.assert_allclose(out.to_numpy(), arr)
 
 
 # --- validation ----------------------------------------------------------------
