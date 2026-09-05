@@ -23,9 +23,18 @@ def sample_data():
     return df, y
 
 
-def test_fit_transform_returns_dict(sample_data):
+def test_fit_transform_returns_array_by_default(sample_data):
     X, y = sample_data
     pre = Preprocessor()
+    out = pre.fit_transform(X, y)
+    assert isinstance(out, np.ndarray)
+    assert out.shape[0] == len(X)
+    assert out.ndim == 2
+
+
+def test_fit_transform_returns_dict_with_blocks_structure(sample_data):
+    X, y = sample_data
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y)
     assert isinstance(out, dict)
     assert all(isinstance(k, str) for k in out)
@@ -53,7 +62,7 @@ def test_transform_raises_before_fit(sample_data):
 def test_embedding_integration(sample_data):
     X, y = sample_data
     embed = np.random.rand(len(X), 10)
-    pre = Preprocessor()
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y, embeddings=embed)
     assert "embedding_1" in out
     assert out["embedding_1"].shape == (len(X), 10)
@@ -62,7 +71,7 @@ def test_embedding_integration(sample_data):
 def test_multiple_embeddings(sample_data):
     X, y = sample_data
     embeds = [np.random.rand(len(X), 3), np.random.rand(len(X), 7)]
-    pre = Preprocessor()
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y, embeddings=embeds)
     assert "embedding_1" in out and "embedding_2" in out
     assert out["embedding_1"].shape[1] == 3
@@ -135,7 +144,7 @@ def test_feature_info_returns_three_dicts(sample_data):
 
 def test_dict_output_shapes_add_up(sample_data):
     X, y = sample_data
-    pre = Preprocessor()
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y)
     assert isinstance(out, dict)
     shapes = [v.shape for v in out.values()]
@@ -144,7 +153,7 @@ def test_dict_output_shapes_add_up(sample_data):
 
 def test_dict_keys_reflect_column_names(sample_data):
     X, y = sample_data
-    pre = Preprocessor()
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y)
     assert isinstance(out, dict)
     expected_prefixes = ["num_", "cat_"]
@@ -180,6 +189,7 @@ EXPECTED_PARAMS = {
     "max_features_per_input",
     "max_dense_memory",
     "overflow_policy",
+    "output_structure",
     "output_format",
     "dtype",
     "verbose",
@@ -265,7 +275,7 @@ def test_get_feature_names_out_does_not_duplicate_feature_name(sample_data):
 def test_lowercase_and_none_method_resolution(sample_data):
     X, y = sample_data
     # Mixed-case / None methods are resolved at fit time, not stored on the instance.
-    pre = Preprocessor(numerical_method="PLE", categorical_method=None)  # type: ignore[arg-type]
+    pre = Preprocessor(numerical_method="PLE", categorical_method=None, output_structure="blocks")  # type: ignore[arg-type]
     out = pre.fit_transform(X, y)
     assert isinstance(out, dict)
     assert pre.numerical_method == "PLE"  # unchanged on the instance

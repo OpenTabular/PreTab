@@ -11,7 +11,7 @@ ergonomics, not capability. This page helps you pick.
 
 :::{grid-item-card} `Preprocessor`
 Reads a `DataFrame`, detects numerical and categorical columns, and applies a strategy per
-column from a single configuration object. Returns a dict of feature blocks by default.
+column from a single configuration object. Returns a single stacked array by default.
 :::
 
 :::{grid-item-card} Standalone transformers
@@ -40,7 +40,7 @@ pre = Preprocessor(feature_preprocessing={
     "income": "ple",
     "city": "one-hot",
 })
-X = pre.fit_transform(df, y)   # dict of blocks, or return_array=True for one matrix
+X = pre.fit_transform(df, y)   # one stacked array, or output_structure="blocks" for a dict
 ```
 
 ## Reach for standalone transformers when
@@ -65,10 +65,26 @@ model = Pipeline([("features", features), ("ridge", Ridge())])
 ```
 
 ```{note}
-The `Preprocessor` returns a dict by default, which is convenient for inspection but is not a
-drop-in for a scikit-learn estimator that expects a single matrix. Call it with
-`return_array=True`, or use the standalone transformers, when you compose one end-to-end
-`Pipeline`.
+The `Preprocessor` returns a single stacked array by default, so it drops directly into a
+plain `Pipeline`/`ColumnTransformer` like any other scikit-learn transformer. Pass
+`output_structure="blocks"` (or `return_array=False` for a single call) when you want the
+dict-of-feature-blocks form instead, for inspection or per-block downstream heads.
+```
+
+A `Preprocessor` composes the same way as the standalone transformers above:
+
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import Ridge
+
+from pretab import Preprocessor
+
+model = Pipeline([
+    ("pretab", Preprocessor(feature_preprocessing={"age": "naturalspline", "income": "ple"})),
+    ("ridge", Ridge()),
+])
+model.fit(df, y)
+model.predict(df)
 ```
 
 ## A note on multivariate methods

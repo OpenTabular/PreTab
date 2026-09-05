@@ -93,8 +93,8 @@ pre = Preprocessor(
     output_dim=10,
 )
 
-X_tr = pre.fit_transform(X_train, y_train, return_array=True)
-X_te = pre.transform(X_test, return_array=True)
+X_tr = pre.fit_transform(X_train, y_train)
+X_te = pre.transform(X_test)
 
 clf = LogisticRegression(max_iter=1000).fit(X_tr, y_train)
 proba = clf.predict_proba(X_te)[:, 1]

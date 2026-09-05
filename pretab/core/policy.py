@@ -3,8 +3,8 @@
 :class:`RepresentationPolicy` names, in one place, how every transformer reacts
 to the recurring edge cases that would otherwise diverge silently per family:
 
-* ``constant`` -- zero-variance input columns (``"error"`` / ``"warn"`` / ``"allow"``).
-* ``out_of_range`` -- values at ``transform`` outside the fitted range
+* ``constant``: zero-variance input columns (``"error"`` / ``"warn"`` / ``"allow"``).
+* ``out_of_range``: values at ``transform`` outside the fitted range
   (``"error"`` / ``"warn"`` / ``"clip"`` / ``"extrapolate"``).
 
 The defaults reproduce the library's historical behaviour (constant columns pass
@@ -27,6 +27,7 @@ policy (there is no configurable axis for it).
    ``PreprocessorConfig``) is deferred to a follow-up; see the "Spline
    expansions" section of ``dev/todo/release-1.0.0/bugfixes-1.0.0.md``.
 """
+
 
 from __future__ import annotations
 

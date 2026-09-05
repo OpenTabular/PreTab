@@ -122,6 +122,7 @@ in depth.
 | `target_aware`, `placement_strategy` | `True`, `"cart"` | [Target awareness](target_awareness.md) |
 | `numerical_imputation`, `categorical_imputation`, `add_missing_indicator` | `"median"`, `"most_frequent"`, `False` | [Missing values](missing_values.md) |
 | `output_format`, `dtype` | `"dense"`, `None` | [Outputs and inspection](outputs_and_inspection.md) |
+| `output_structure` | `"matrix"` | [Outputs and inspection](outputs_and_inspection.md) |
 | `random_state` | `None` | [Reproducibility](reproducibility.md) |
 
 ## Where to go next

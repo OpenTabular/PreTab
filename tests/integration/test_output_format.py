@@ -48,7 +48,7 @@ def test_default_output_format_is_dense(frame, y):
 
 def test_default_dict_blocks_are_dense(frame, y):
     p = _bspline().fit(frame, y)
-    out = p.transform(frame)
+    out = p.transform(frame, return_array=False)
     assert isinstance(out, dict)
     assert all(isinstance(v, np.ndarray) for v in out.values())
 
@@ -69,7 +69,7 @@ def test_sparse_return_array_is_csr(frame, y):
 
 def test_sparse_dict_blocks_are_csr(frame, y):
     p = _bspline(output_format="sparse").fit(frame, y)
-    out = p.transform(frame)
+    out = p.transform(frame, return_array=False)
     assert isinstance(out, dict)
     assert all(sp.issparse(v) for v in out.values())
 
@@ -184,8 +184,16 @@ def test_set_output_pandas_fit_transform(frame, y):
     assert out.shape[1] == p.total_output_dim_
 
 
-def test_set_output_default_still_dict(frame, y):
+def test_set_output_default_still_array(frame, y):
+    # set_output(transform="default") only opts out of pandas/polars wrapping; it
+    # does not override output_structure, which still resolves to an array.
     p = _bspline().fit(frame, y).set_output(transform="default")
+    out = p.transform(frame)
+    assert isinstance(out, np.ndarray)
+
+
+def test_set_output_default_with_blocks_structure_is_dict(frame, y):
+    p = _bspline(output_structure="blocks").fit(frame, y).set_output(transform="default")
     out = p.transform(frame)
     assert isinstance(out, dict)
 

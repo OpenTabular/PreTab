@@ -1,10 +1,11 @@
 # Inside an sklearn Pipeline
 
-The high-level `Preprocessor` returns a dict by default, so it is used as an explicit
-feature-building step (call it with `return_array=True`, then fit the model on the arrays).
-The **standalone transformers**, on the other hand, return plain arrays and follow the
-`sklearn` API exactly, so they drop straight into a `ColumnTransformer` and `Pipeline`, and
-work with `cross_val_score`, `GridSearchCV`, and every other `sklearn` utility.
+The **standalone transformers** return plain arrays and follow the `sklearn` API exactly, so
+they drop straight into a `ColumnTransformer` and `Pipeline`, and work with
+`cross_val_score`, `GridSearchCV`, and every other `sklearn` utility. The high-level
+`Preprocessor` composes the same way (it returns a single stacked array by default), but this
+page focuses on wiring each column's transformer by hand for fine-grained, per-transformer
+control: addressable hyperparameters (`step__param`), one estimator per column.
 
 This tutorial builds the regression task from the
 [nonlinear regression tutorial](nonlinear_regression.md) as a single, self-contained
@@ -110,11 +111,12 @@ Every pretab transformer participates in the search grid just like a native `skl
 ## When to use which
 
 - **Standalone transformers** (this page) compose inside one `Pipeline` and integrate with
-  cross-validation and grid search. Reach for them when you want a single estimator object.
-- **The `Preprocessor`** (the [nonlinear regression tutorial](nonlinear_regression.md)) reads
-  a `DataFrame`, detects feature types automatically, and configures every column from a
-  single config. Reach for it when you want per-column strategies without wiring each one by
-  hand.
+  cross-validation and grid search, with each column's transformer addressable individually
+  (`step__param`). Reach for them when you want fine control over one column's transformer.
+- **The `Preprocessor`** (the [nonlinear regression tutorial](nonlinear_regression.md)) also
+  composes inside a `Pipeline` (it returns a single stacked array by default), reads a
+  `DataFrame`, detects feature types automatically, and configures every column from a single
+  config. Reach for it when you want per-column strategies without wiring each one by hand.
 
 ## Next steps
 

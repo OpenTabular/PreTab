@@ -56,15 +56,15 @@ y = np.random.randn(100)
 
 # One strategy per feature type: PLE for numerics, integer codes for categoricals
 pre = Preprocessor(numerical_method="ple", categorical_method="int")
-X = pre.fit_transform(df, y)          # dict of model-ready feature blocks
-
-{k: v.shape for k, v in X.items()}
-# {'num_age': (100, 7), 'num_income': (100, 7), 'cat_city': (100, 1)}
+X = pre.fit_transform(df, y)          # single stacked, model-ready array
+X.shape
+# (100, 15)
 ```
 
-`Preprocessor` detects the column types, fits a strategy per column, and returns model-ready
-arrays, either as a dict of blocks or, with `return_array=True`, a single stacked matrix.
-Inspect the resolved layout at any time with `get_feature_info(verbose=True)`:
+`Preprocessor` detects the column types, fits a strategy per column, and returns a single
+stacked, model-ready array by default, so it drops straight into a plain
+`sklearn.pipeline.Pipeline`; pass `output_structure="blocks"` for a dict of per-feature blocks
+instead. Inspect the resolved layout at any time with `get_feature_info(verbose=True)`:
 
 ```text
 feature  kind         pipeline                        dim   cats
