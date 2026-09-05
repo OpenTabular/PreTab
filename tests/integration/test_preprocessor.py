@@ -343,3 +343,21 @@ def test_output_dims_and_total_before_fit_raise():
         _ = Preprocessor().output_dims_
     with pytest.raises(NotFittedError):
         _ = Preprocessor().total_output_dim_
+
+
+# --- Documented categorical_method values are actually accepted (docstring/registry drift) ---
+
+_DOCUMENTED_CATEGORICAL_METHODS = ["int", "one-hot", "onehot_from_ordinal", "pretrained", "none"]
+
+
+@pytest.mark.parametrize("method", _DOCUMENTED_CATEGORICAL_METHODS)
+def test_documented_categorical_method_is_accepted(sample_data, method):
+    # Regression guard: the docstring's categorical_method list once claimed
+    # "custombin" was valid, but the registry rejected it (numerical-only).
+    if method == "pretrained":
+        pytest.importorskip("sentence_transformers")
+    X, y = sample_data
+    if method == "onehot_from_ordinal":
+        # Requires already-integer-coded categorical input.
+        X = X.assign(cat1=pd.factorize(X["cat1"])[0], cat2=pd.factorize(X["cat2"])[0])
+    Preprocessor(numerical_method="none", categorical_method=method).fit(X, y)

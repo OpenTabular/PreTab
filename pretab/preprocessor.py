@@ -115,9 +115,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Preprocessing strategy applied to every categorical column unless overridden per feature.
         Choices: ``"int"`` (contiguous integer codes), ``"one-hot"`` (dummy columns),
         ``"onehot_from_ordinal"`` (one-hot from an already integer-coded column; raises if the
-        input is not already ordinal-encoded), ``"pretrained"`` (sentence-transformer language
-        embeddings), and ``"custombin"`` (discretized bin codes). Pass ``None`` (resolved to
-        ``"none"``) to leave categorical columns unchanged.
+        input is not already ordinal-encoded), and ``"pretrained"`` (sentence-transformer
+        language embeddings). Pass ``None`` (resolved to ``"none"``) to leave categorical
+        columns unchanged.
     feature_preprocessing : dict, optional
         Mapping of individual column names to a method, overriding the global ``numerical_method`` /
         ``categorical_method`` for those columns only, e.g.
@@ -306,7 +306,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"mspline"``, ``"ispline"``.
 
     Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
-    ``"pretrained"``, ``"custombin"``, ``"none"``. The ``"pretrained"`` method requires the optional
+    ``"pretrained"``, ``"none"``. The ``"pretrained"`` method requires the optional
     ``sentence-transformers`` dependency (``pip install "pretab[embeddings]"``).
 
     Method names are resolved case-insensitively and ignore ``-`` / ``_`` / space separators, so
