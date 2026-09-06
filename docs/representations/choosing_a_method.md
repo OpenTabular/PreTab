@@ -74,7 +74,6 @@ Very small samples
 and rely on a scaled input.
 
 Extrapolation beyond the fitted range
-Extrapolation beyond the fitted range
 : Bases are fitted on the training range, and each spline family has its own default
   transform-time behavior for values beyond it: B/M/I-spline, P-spline, and tensor-product
   clip to the fitted range, while natural-cubic and cubic-regression extrapolate smoothly
