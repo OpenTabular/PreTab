@@ -7,6 +7,22 @@ This project adheres to [Semantic Versioning](https://semver.org/) and uses
 
 Going forward, this file is updated automatically by `cz bump` on each release.
 
+## Unreleased
+
+### Fix
+
+- Require scikit-learn >=1.6, matching the validation and estimator-tag APIs used by the implementation.
+- Preserve NumPy 1.24 support in natural-spline penalties and add minimum-dependency CI coverage.
+- Keep fitted fingerprints stable across inference batches and lifecycle annotations.
+- Prevent `fit` and `fit_transform` from overwriting frozen preprocessors.
+- Compare representation-search candidates on identical cross-validation folds.
+- Reject invalid cross-fitting task names instead of silently using regression folds.
+- Bypass estimator `__new__` hooks when reconstructing serialized state.
+- Exercise installed wheels in isolation and run the full quickstart before publishing.
+- Require the tagged revision to pass CI and documentation checks before either publishing workflow uploads artifacts.
+- Correct contributor commands, README examples, classification configuration, and migration guidance.
+- Clarify serialization support and trust requirements, and execute introductory documentation examples in tests.
+
 ## v1.0.0rc3 (2026-09-01)
 
 ### Fix
@@ -47,9 +63,9 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 - **core**: raise on mismatched input_features length in get_feature_names_out (issue #21)
 - **locations**: keep importance aligned with locations after sort/dedupe (issue #21)
 - keep location provided by tree when suplementing
--  provide appropriate error for onehot_from_ordinal input
+- provide appropriate error for onehot_from_ordinal input
 - **splines,transformers**: close B-spline final span and fix ContinuousOrdinalTransformer DataFrame input (issues #12, #14)
-- **selectors**: make _enforce_spacing order-independent to fix lightgbm clustering (issue #10)
+- **selectors**: make \_enforce_spacing order-independent to fix lightgbm clustering (issue #10)
 
 ### Perf
 
@@ -133,7 +149,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Refactor
 
-- **core**: rename typing module to _typing and add estimator protocols
+- **core**: rename typing module to \_typing and add estimator protocols
 - **transformers**: move Fourier and kernel-approximation maps into feature_maps/
 - **transformers**: rename core transformers, drop temporal utils
 - **compose**: add capability registry and slim preprocessor
@@ -143,7 +159,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 - remove dead selection helpers
 - **ple**: use location selectors for thresholds
 - add shared resolve_locations helper
-- **feature_maps**: move strategy/task validation from __init__ to fit
+- **feature_maps**: move strategy/task validation from `__init__` to fit
 - **transformers**: drop utils, move BaseCenterExpansion ti feature_maps
 - **preprocessor**: make it a compliant sklearn estimator
 - canonicalize pipeline kwargs to avoid deprecation warnings
