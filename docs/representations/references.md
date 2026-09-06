@@ -17,6 +17,15 @@ These two papers introduce the P-spline (B-spline basis with a difference penalt
 tensor-product extension, which underpin `PSplineTransformer` and
 `TensorProductSplineTransformer`.
 
+Kumar, M., Thielmann, A. F., Weisser, C., and Säfken, B. (2026). From uniform to learned
+knots: A study of spline-based numerical encodings for tabular deep learning. _Transactions
+on Machine Learning Research_. <https://openreview.net/pdf?id=str7wQt9Qc>
+
+This study compares uniform and learned knot placement for spline-based numerical encodings
+against piecewise-linear encoding across regression and classification tasks, and motivates
+the `Preprocessor`'s task-dependent preset default: `"bspline"` for regression, `"ple"` for
+classification. See [Presets](../core_concepts/configuration.md#presets).
+
 ## Thin-plate and generalized additive models
 
 Wahba, G. (1990). _Spline Models for Observational Data_. Society for Industrial and Applied

@@ -108,13 +108,34 @@ Don't infer the resolved method per column from the constructor arguments alone.
 
 Presets are transparent, named bundles of parameters for common intents. They set the same
 knobs you could set by hand, so nothing is hidden, and each one resolves to a fixed,
-documented set of values:
+documented set of values. `numerical_method` is the one exception: every preset resolves it
+from `task` instead of a fixed value, since a spline basis and piecewise-linear encoding suit
+regression and classification differently.
 
-| Preset       | `numerical_method` | `categorical_method` | `output_dim` | `adaptive` | `max_output_dim` |
-| ------------ | ------------------ | -------------------- | ------------ | ---------- | ---------------- |
-| `"standard"` | `"ple"`            | `"int"`              | `7`          | `False`    | `10`             |
-| `"expanded"` | `"ple"`            | `"one-hot"`          | `16`         | `False`    | `10`             |
-| `"adaptive"` | `"ple"`            | `"int"`              | `7`          | `True`     | `16`             |
+| Preset       | `numerical_method` | `categorical_method` | `output_dim` | `adaptive` | `min_output_dim` | `max_output_dim` |
+| ------------ | ------------------ | -------------------- | ------------ | ---------- | ---------------- | ---------------- |
+| `"standard"` | task-dependent     | `"int"`              | `7`          | `False`    | -                | -                |
+| `"expanded"` | task-dependent     | `"one-hot"`          | `10`         | `False`    | -                | -                |
+| `"adaptive"` | task-dependent     | `"int"`              | -            | `True`     | `7`              | `15`             |
+
+`numerical_method` resolves to `"bspline"` when `task="regression"` (the default) and to
+`"ple"` when `task="classification"`, for every preset:
+
+```python
+standard_regression = Preprocessor(preset="standard", task="regression")
+standard_classification = Preprocessor(preset="standard", task="classification")
+
+standard_regression.get_resolved_config()["numerical_method"]        # "bspline"
+standard_classification.get_resolved_config()["numerical_method"]    # "ple"
+```
+
+```{note}
+The regression/classification split follows Kumar et al. (2026),
+["From Uniform to Learned Knots: A Study of Spline-Based Numerical Encodings for Tabular Deep
+Learning"](https://openreview.net/pdf?id=str7wQt9Qc), *Transactions on Machine Learning
+Research*. See the [representation references](../representations/references.md) for the full
+citation.
+```
 
 ```python
 standard = Preprocessor(preset="standard")
@@ -122,19 +143,18 @@ expanded = Preprocessor(preset="expanded")
 
 standard.get_resolved_config()["categorical_method"]   # "int": compact integer codes
 expanded.get_resolved_config()["categorical_method"]    # "one-hot": one column per category
-expanded.get_resolved_config()["output_dim"]             # 16: wider representations than "standard"
+expanded.get_resolved_config()["output_dim"]             # 10: wider than "standard"
 ```
 
-So `"standard"` is the balanced default (PLE numerics, integer-coded categoricals, `output_dim=7`),
-`"expanded"` widens the representation and one-hot-encodes categoricals instead, and
-`"adaptive"` lets each feature pick its own width between `min_output_dim` and `max_output_dim`
-rather than using a fixed `output_dim`. The `output_dim=7` shown for `"adaptive"` above is just
-the ordinary fallback default reported by `get_resolved_config()`; the preset itself never sets
-it, and it has no effect since both bounds are set.
+So `"standard"` is the balanced default (`output_dim=7`, integer-coded categoricals),
+`"expanded"` widens the representation to `output_dim=10` and one-hot-encodes categoricals
+instead, and `"adaptive"` lets each feature pick its own width between `min_output_dim=7` and
+`max_output_dim=15` rather than using a fixed `output_dim`.
 
 ```{tip}
 A preset is a starting point, not a lock. Any parameter you pass alongside a preset overrides
-the preset's value for that knob, for example `Preprocessor(preset="expanded", output_dim=32)`.
+the preset's value for that knob, including `numerical_method` itself, for example
+`Preprocessor(preset="expanded", numerical_method="rbf")`.
 ```
 
 ## Reading the resolved configuration

@@ -48,28 +48,37 @@ logger = get_logger(__name__)
 #: sets explicitly overrides the preset. ``__init__`` defaults every parameter listed
 #: here to :data:`~pretab.core.parameters.UNSET` (rather than its ordinary value) so
 #: "left unset" can be told apart from "explicitly passed the same value the default
-#: happens to have" -- see :meth:`Preprocessor._resolved_params`.
+#: happens to have" -- see :meth:`Preprocessor._resolved_params`. ``numerical_method``
+#: is deliberately absent here: every preset resolves it from ``task`` instead, via
+#: :func:`_preset_numerical_method`.
 PRESETS = {
     "standard": {
-        "numerical_method": "ple",
         "categorical_method": "int",
         "output_dim": 7,
         "adaptive": False,
     },
     "expanded": {
-        "numerical_method": "ple",
         "categorical_method": "one-hot",
-        "output_dim": 16,
+        "output_dim": 10,
         "adaptive": False,
     },
     "adaptive": {
-        "numerical_method": "ple",
         "categorical_method": "int",
         "adaptive": True,
-        "min_output_dim": 5,
-        "max_output_dim": 16,
+        "min_output_dim": 7,
+        "max_output_dim": 15,
     },
 }
+
+
+def _preset_numerical_method(task) -> str:
+    """Return the preset numerical method for a given ``task``.
+
+    Splines (``"bspline"``) are the preset default for regression, and piecewise-linear
+    encoding (``"ple"``) remains the default for classification.
+    """
+    return "bspline" if task == "regression" else "ple"
+
 
 #: True ``__init__`` defaults for the parameters presets may override. These are
 #: substituted back in by :meth:`Preprocessor._resolved_params` wherever the
@@ -79,7 +88,7 @@ _PRESET_PARAM_DEFAULTS = {
     "categorical_method": "int",
     "output_dim": 7,
     "adaptive": False,
-    "min_output_dim": 5,
+    "min_output_dim": 7,
     "max_output_dim": 10,
 }
 
@@ -173,7 +182,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
         Fixed-width methods (e.g. plain scalers) ignore this flag. When True and both bounds
         are set, ``output_dim`` itself has no effect (see above).
-    min_output_dim : int, default=5
+    min_output_dim : int, default=7
         Lower bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
         fixed-width methods and when ``adaptive`` is False.
     max_output_dim : int, default=10
@@ -285,10 +294,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     preset : {"standard", "expanded", "adaptive"} or None, default=None
         Optional named configuration bundle applied as a transparent alias. A preset only
         fills in parameters left at their defaults; any parameter set explicitly always wins.
-        ``"standard"`` is the PLE + integer-code baseline, ``"expanded"`` widens the
-        numerical basis and one-hot encodes categoricals, and ``"adaptive"`` sizes each
-        feature's width from the data. Call :meth:`get_resolved_config` to see the effective
-        parameters. ``None`` (default) uses the individual parameters unchanged.
+        Every preset resolves ``numerical_method`` from ``task``: ``"bspline"`` for
+        ``task="regression"``, ``"ple"`` for ``task="classification"``.
+        ``"standard"`` is the balanced baseline, ``"expanded"`` widens the numerical basis
+        and one-hot encodes categoricals, and ``"adaptive"`` sizes each feature's width
+        from the data within ``[7, 15]``. Call :meth:`get_resolved_config` to see the
+        effective parameters. ``None`` (default) uses the individual parameters unchanged.
 
     Attributes
     ----------
@@ -711,6 +722,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         for key, preset_value in PRESETS[preset].items():
             if params.get(key, UNSET) is UNSET:
                 resolved[key] = preset_value
+        if params.get("numerical_method", UNSET) is UNSET:
+            resolved["numerical_method"] = _preset_numerical_method(resolved["task"])
         return resolved
 
     def get_resolved_config(self):

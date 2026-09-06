@@ -33,8 +33,9 @@ literature. Splines can help shallow networks.
 | A general kernel over many inputs | Random Fourier features, Nyström         |
 
 ```{tip}
-When unsure, start with the `"standard"` preset (min-max scaling, PLE for numericals, integer
-categoricals) and compare against a spline. The
+When unsure, start with the `"standard"` preset (min-max scaling, integer categoricals, and
+`numerical_method` resolved from `task`: `"bspline"` for regression, `"ple"` for
+classification) and compare against another method. The
 [comparing representations tutorial](../tutorials/comparing_representations.md) shows how to
 measure the difference instead of guessing.
 ```
