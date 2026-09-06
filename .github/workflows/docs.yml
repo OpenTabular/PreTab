@@ -16,6 +16,7 @@ on:
     # which files changed in the tagged commit.
     branches:
       - main
+      - "release/**"
     tags:
       - "v*.*.*"
 
