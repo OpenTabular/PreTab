@@ -22,6 +22,8 @@ all = ["sentence-transformers>=2.0", "lightgbm>=4.0", "polars>=0.20"]
 homepage = "https://github.com/OpenTabular/PreTab"
 repository = "https://github.com/OpenTabular/PreTab"
 package = "https://pypi.org/project/pretab/"
+documentation = "https://pretab.readthedocs.io/en/latest/"
+issues = "https://github.com/OpenTabular/PreTab/issues"
 
 [tool.poetry]
 packages = [{ include = "pretab" }]
