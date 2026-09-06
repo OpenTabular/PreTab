@@ -7,21 +7,31 @@ This project adheres to [Semantic Versioning](https://semver.org/) and uses
 
 Going forward, this file is updated automatically by `cz bump` on each release.
 
-## Unreleased
+## v1.0.0rc4 (2026-09-06)
+
+### Feat
+
+- default Preprocessor output to a single array
 
 ### Fix
 
-- Require scikit-learn >=1.6, matching the validation and estimator-tag APIs used by the implementation.
-- Preserve NumPy 1.24 support in natural-spline penalties and add minimum-dependency CI coverage.
-- Keep fitted fingerprints stable across inference batches and lifecycle annotations.
-- Prevent `fit` and `fit_transform` from overwriting frozen preprocessors.
-- Compare representation-search candidates on identical cross-validation folds.
-- Reject invalid cross-fitting task names instead of silently using regression folds.
-- Bypass estimator `__new__` hooks when reconstructing serialized state.
-- Exercise installed wheels in isolation and run the full quickstart before publishing.
-- Require the tagged revision to pass CI and documentation checks before either publishing workflow uploads artifacts.
-- Correct contributor commands, README examples, classification configuration, and migration guidance.
-- Clarify serialization support and trust requirements, and execute introductory documentation examples in tests.
+- raise scikit-learn minimum and use scipy trapezoid
+- validate cross-fitting task name
+- reuse identical CV folds across search candidates
+- correct serialization safety claims and bypass __new__ hooks
+- reject fit on a frozen preprocessor
+- clip P-spline and tensor-product out-of-range transforms via policy
+- document periodic transform wrap-around and correct binning docstring
+- add missing polars optional dependency and its tests
+- numerical_method=none no longer applies scaling
+- validate feature_preprocessing keys against input columns
+- remove unimplemented resolution stubs from public placement API
+- raise scikit-learn minimum and use scipy trapezoid
+- use configured dtype in output-budget memory estimate
+- drop unwired policy fields and encoding/embedding NaN bugs
+- **spline**: correct penalty matrices and validate diff_order
+- **ple**: remove boundary-bin discontinuity in PLETransformer
+- **serialize**: reject unsafe classes in from_spec
 
 ## v1.0.0rc3 (2026-09-01)
 
