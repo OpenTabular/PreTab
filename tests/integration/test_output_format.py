@@ -170,7 +170,8 @@ def test_output_report_shape_and_keys(frame, y):
 
 
 def test_set_output_pandas_returns_dataframe(frame, y):
-    p = _bspline().fit(frame, y).set_output(transform="pandas")
+    p = _bspline().fit(frame, y)
+    p.set_output(transform="pandas")
     out = p.transform(frame)
     assert isinstance(out, pd.DataFrame)
     assert list(out.columns) == list(p.get_feature_names_out())
@@ -178,7 +179,8 @@ def test_set_output_pandas_returns_dataframe(frame, y):
 
 
 def test_set_output_pandas_fit_transform(frame, y):
-    p = _bspline().set_output(transform="pandas")
+    p = _bspline()
+    p.set_output(transform="pandas")
     out = p.fit_transform(frame, y)
     assert isinstance(out, pd.DataFrame)
     assert out.shape[1] == p.total_output_dim_
@@ -187,13 +189,15 @@ def test_set_output_pandas_fit_transform(frame, y):
 def test_set_output_default_still_array(frame, y):
     # set_output(transform="default") only opts out of pandas/polars wrapping; it
     # does not override output_structure, which still resolves to an array.
-    p = _bspline().fit(frame, y).set_output(transform="default")
+    p = _bspline().fit(frame, y)
+    p.set_output(transform="default")
     out = p.transform(frame)
     assert isinstance(out, np.ndarray)
 
 
 def test_set_output_default_with_blocks_structure_is_dict(frame, y):
-    p = _bspline(output_structure="blocks").fit(frame, y).set_output(transform="default")
+    p = _bspline(output_structure="blocks").fit(frame, y)
+    p.set_output(transform="default")
     out = p.transform(frame)
     assert isinstance(out, dict)
 
@@ -213,18 +217,20 @@ def test_set_output_polars_without_polars_raises(frame, y):
 
 
 def test_set_output_polars_dataframe_is_correct(frame, y):
-    pl = pytest.importorskip("polars")
+    pytest.importorskip("polars")
+    import polars as pl  # type: ignore
 
     arr = _bspline().fit(frame, y).transform(frame, return_array=True)
     assert isinstance(arr, np.ndarray)
 
     p = _bspline().fit(frame, y)
-    out = p.set_output(transform="polars").transform(frame)
+    p.set_output(transform="polars")
+    out = p.transform(frame)
 
     assert isinstance(out, pl.DataFrame)
-    assert out.shape == (len(frame), p.total_output_dim_)
-    assert out.columns == list(p.get_feature_names_out())
-    np.testing.assert_allclose(out.to_numpy(), arr)
+    assert out.shape == (len(frame), p.total_output_dim_)  # type: ignore
+    assert out.columns == list(p.get_feature_names_out())  # type: ignore
+    np.testing.assert_allclose(out.to_numpy(), arr)  # type: ignore
 
 
 # --- validation ----------------------------------------------------------------
