@@ -85,6 +85,16 @@ random basis independent of the data, while Nyström samples landmarks from the 
 When in doubt, try both and compare with cross-validation.
 ```
 
+```{note}
+Nyström's approximation error is not uniformly bounded across the kernel matrix. In
+particular, the self-similarity entries $K(x, x)$ on the diagonal can be approximated far
+less accurately than typical off-diagonal entries, depending on how well the sampled
+landmarks happen to cover that row. This is an inherent property of the Nyström method
+itself (also present in plain `sklearn.kernel_approximation.Nystroem`), not something
+specific to PreTab's wrapper. If your downstream model is sensitive to diagonal accuracy,
+increase `n_components` or try random Fourier features instead.
+```
+
 ```{warning}
 Random Fourier features and Nyström are multivariate and operate on the whole input matrix.
 They are not available as a per-column `numerical_method`; fit them standalone or combine them
