@@ -42,10 +42,18 @@ to use the `pretrained` categorical strategy.
 ```
 
 The `lightgbm` extra enables the gradient-boosted `placement_strategy="lightgbm"` for
-supervised knot, center, and threshold selection:
+supervised knot, center, and threshold selection. By default, PreTab uses the built-in
+`"cart"` strategy for target-aware placement, so LightGBM is only needed when you
+explicitly opt into the boosted strategy:
 
 ```bash
 pip install "pretab[lightgbm]"
+```
+
+```{note}
+The `lightgbm` extra is required only for `placement_strategy="lightgbm"`. If you do
+not set that strategy explicitly, PreTab uses the default `"cart"` path and does not
+need the optional dependency installed.
 ```
 
 The `polars` extra enables `set_output(transform="polars")`, so `Preprocessor.transform`
