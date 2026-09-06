@@ -343,6 +343,12 @@ preprocessor.get_feature_info(verbose=True)      # resolved strategies, widths, 
 lineage = preprocessor.get_feature_lineage()     # one record per output column
 ```
 
+> **Tip:** Pass `verbose=1` (or higher) to `Preprocessor` for fit-time logging through the
+> shared `"pretab"` logger, including a one-line summary of the resolved method(s) per
+> feature kind. See
+> [Outputs and inspection](https://pretab.readthedocs.io/en/latest/core_concepts/outputs_and_inspection.html#fit-time-logging)
+> for the full level reference.
+
 ### Leakage-safe supervised representations
 
 Methods like `PLETransformer` place their bins using the target. PreTab warns when a

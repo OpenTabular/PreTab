@@ -45,6 +45,37 @@ not need to state whether a column is numerical or categorical; PreTab already k
 feature-type detection.
 ```
 
+### Columns not listed in `feature_preprocessing`
+
+`feature_preprocessing` only overrides the columns it names. Any numerical column left out
+falls back to `numerical_method`, and any categorical column left out falls back to
+`categorical_method`. This is real method resolution, not just a logging detail: the fallback
+column is fit with the global default's transformer, exactly as if you had listed it yourself.
+
+```python
+pre = Preprocessor(
+    numerical_method="bspline",          # applies to every numerical column not listed below
+    feature_preprocessing={
+        "income": "rbf",                 # overrides the default for this one column
+        "city": "one-hot",
+    },
+).fit(df, y)
+```
+
+| Column   | Kind        | Listed in `feature_preprocessing`? | Resolved method                     |
+| -------- | ----------- | ---------------------------------- | ----------------------------------- |
+| `age`    | numerical   | no                                 | `bspline` (from `numerical_method`) |
+| `income` | numerical   | yes, `"rbf"`                       | `rbf`                               |
+| `city`   | categorical | yes, `"one-hot"`                   | `one-hot`                           |
+| `region` | categorical | no                                 | `int` (from `categorical_method`)   |
+
+```{tip}
+Don't infer the resolved method per column from the constructor arguments alone. Call
+`get_feature_info(verbose=True)` after `fit` for the definitive per-column table, or set
+`verbose=2` (or higher) on the `Preprocessor` to log the same table at fit time. See
+[Fit-time logging](outputs_and_inspection.md#fit-time-logging).
+```
+
 ## Presets
 
 Presets are transparent, named bundles of parameters for common intents. They set the same
@@ -113,17 +144,18 @@ representation.
 The parameters below are the ones you reach for most. Each links to the page that explains it
 in depth.
 
-| Parameter                                                                 | Default                                | Covered in                                              |
-| ------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------- |
-| `numerical_method`, `categorical_method`                                  | `"ple"`, `"int"`                       | this page                                               |
-| `feature_preprocessing`                                                   | `None`                                 | this page                                               |
-| `output_dim`                                                              | `7`                                    | [Resolution and placement](resolution_and_placement.md) |
-| `adaptive`, `min_output_dim`, `max_output_dim`                            | `False`, `5`, `10`                     | [Resolution and placement](resolution_and_placement.md) |
-| `target_aware`, `placement_strategy`                                      | `True`, `"cart"`                       | [Target awareness](target_awareness.md)                 |
-| `numerical_imputation`, `categorical_imputation`, `add_missing_indicator` | `"median"`, `"most_frequent"`, `False` | [Missing values](missing_values.md)                     |
-| `output_format`, `dtype`                                                  | `"dense"`, `None`                      | [Outputs and inspection](outputs_and_inspection.md)     |
-| `output_structure`                                                        | `"matrix"`                             | [Outputs and inspection](outputs_and_inspection.md)     |
-| `random_state`                                                            | `None`                                 | [Reproducibility](reproducibility.md)                   |
+| Parameter                                                                 | Default                                | Covered in                                                           |
+| ------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
+| `numerical_method`, `categorical_method`                                  | `"ple"`, `"int"`                       | this page                                                            |
+| `feature_preprocessing`                                                   | `None`                                 | this page                                                            |
+| `output_dim`                                                              | `7`                                    | [Resolution and placement](resolution_and_placement.md)              |
+| `adaptive`, `min_output_dim`, `max_output_dim`                            | `False`, `5`, `10`                     | [Resolution and placement](resolution_and_placement.md)              |
+| `target_aware`, `placement_strategy`                                      | `True`, `"cart"`                       | [Target awareness](target_awareness.md)                              |
+| `numerical_imputation`, `categorical_imputation`, `add_missing_indicator` | `"median"`, `"most_frequent"`, `False` | [Missing values](missing_values.md)                                  |
+| `output_format`, `dtype`                                                  | `"dense"`, `None`                      | [Outputs and inspection](outputs_and_inspection.md)                  |
+| `output_structure`                                                        | `"matrix"`                             | [Outputs and inspection](outputs_and_inspection.md)                  |
+| `verbose`                                                                 | `0`                                    | [Outputs and inspection](outputs_and_inspection.md#fit-time-logging) |
+| `random_state`                                                            | `None`                                 | [Reproducibility](reproducibility.md)                                |
 
 ## Where to go next
 

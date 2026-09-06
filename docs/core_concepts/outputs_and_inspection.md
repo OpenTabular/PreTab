@@ -301,6 +301,74 @@ income   numerical    imputer -> minmax -> ple         12      -
 city     categorical  imputer -> onehot -> to_float     4      4
 ```
 
+`verbose=True` is the default, so `get_feature_info()` both logs that table and returns the
+same data as a tuple of dicts, one per feature kind, keyed by input column name:
+
+```python
+pre.get_feature_info()
+```
+
+```text
+feature  kind         pipeline                        dim   cats
+----------------------------------------------------------------
+age      numerical    imputer -> minmax -> bspline      7      -
+income   numerical    imputer -> minmax -> rbf           7      -
+city     categorical  imputer -> onehot -> to_float      3      3
+```
+
+```python
+(
+    {"age": {"preprocessing": "imputer -> minmax -> bspline", "dimension": 7, "categories": None},
+     "income": {"preprocessing": "imputer -> minmax -> rbf", "dimension": 7, "categories": None}},
+    {"city": {"preprocessing": "imputer -> onehot -> to_float", "dimension": 3, "categories": 3}},
+    {},
+)
+```
+
+```{tip}
+`get_feature_info()` is a handy, no-setup way to check exactly what happened to each feature:
+which pipeline it went through, how many output columns it produced, and (for categoricals)
+how many categories were seen. Pass `verbose=False` to get just the returned dicts, silently.
+For other fitted details (total output width, per-feature output counts, the last
+`transform`'s memory report), see the `Preprocessor` **Attributes** in the
+[API reference](../api/preprocessor.rst).
+```
+
+## Fit-time logging
+
+`verbose` controls how much `fit` reports through the shared `"pretab"` logger, useful when
+running PreTab inside a larger training script or notebook.
+
+| Level           | What is logged                                                                               |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| `0` (default)   | Nothing, aside from `PretabWarning` data warnings.                                           |
+| `1` (or `True`) | One summary line: feature counts, resolved method(s) per kind, total output width, duration. |
+| `2`             | Also logs the same table `get_feature_info(verbose=True)` builds.                            |
+| `3`             | Also logs internal fitted decisions (bins, knots, centers).                                  |
+
+```python
+Preprocessor(numerical_method="ple", verbose=1).fit(df, y)
+```
+
+```text
+fit complete: 2 numerical (ple) + 1 categorical (int) feature(s) -> 15 output columns in 0.02s
+```
+
+```{note}
+When `feature_preprocessing` overrides make columns of the same kind resolve to different
+methods, the summary reports `mixed: <method>, <method>, ...` instead of a single name, so the
+log line never misrepresents which method actually ran on a given feature. For the definitive,
+per-column answer, use `get_feature_info(verbose=True)` (level `2` logs the same table).
+```
+
+```{tip}
+This also covers columns left out of `feature_preprocessing` entirely: they resolve to the
+global `numerical_method` / `categorical_method` for their kind, and show up in the same
+`mixed: ...` summary whenever a sibling column of that kind was overridden. See
+[Columns not listed in feature_preprocessing](configuration.md#columns-not-listed-in-feature_preprocessing)
+for a worked example.
+```
+
 ## Feature lineage
 
 Lineage is the flagship inspection feature. `get_feature_lineage()` returns one record per
