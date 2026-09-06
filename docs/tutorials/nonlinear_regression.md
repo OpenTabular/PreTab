@@ -121,13 +121,13 @@ print(f"MAE: {mean_absolute_error(y_test, pred):.2f}")
 
 ```text
 features: 40
-R2:  0.979
-MAE: 1.85
+R2:  0.983
+MAE: 1.78
 ```
 
 The data and the `Ridge` model are unchanged, but the expressive features let it capture the
-nonlinear structure. The $R^2$ jumps from `0.124` to `0.979` and the mean absolute error drops
-from `11.20` to `1.85`.
+nonlinear structure. The $R^2$ jumps from `0.124` to `0.983` and the mean absolute error drops
+from `11.20` to `1.78`.
 
 ```{tip}
 `Preprocessor.transform` returns a single stacked array by default, so it drops straight into
