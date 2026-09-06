@@ -15,7 +15,8 @@ dynamic = ["dependencies"]
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=2.0"]
 lightgbm = ["lightgbm>=4.0"]
-all = ["sentence-transformers>=2.0", "lightgbm>=4.0"]
+polars = ["polars>=0.20"]
+all = ["sentence-transformers>=2.0", "lightgbm>=4.0", "polars>=0.20"]
 
 [project.urls]
 homepage = "https://github.com/OpenTabular/PreTab"
@@ -32,7 +33,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.dependencies]
 numpy = ">=1.24,<3.0"
 pandas = ">=2.0,<3.0"
-scikit-learn = ">=1.3,<2.0"
+scikit-learn = ">=1.6,<2.0"
 scipy = ">=1.10,<2.0"
 
 [tool.poetry.group.dev.dependencies]

@@ -2,17 +2,18 @@
 
 Every PreTab expansion exposes the same sizing vocabulary: a fixed ``output_dim``
 plus an optional adaptive window ``[min_output_dim, max_output_dim]``. Resolving
-that vocabulary into an inclusive ``(lo, hi)`` count window -- and validating it
-against a family floor / ceiling -- is a single concern that does not depend on
+that vocabulary into an inclusive ``(lo, hi)`` count window (and validating it
+against a family floor / ceiling) is a single concern that does not depend on
 *where* the units land. Keeping it here, apart from the placement strategies in
 :mod:`pretab.placement.unsupervised` / :mod:`pretab.placement.supervised`, lets a
 family combine any resolution policy with any placement strategy.
 
 :class:`FixedResolution` implements the ``output_dim`` / ``[min, max]`` contract
 shared by every family today. :class:`CardinalityAwareResolution` and
-:class:`DataSizeAwareResolution` are declared as forward-looking stubs (their
-data-driven ``(lo, hi)`` policies are scheduled for a later phase) so the
-registry and factory can name them without importing from a moving target.
+:class:`DataSizeAwareResolution` are internal, not-yet-implemented stubs for a
+future data-driven ``(lo, hi)`` policy; every method on both currently raises
+``NotImplementedError``, and neither is part of the public ``pretab.placement``
+API (they are not re-exported from :mod:`pretab.placement`'s ``__all__``).
 """
 
 from __future__ import annotations
@@ -25,8 +26,6 @@ from ..exceptions import IncompatibleParamsError, InvalidParamError
 
 __all__ = [
     "BaseResolutionPolicy",
-    "CardinalityAwareResolution",
-    "DataSizeAwareResolution",
     "FixedResolution",
 ]
 
@@ -119,8 +118,8 @@ class FixedResolution(BaseResolutionPolicy):
 class CardinalityAwareResolution(BaseResolutionPolicy):
     """Stub: cap the unit count by the feature's distinct-value count.
 
-    Scheduled for a later phase. Declared now so the capability registry and
-    placement factory can reference it by name.
+    Internal, not-yet-implemented placeholder for a future phase; not part of the
+    public ``pretab.placement`` API.
     """
 
     def resolve(
@@ -143,8 +142,8 @@ class CardinalityAwareResolution(BaseResolutionPolicy):
 class DataSizeAwareResolution(BaseResolutionPolicy):
     """Stub: scale the unit count with the number of samples.
 
-    Scheduled for a later phase. Declared now so the capability registry and
-    placement factory can reference it by name.
+    Internal, not-yet-implemented placeholder for a future phase; not part of the
+    public ``pretab.placement`` API.
     """
 
     def resolve(

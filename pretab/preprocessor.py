@@ -115,9 +115,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Preprocessing strategy applied to every categorical column unless overridden per feature.
         Choices: ``"int"`` (contiguous integer codes), ``"one-hot"`` (dummy columns),
         ``"onehot_from_ordinal"`` (one-hot from an already integer-coded column; raises if the
-        input is not already ordinal-encoded), ``"pretrained"`` (sentence-transformer language
-        embeddings), and ``"custombin"`` (discretized bin codes). Pass ``None`` (resolved to
-        ``"none"``) to leave categorical columns unchanged.
+        input is not already ordinal-encoded), and ``"pretrained"`` (sentence-transformer
+        language embeddings). Pass ``None`` (resolved to ``"none"``) to leave categorical
+        columns unchanged.
     feature_preprocessing : dict, optional
         Mapping of individual column names to a method, overriding the global ``numerical_method`` /
         ``categorical_method`` for those columns only, e.g.
@@ -233,6 +233,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         :class:`~pretab.exceptions.OutputBudgetError`, ``"warn"`` emits a
         :class:`~pretab.exceptions.ConfigWarning`, ``"ignore"`` proceeds silently.
         Only takes effect when at least one budget parameter above is set.
+    output_structure : {"matrix", "blocks"}, default="matrix"
+        Top-level shape ``transform`` / ``fit_transform`` return when ``return_array`` is not
+        passed explicitly. ``"matrix"`` (the default) returns a single stacked array, so a
+        plain ``sklearn.pipeline.Pipeline([("pretab", Preprocessor(...)), ("model",
+        estimator)])`` composes like any other transformer. ``"blocks"`` returns the dict of
+        per-feature blocks instead (the library's pre-1.0 default), useful for inspection or
+        when a downstream step consumes named blocks directly. Passing ``return_array``
+        explicitly to ``transform`` / ``fit_transform`` always overrides this setting.
     output_format : {"dense", "sparse", "auto"}, default="dense"
         Container used for the transformed output. ``"dense"`` (the default, for
         backward compatibility) returns NumPy arrays; ``"sparse"`` returns SciPy
@@ -298,7 +306,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"mspline"``, ``"ispline"``.
 
     Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
-    ``"pretrained"``, ``"custombin"``, ``"none"``. The ``"pretrained"`` method requires the optional
+    ``"pretrained"``, ``"none"``. The ``"pretrained"`` method requires the optional
     ``sentence-transformers`` dependency (``pip install "pretab[embeddings]"``).
 
     Method names are resolved case-insensitively and ignore ``-`` / ``_`` / space separators, so
@@ -307,8 +315,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
     ``"polynomial"``, ``"thin-plate"`` -> ``"tprs"``, and ``"passthrough"`` -> ``"none"``.
 
-    ``transform`` returns a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` by
-    default, or a single stacked array when ``return_array=True``.
+    ``transform`` returns a single stacked array by default (``output_structure="matrix"``),
+    or a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` when
+    ``output_structure="blocks"``. Passing ``return_array`` explicitly to ``transform`` /
+    ``fit_transform`` always overrides ``output_structure`` for that call.
 
     Examples
     --------
@@ -320,8 +330,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     >>> y = [0.1, 0.4, 0.9, 1.2]
     >>> pre = Preprocessor()
     >>> out = pre.fit_transform(df, y)
-    >>> sorted(out.keys())
-    ['cat_gender', 'num_age']
+    >>> out.ndim
+    2
 
     Cubic-spline basis for numerics with one-hot encoded categoricals:
 
@@ -340,13 +350,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     >>> pre = Preprocessor(feature_preprocessing={"age": "pspline", "gender": "one-hot"})
     >>> out = pre.fit_transform(df, y)
 
-    Data-driven (adaptive) width, returned as a single stacked array:
+    Data-driven (adaptive) width:
 
     >>> pre = Preprocessor(numerical_method="ple", adaptive=True,
     ...                    min_output_dim=4, max_output_dim=12)
-    >>> arr = pre.fit_transform(df, y, return_array=True)
+    >>> arr = pre.fit_transform(df, y)
     >>> arr.ndim
     2
+
+    Per-feature blocks instead of a single matrix:
+
+    >>> pre = Preprocessor(output_structure="blocks")
+    >>> out = pre.fit_transform(df, y)
+    >>> sorted(out.keys())
+    ['cat_gender', 'num_age']
     """
 
     def __init__(
@@ -375,6 +392,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         max_features_per_input=None,
         max_dense_memory=None,
         overflow_policy="error",
+        output_structure="matrix",
         output_format="dense",
         dtype=None,
         verbose=0,
@@ -411,6 +429,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.max_features_per_input = max_features_per_input
         self.max_dense_memory = max_dense_memory
         self.overflow_policy = overflow_policy
+        self.output_structure = output_structure
         self.output_format = output_format
         self.dtype = dtype
         self.verbose = verbose
@@ -466,6 +485,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         X = to_dataframe(X)
 
+        if self.feature_preprocessing:
+            unknown_features = set(self.feature_preprocessing) - set(X.columns)
+            if unknown_features:
+                raise invalid_param_error(
+                    type(self).__name__,
+                    "feature_preprocessing",
+                    sorted(unknown_features),
+                    "every key must name a column present in X",
+                    valid=X.columns,
+                )
+
         if self.missing_policy == "error":
             self._reject_missing(X)
 
@@ -497,6 +527,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 self.output_format,
                 "must be one of 'auto', 'dense', 'sparse'",
                 valid=set(valid_formats),
+            )
+
+        valid_structures = ("matrix", "blocks")
+        if self.output_structure not in valid_structures:
+            raise invalid_param_error(
+                type(self).__name__,
+                "output_structure",
+                self.output_structure,
+                "must be one of 'matrix', 'blocks'",
+                valid=set(valid_structures),
             )
 
         # Ask ColumnTransformer to assemble the representation in the requested
@@ -533,7 +573,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         return self
 
-    def transform(self, X, embeddings=None, return_array=False):
+    def transform(self, X, embeddings=None, return_array=None):
         """
         Transform the input data using the fitted column transformer.
 
@@ -543,18 +583,22 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             Input features to transform.
         embeddings : np.ndarray or list of np.ndarray, optional
             External embeddings to attach to dictionary output. Required when
-            embeddings were supplied during ``fit`` and unsupported when
-            ``return_array=True`` or :meth:`set_output` requests a DataFrame.
-        return_array : bool, default=False
-            If True, return a single stacked NumPy array. If False, return a dict of transformed arrays.
+            embeddings were supplied during ``fit`` and unsupported when the
+            resolved output is a single array or :meth:`set_output` requests a DataFrame.
+        return_array : bool or None, default=None
+            If True, return a single stacked NumPy array; if False, return a dict of
+            transformed arrays. ``None`` (the default) resolves from ``output_structure``:
+            ``"matrix"`` behaves like ``True``, ``"blocks"`` like ``False``. Pass this
+            explicitly to override ``output_structure`` for a single call.
 
         Returns
         -------
         dict, np.ndarray, scipy.sparse matrix, or DataFrame
-            Transformed data. By default a dictionary of per-feature blocks; a
-            single stacked array when ``return_array=True``; a SciPy CSR matrix (or
-            CSR blocks) when ``output_format`` resolves to ``"sparse"``; or a pandas
-            / polars DataFrame when configured via :meth:`set_output`.
+            Transformed data. A single stacked array by default (``output_structure=
+            "matrix"``); a dict of per-feature blocks when ``output_structure="blocks"``
+            (or ``return_array=False``); a SciPy CSR matrix (or CSR blocks) when
+            ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
+            when configured via :meth:`set_output`.
         """
 
         check_is_fitted(self)
@@ -564,8 +608,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if self.missing_policy == "error":
             self._reject_missing(X)
 
+        resolved_return_array = (self.output_structure == "matrix") if return_array is None else return_array
+
         container = _get_output_config("transform", self)["dense"]
-        output_kind = container if container in ("pandas", "polars") else ("array" if return_array else "dict")
+        output_kind = container if container in ("pandas", "polars") else ("array" if resolved_return_array else "dict")
         validate_embedding_request(embeddings, expected=self.embeddings_, output_kind=output_kind)
 
         transformed_X = self.column_transformer_.transform(X)
@@ -579,10 +625,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if container in ("pandas", "polars"):
             return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
 
-        slices = None if return_array else get_output_slices(self.column_transformer_)
+        slices = None if resolved_return_array else get_output_slices(self.column_transformer_)
         return format_output(
             transformed_X,
-            return_array=return_array,
+            return_array=resolved_return_array,
             slices=slices,
             embeddings=embeddings,
             embeddings_expected=self.embeddings_,
@@ -590,7 +636,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             output_format=fmt,
         )
 
-    def fit_transform(self, X, y=None, embeddings=None, return_array=False):
+    def fit_transform(self, X, y=None, embeddings=None, return_array=None):
         """
         Convenience method that fits the preprocessor and transforms the data.
 
@@ -602,8 +648,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             Target values.
         embeddings : np.ndarray or list of np.ndarray, optional
             Optional embedding arrays.
-        return_array : bool, default=False
-            Whether to return a stacked NumPy array or a dictionary of arrays.
+        return_array : bool or None, default=None
+            Whether to return a stacked NumPy array or a dictionary of arrays. ``None``
+            (the default) resolves from ``output_structure``.
 
         Returns
         -------
@@ -741,8 +788,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return dims
 
     def _output_itemsize(self) -> int:
-        """Bytes per element of the dense transformed array (float64 for now)."""
-        return np.dtype(np.float64).itemsize
+        """Bytes per element of the dense transformed array.
+
+        Reflects the configured ``dtype`` when set (the cast :meth:`transform`
+        actually applies); falls back to ``float64``, the natural output dtype
+        of most representations when no cast is requested.
+        """
+        return np.dtype(self.dtype if self.dtype is not None else np.float64).itemsize
 
     def estimate_output_shape(self, X) -> tuple:
         """Estimate the shape of the dense transformed array for ``X``.

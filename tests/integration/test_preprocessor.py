@@ -5,7 +5,7 @@ from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 from sklearn.utils.validation import check_is_fitted
 
-from pretab.exceptions import IncompatibleParamsError, PretabDataError
+from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
 
 
@@ -23,9 +23,18 @@ def sample_data():
     return df, y
 
 
-def test_fit_transform_returns_dict(sample_data):
+def test_fit_transform_returns_array_by_default(sample_data):
     X, y = sample_data
     pre = Preprocessor()
+    out = pre.fit_transform(X, y)
+    assert isinstance(out, np.ndarray)
+    assert out.shape[0] == len(X)
+    assert out.ndim == 2
+
+
+def test_fit_transform_returns_dict_with_blocks_structure(sample_data):
+    X, y = sample_data
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y)
     assert isinstance(out, dict)
     assert all(isinstance(k, str) for k in out)
@@ -53,7 +62,7 @@ def test_transform_raises_before_fit(sample_data):
 def test_embedding_integration(sample_data):
     X, y = sample_data
     embed = np.random.rand(len(X), 10)
-    pre = Preprocessor()
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y, embeddings=embed)
     assert "embedding_1" in out
     assert out["embedding_1"].shape == (len(X), 10)
@@ -62,7 +71,7 @@ def test_embedding_integration(sample_data):
 def test_multiple_embeddings(sample_data):
     X, y = sample_data
     embeds = [np.random.rand(len(X), 3), np.random.rand(len(X), 7)]
-    pre = Preprocessor()
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y, embeddings=embeds)
     assert "embedding_1" in out and "embedding_2" in out
     assert out["embedding_1"].shape[1] == 3
@@ -135,7 +144,7 @@ def test_feature_info_returns_three_dicts(sample_data):
 
 def test_dict_output_shapes_add_up(sample_data):
     X, y = sample_data
-    pre = Preprocessor()
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y)
     assert isinstance(out, dict)
     shapes = [v.shape for v in out.values()]
@@ -144,7 +153,7 @@ def test_dict_output_shapes_add_up(sample_data):
 
 def test_dict_keys_reflect_column_names(sample_data):
     X, y = sample_data
-    pre = Preprocessor()
+    pre = Preprocessor(output_structure="blocks")
     out = pre.fit_transform(X, y)
     assert isinstance(out, dict)
     expected_prefixes = ["num_", "cat_"]
@@ -180,6 +189,7 @@ EXPECTED_PARAMS = {
     "max_features_per_input",
     "max_dense_memory",
     "overflow_policy",
+    "output_structure",
     "output_format",
     "dtype",
     "verbose",
@@ -265,7 +275,7 @@ def test_get_feature_names_out_does_not_duplicate_feature_name(sample_data):
 def test_lowercase_and_none_method_resolution(sample_data):
     X, y = sample_data
     # Mixed-case / None methods are resolved at fit time, not stored on the instance.
-    pre = Preprocessor(numerical_method="PLE", categorical_method=None)  # type: ignore[arg-type]
+    pre = Preprocessor(numerical_method="PLE", categorical_method=None, output_structure="blocks")  # type: ignore[arg-type]
     out = pre.fit_transform(X, y)
     assert isinstance(out, dict)
     assert pre.numerical_method == "PLE"  # unchanged on the instance
@@ -333,3 +343,37 @@ def test_output_dims_and_total_before_fit_raise():
         _ = Preprocessor().output_dims_
     with pytest.raises(NotFittedError):
         _ = Preprocessor().total_output_dim_
+
+
+# --- Documented categorical_method values are actually accepted (docstring/registry drift) ---
+
+_DOCUMENTED_CATEGORICAL_METHODS = ["int", "one-hot", "onehot_from_ordinal", "pretrained", "none"]
+
+
+@pytest.mark.parametrize("method", _DOCUMENTED_CATEGORICAL_METHODS)
+def test_documented_categorical_method_is_accepted(sample_data, method):
+    # Regression guard: the docstring's categorical_method list once claimed
+    # "custombin" was valid, but the registry rejected it (numerical-only).
+    if method == "pretrained":
+        pytest.importorskip("sentence_transformers")
+    X, y = sample_data
+    if method == "onehot_from_ordinal":
+        # Requires already-integer-coded categorical input.
+        X = X.assign(cat1=pd.factorize(X["cat1"])[0], cat2=pd.factorize(X["cat2"])[0])
+    Preprocessor(numerical_method="none", categorical_method=method).fit(X, y)
+
+
+def test_numerical_method_none_leaves_values_untouched():
+    # Regression test: numerical_method="none" used to still run MinMaxScaler
+    # before the no-op, contradicting the documented "leave unchanged" meaning.
+    X = pd.DataFrame({"a": [1.0, 2.0, 3.0, 100.0]})
+    pre = Preprocessor(numerical_method="none").fit(X)
+    out = pre.transform(X)
+    assert isinstance(out, np.ndarray)
+    np.testing.assert_array_equal(out.ravel(), X["a"].to_numpy())
+
+
+def test_unknown_feature_preprocessing_key_raises(sample_data):
+    X, y = sample_data
+    with pytest.raises(InvalidParamError, match="feature_preprocessing"):
+        Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)

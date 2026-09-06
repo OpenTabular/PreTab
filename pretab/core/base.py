@@ -35,6 +35,8 @@ class BasePreTabTransformer(
     (``_policy``). A family narrows individual axes through the ``_constant_policy``
     / ``_out_of_range_policy`` / ``_duplicate_policy`` class attributes (``None``
     means "inherit the shared policy"); :meth:`_resolved_policy` merges them.
+    Transformers that expose their own ``policy`` constructor parameter let a
+    caller override those defaults per-instance; see :meth:`_resolved_policy`.
     """
 
     _allow_nan: bool = True
@@ -54,7 +56,17 @@ class BasePreTabTransformer(
     n_features_in_: int
 
     def _resolved_policy(self) -> RepresentationPolicy:
-        """Return the shared policy narrowed by this family's override attributes."""
+        """Return the effective edge-case policy for this instance.
+
+        An explicit ``policy`` constructor argument, on the transformers that expose
+        one, always wins verbatim over the class-level defaults below. Otherwise, the
+        shared default policy is narrowed by this family's ``_constant_policy`` /
+        ``_out_of_range_policy`` class attributes, which record each family's
+        historical, non-configurable default behavior.
+        """
+        instance_policy = getattr(self, "policy", None)
+        if instance_policy is not None:
+            return RepresentationPolicy.resolve(instance_policy)
         return self._policy.merge(
             constant=self._constant_policy,
             out_of_range=self._out_of_range_policy,

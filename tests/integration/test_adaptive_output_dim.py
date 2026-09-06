@@ -97,7 +97,7 @@ def data():
 def _num_width(X, y, method, **kwargs):
     """Fit a Preprocessor on one numerical feature and return its block width."""
     pre = Preprocessor(numerical_method=method, categorical_method="none", **kwargs)
-    out = cast("dict[str, np.ndarray]", pre.fit(X, y).transform(X))
+    out = cast("dict[str, np.ndarray]", pre.fit(X, y).transform(X, return_array=False))
     return out["num_x"].shape[1]
 
 
@@ -140,7 +140,7 @@ def test_custombin_respects_bin_count(data, output_dim):
     """Numerical ``custombin`` yields a single column of at most output_dim codes."""
     X, y = data
     pre = Preprocessor(numerical_method="custombin", categorical_method="none", output_dim=output_dim)
-    block = cast("dict[str, np.ndarray]", pre.fit(X, y).transform(X))["num_x"]
+    block = cast("dict[str, np.ndarray]", pre.fit(X, y).transform(X, return_array=False))["num_x"]
     assert block.shape[1] == 1
     assert int(block.max()) < output_dim
     assert len(np.unique(block)) <= output_dim

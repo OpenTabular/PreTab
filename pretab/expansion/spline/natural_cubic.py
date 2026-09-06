@@ -1,8 +1,10 @@
 import numpy as np
+from scipy.integrate import trapezoid
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.parameters import UNSET, validate_placement
+from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...core.supervised import warn_target_leakage
 from ...exceptions import InvalidParamError
 from ...placement.adapters import SplinePlacementAdapter
@@ -72,6 +74,13 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
     random_state : int or None, default=None
         Random state forwarded to the target-aware selector for reproducibility.
 
+    policy : RepresentationPolicy, dict, or None, default=None
+        Overrides this family's default ``out_of_range`` behavior (smooth linear
+        extrapolation beyond the fitted range, the natural-spline boundary
+        constraint this family is named for). Pass e.g.
+        ``RepresentationPolicy(out_of_range="clip")`` to clamp instead. Leaving
+        this at ``None`` preserves the historical extrapolation behavior.
+
     Attributes
     ----------
     knots_ : list of ndarray
@@ -130,6 +139,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = None,
+        policy: RepresentationPolicy | dict | None = None,
     ):
         self.output_dim = output_dim
         self.degree = degree
@@ -141,6 +151,7 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
         self.random_state = random_state
+        self.policy = policy
 
     def _basis(self, x, knots):
         x = np.asarray(x).reshape(-1, 1)
@@ -205,10 +216,12 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         check_is_fitted(self, "n_basis_")
         X = self._validate_allow_nan(X, reset=False)
 
+        policy = self._resolved_policy()
         transformed = []
         for i in range(X.shape[1]):
-            xi = X[:, i]
-            basis = self._basis(xi, self.knots_[i])
+            knots = self.knots_[i]
+            xi = resolve_out_of_range(X[:, i], knots[0], knots[-1], policy, estimator=self)
+            basis = self._basis(xi, knots)
             transformed.append(basis)
 
         return np.hstack(transformed)
@@ -244,6 +257,6 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         for i in range(offset, n_basis):
             for j in range(offset, n_basis):
                 integrand = B_dd[:, i] * B_dd[:, j]
-                P[i, j] = np.trapezoid(integrand, x_grid)
+                P[i, j] = trapezoid(integrand, x_grid)
 
         return P

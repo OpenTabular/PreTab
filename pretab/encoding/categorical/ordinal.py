@@ -6,12 +6,23 @@ from ...core.representation import RepresentationSpecMixin
 from ...exceptions import PretabDataError
 
 
+def _is_missing_value(value) -> bool:
+    """Return True for ``None`` or a NaN float; False for any other value."""
+    if value is None:
+        return True
+    try:
+        return bool(np.isnan(value))
+    except TypeError:
+        return False
+
+
 class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
     """Encode categorical features as continuous integer values.
 
     Each unique category within a feature is assigned an integer based on its
-    sorted order. Unknown or missing categories are mapped to ``0``. This is
-    useful for models that can only handle numerical input.
+    sorted order. Unknown, missing (``None`` or NaN), or unseen categories are
+    mapped to ``0``. This is useful for models that can only handle numerical
+    input.
 
     Attributes
     ----------
@@ -21,7 +32,7 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
     Notes
     -----
     Categories are numbered starting at ``1`` in sorted order; the value ``0`` is
-    reserved for categories not seen during ``fit`` (and for ``None``).
+    reserved for categories not seen during ``fit`` (and for ``None`` / NaN).
 
     Examples
     --------
@@ -55,9 +66,16 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         X = np.asarray(X, dtype=object)
         if X.ndim == 1:
             X = X.reshape(-1, 1)
-        self.mapping_ = [{category: i + 1 for i, category in enumerate(np.unique(X[:, j]))} for j in range(X.shape[1])]
-        for mapping in self.mapping_:
-            mapping[None] = 0  # Assign 0 to unknown values
+        self.mapping_ = []
+        for j in range(X.shape[1]):
+            column = X[:, j]
+            # Missing values (None / NaN) are excluded before sorting: np.unique
+            # cannot compare a NaN or None against a string category.
+            non_missing = np.array([v for v in column if not _is_missing_value(v)], dtype=object)
+            categories = np.unique(non_missing) if non_missing.size else np.array([], dtype=object)
+            mapping = {category: i + 1 for i, category in enumerate(categories)}
+            mapping[None] = 0  # Assign 0 to unknown/missing values
+            self.mapping_.append(mapping)
         self.n_features_in_ = len(self.mapping_)
         return self
 

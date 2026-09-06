@@ -71,7 +71,9 @@ def test_fit_transform_invokes_model_encode():
     transformer = LanguageEmbeddingTransformer(model=dummy)
     embeddings = transformer.fit_transform(np.array([["a"], ["b"], ["c"]]))
     assert embeddings.shape == (3, 4)
-    assert dummy.calls == 1
+    # 1 call from fit()'s dimension probe (dummy has no 'dim'/
+    # get_sentence_embedding_dimension) + 1 real encode call from transform().
+    assert dummy.calls == 2
 
 
 def test_transform_multi_column_preserves_row_count():
@@ -81,7 +83,21 @@ def test_transform_multi_column_preserves_row_count():
     transformer = LanguageEmbeddingTransformer(model=dummy)
     embeddings = transformer.fit_transform(np.array([["a", "b"], ["c", "d"], ["e", "f"]]))
     assert embeddings.shape == (3, 8)  # 2 columns x 4-dim embedding
-    assert dummy.calls == 2  # one encode call per column
+    assert dummy.calls == 3  # 1 dimension probe (fit) + 2 real encode calls (transform, one per column)
+
+
+def test_fit_infers_embedding_dim_from_probe_without_introspection_hook():
+    # Regression test: a model exposing only encode() (no 'dim' /
+    # get_sentence_embedding_dimension) used to leave embedding_dim_ at the
+    # default 0, so get_feature_names_out() returned an empty array while
+    # transform() still produced real-width output, a length mismatch.
+    dummy = _DummyModel()
+    transformer = LanguageEmbeddingTransformer(model=dummy)
+    Xt = transformer.fit(np.array([["a"], ["b"]])).transform(np.array([["a"], ["b"]]))
+
+    assert transformer.embedding_dim_ == 4  # matches _DummyModel.encode's output width
+    names = transformer.get_feature_names_out()
+    assert len(names) == Xt.shape[1]
 
 
 @pytest.mark.parametrize(
@@ -97,7 +113,9 @@ def test_transform_rejects_fitted_feature_count_mismatch(X_transform):
 
     with pytest.raises(PretabDataError, match="is expecting 2 features"):
         transformer.transform(X_transform)
-    assert dummy.calls == 0
+    # Only fit()'s dimension probe ran; the shape check in transform() rejects
+    # the mismatched input before any real encode() call.
+    assert dummy.calls == 1
 
 
 def test_fit_without_dependency_raises(monkeypatch):

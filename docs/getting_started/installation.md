@@ -1,6 +1,19 @@
 # Installation
 
-pretab supports Python 3.10 to 3.13.
+pretab supports Python 3.10 to 3.13, with the following minimum core dependency versions:
+
+| Dependency | Minimum |
+| --- | --- |
+| `numpy` | 1.24 |
+| `pandas` | 2.0 |
+| `scipy` | 1.10 |
+| `scikit-learn` | 1.6 |
+
+```{note}
+`scikit-learn>=1.6` is required for the `__sklearn_tags__` tag-dispatch API pretab's
+transformers use. A dedicated CI job installs exactly these minimum versions and runs the
+test suite against them, so this floor is verified, not just declared.
+```
 
 ## From PyPI
 
@@ -29,6 +42,20 @@ supervised knot, center, and threshold selection:
 
 ```bash
 pip install "pretab[lightgbm]"
+```
+
+The `polars` extra enables `set_output(transform="polars")`, so `Preprocessor.transform`
+returns a `polars.DataFrame` instead of a NumPy array or dict:
+
+```bash
+pip install "pretab[polars]"
+```
+
+```{note}
+`polars` is only needed for the `set_output(transform="polars")` output path; every other
+output (`output_structure="matrix"`/`"blocks"`, `output_format="dense"`/`"sparse"`,
+`set_output(transform="pandas")`) works without it. Requesting `"polars"` output without the
+extra installed raises a clear `OptionalDependencyError`.
 ```
 
 Use the convenience `all` extra to install every optional dependency at once:

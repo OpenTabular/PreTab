@@ -85,3 +85,12 @@ def test_legacy_pipeline_package_is_removed():
 def test_compose_subsystem_is_importable():
     for module in ("config", "registry", "factory", "output", "inspection", "feature_detection"):
         importlib.import_module(f"pretab.compose.{module}")
+
+
+def test_py_typed_marker_is_present():
+    # PEP 561 marker: without this, type checkers treat an installed pretab as
+    # untyped by default, losing the benefit of the project's own annotations.
+    import pathlib
+
+    pretab_dir = pathlib.Path(pretab.__file__).parent
+    assert (pretab_dir / "py.typed").is_file()

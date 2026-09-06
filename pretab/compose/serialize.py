@@ -47,7 +47,9 @@ _ALLOWED_TOP_LEVEL = frozenset({"pretab", "sklearn", "numpy", "scipy"})
 # "any dataclass importable under an allowed module" -- the latter would still
 # let a spec construct an arbitrary sklearn/numpy/scipy dataclass with
 # attacker-controlled fields.
-_ALLOWED_DATACLASSES = frozenset({RepresentationPolicy, RepresentationSpec, FeatureLineage, PlacementResult, TransformerSpec})
+_ALLOWED_DATACLASSES = frozenset(
+    {RepresentationPolicy, RepresentationSpec, FeatureLineage, PlacementResult, TransformerSpec}
+)
 
 
 # --- helpers -------------------------------------------------------------
@@ -180,8 +182,7 @@ def _decode_estimator(payload: dict):
     cls = cast(Any, _resolve(payload["class"]))
     if not (isinstance(cls, type) and issubclass(cls, BaseEstimator)):
         raise PretabSerializationError(
-            f"Refusing to reconstruct {payload['class']!r} as an estimator: not a "
-            "scikit-learn BaseEstimator subclass."
+            f"Refusing to reconstruct {payload['class']!r} as an estimator: not a scikit-learn BaseEstimator subclass."
         )
     obj = cls.__new__(cls)
     obj.__dict__.update(_decode_mapping(payload["state"]))

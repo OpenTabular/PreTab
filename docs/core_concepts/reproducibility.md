@@ -38,8 +38,9 @@ restored = Preprocessor.from_spec("representation.json")
 
 ```{important}
 `from_spec` is a safe alternative to pickle. Reconstruction imports only from `pretab`,
-`scikit-learn`, `numpy`, `scipy`, and builtins, and it never executes arbitrary estimator
-code. A spec from an untrusted source cannot run code the way an untrusted pickle can.
+`scikit-learn`, `numpy`, and `scipy`, reconstructs dataclasses only from an exact,
+closed allow-list, and never executes arbitrary estimator code. A spec from an untrusted
+source cannot run code the way an untrusted pickle can.
 ```
 
 A round-trip reproduces `transform` bit-for-bit, so a spec is a faithful, human-readable

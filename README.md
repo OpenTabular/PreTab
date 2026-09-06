@@ -73,10 +73,10 @@ y = np.random.randn(100)
 # Global strategies: PLE for numerics, integer codes for categoricals
 preprocessor = Preprocessor(numerical_method="ple", categorical_method="int")
 
-X = preprocessor.fit_transform(df, y)   # dict of transformed feature blocks
+X = preprocessor.fit_transform(df, y)   # single stacked array, one row per sample
 
-print({k: v.shape for k, v in X.items()})
-# {'num_age': (100, 7), 'num_income': (100, 7), 'cat_city': (100, 1)}
+print(X.shape)
+# (100, 15)
 ```
 
 > **Note:** PreTab accepts a `pandas.DataFrame` or a `numpy.ndarray` and infers numerical
@@ -185,7 +185,7 @@ pip install "pretab[all]"          # both of the above
 ```bash
 git clone https://github.com/OpenTabular/PreTab
 cd PreTab
-pip install -e ".[dev]"
+poetry install
 ```
 
 ## Usage
@@ -209,8 +209,8 @@ preprocessor = Preprocessor(
     task="regression",
 )
 
-X_dict = preprocessor.fit_transform(df, y)               # {"num_age": ..., "cat_city": ...}
-X_array = preprocessor.transform(df, return_array=True)  # single stacked ndarray
+X_array = preprocessor.fit_transform(df, y)              # single stacked ndarray
+X_dict = preprocessor.transform(df, return_array=False)  # {"num_age": ..., "cat_city": ...}
 
 preprocessor.get_feature_info(verbose=True)              # inspect resolved strategies
 ```
@@ -227,8 +227,10 @@ experience  numerical    imputer -> minmax -> quantile     1      -
 city        categorical  imputer -> onehot -> to_float     4      4
 ```
 
-> **Note:** `transform` returns a dict of feature blocks by default (keys prefixed `num_`
-> and `cat_`), or a single stacked array when you pass `return_array=True`.
+> **Note:** `transform` returns a single stacked array by default, so a `Preprocessor` drops
+> straight into a plain `sklearn.pipeline.Pipeline`. Pass `output_structure="blocks"` (or
+> `return_array=False` for a single call) for the dict-of-feature-blocks form instead (keys
+> prefixed `num_` and `cat_`).
 
 ### Standalone transformers
 

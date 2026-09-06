@@ -48,7 +48,7 @@ def test_default_output_format_is_dense(frame, y):
 
 def test_default_dict_blocks_are_dense(frame, y):
     p = _bspline().fit(frame, y)
-    out = p.transform(frame)
+    out = p.transform(frame, return_array=False)
     assert isinstance(out, dict)
     assert all(isinstance(v, np.ndarray) for v in out.values())
 
@@ -69,7 +69,7 @@ def test_sparse_return_array_is_csr(frame, y):
 
 def test_sparse_dict_blocks_are_csr(frame, y):
     p = _bspline(output_format="sparse").fit(frame, y)
-    out = p.transform(frame)
+    out = p.transform(frame, return_array=False)
     assert isinstance(out, dict)
     assert all(sp.issparse(v) for v in out.values())
 
@@ -170,7 +170,8 @@ def test_output_report_shape_and_keys(frame, y):
 
 
 def test_set_output_pandas_returns_dataframe(frame, y):
-    p = _bspline().fit(frame, y).set_output(transform="pandas")
+    p = _bspline().fit(frame, y)
+    p.set_output(transform="pandas")
     out = p.transform(frame)
     assert isinstance(out, pd.DataFrame)
     assert list(out.columns) == list(p.get_feature_names_out())
@@ -178,28 +179,58 @@ def test_set_output_pandas_returns_dataframe(frame, y):
 
 
 def test_set_output_pandas_fit_transform(frame, y):
-    p = _bspline().set_output(transform="pandas")
+    p = _bspline()
+    p.set_output(transform="pandas")
     out = p.fit_transform(frame, y)
     assert isinstance(out, pd.DataFrame)
     assert out.shape[1] == p.total_output_dim_
 
 
-def test_set_output_default_still_dict(frame, y):
-    p = _bspline().fit(frame, y).set_output(transform="default")
+def test_set_output_default_still_array(frame, y):
+    # set_output(transform="default") only opts out of pandas/polars wrapping; it
+    # does not override output_structure, which still resolves to an array.
+    p = _bspline().fit(frame, y)
+    p.set_output(transform="default")
+    out = p.transform(frame)
+    assert isinstance(out, np.ndarray)
+
+
+def test_set_output_default_with_blocks_structure_is_dict(frame, y):
+    p = _bspline(output_structure="blocks").fit(frame, y)
+    p.set_output(transform="default")
     out = p.transform(frame)
     assert isinstance(out, dict)
 
 
 def test_set_output_polars_without_polars_raises(frame, y):
-    import importlib.util
+    # Unit-test to_dataframe_output directly (rather than through the full
+    # Preprocessor.set_output stack): sklearn's own polars detection elsewhere
+    # in that stack also probes sys.modules and breaks under a blanket
+    # sys.modules["polars"] = None patch, unrelated to the behavior under test.
+    import unittest.mock
 
-    p = _bspline().fit(frame, y).set_output(transform="polars")
-    if importlib.util.find_spec("polars") is None:
-        with pytest.raises(OptionalDependencyError):
-            p.transform(frame)
-    else:
-        out = p.transform(frame)
-        assert out.shape == (len(frame), p.total_output_dim_)
+    from pretab.compose.output import to_dataframe_output
+
+    with unittest.mock.patch.dict("sys.modules", {"polars": None}):
+        with pytest.raises(OptionalDependencyError, match="polars"):
+            to_dataframe_output(np.zeros((2, 2)), ["a", "b"], "polars")
+
+
+def test_set_output_polars_dataframe_is_correct(frame, y):
+    pytest.importorskip("polars")
+    import polars as pl  # type: ignore
+
+    arr = _bspline().fit(frame, y).transform(frame, return_array=True)
+    assert isinstance(arr, np.ndarray)
+
+    p = _bspline().fit(frame, y)
+    p.set_output(transform="polars")
+    out = p.transform(frame)
+
+    assert isinstance(out, pl.DataFrame)
+    assert out.shape == (len(frame), p.total_output_dim_)  # type: ignore
+    assert out.columns == list(p.get_feature_names_out())  # type: ignore
+    np.testing.assert_allclose(out.to_numpy(), arr)  # type: ignore
 
 
 # --- validation ----------------------------------------------------------------

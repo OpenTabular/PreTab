@@ -108,8 +108,8 @@ pre = Preprocessor(
     output_dim=12,
 )
 
-X_tr = pre.fit_transform(X_train, y_train, return_array=True)
-X_te = pre.transform(X_test, return_array=True)
+X_tr = pre.fit_transform(X_train, y_train)
+X_te = pre.transform(X_test)
 
 model = Ridge(alpha=1.0).fit(X_tr, y_train)
 pred = model.predict(X_te)
@@ -130,10 +130,10 @@ nonlinear structure. The $R^2$ jumps from `0.124` to `0.979` and the mean absolu
 from `11.20` to `1.85`.
 
 ```{tip}
-`Preprocessor.transform` returns a dict of feature blocks by default. When you feed a plain
-estimator, call it with `return_array=True` to get a single stacked matrix. To compose
-everything inside one scikit-learn `Pipeline` instead, use the standalone transformers, shown
-in the [sklearn pipeline tutorial](sklearn_pipeline.md).
+`Preprocessor.transform` returns a single stacked array by default, so it drops straight into
+a plain scikit-learn estimator or `Pipeline`. Pass `output_structure="blocks"` (or
+`return_array=False` for a single call) for the dict-of-feature-blocks form instead. See the
+[sklearn pipeline tutorial](sklearn_pipeline.md) for wiring each column's transformer by hand.
 ```
 
 ## What actually changed

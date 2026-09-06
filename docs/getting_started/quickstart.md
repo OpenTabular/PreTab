@@ -16,8 +16,8 @@ LightGBM-based placement.
 ## Fit a `Preprocessor`
 
 The `Preprocessor` inspects a `DataFrame`, decides which columns are numerical and which are
-categorical, and applies a strategy per column. It returns a dictionary of feature blocks by
-default, or a single stacked array on request.
+categorical, and applies a strategy per column. It returns a single stacked array by default,
+or a dict of per-feature blocks on request.
 
 ```python
 import numpy as np
@@ -44,9 +44,9 @@ config = {
 }
 pre = Preprocessor(feature_preprocessing=config, task="regression", random_state=0)
 
-# Fit and transform into a dict of feature blocks
-X_dict = pre.fit_transform(df, y)
-{k: v.shape for k, v in X_dict.items()}
+# Fit and transform into a single stacked array
+X = pre.fit_transform(df, y)
+X.shape
 ```
 
 ```{tip}
@@ -55,10 +55,10 @@ When no per-feature config is given, the `Preprocessor` falls back to its global
 [Configuration](../core_concepts/configuration.md) for every knob.
 ```
 
-Ask for a single stacked matrix instead when you feed a plain estimator:
+Ask for a dict of per-feature blocks instead, for inspection or per-block downstream heads:
 
 ```python
-X = pre.transform(df, return_array=True)   # one ndarray, one row per sample
+X_dict = pre.transform(df, return_array=False)   # {"num_age": ..., "cat_city": ...}
 ```
 
 ## Inspect what was built

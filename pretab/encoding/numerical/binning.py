@@ -182,7 +182,7 @@ class NumericBinningTransformer(RepresentationSpecMixin, AliasResolverMixin, Tra
 
     @staticmethod
     def _bin_indices(column, edges):
-        """Assign each value to a bin using ``(a, b]`` intervals with a closed left edge."""
+        """Assign each value to a bin using ``(a, b]`` intervals with a closed right edge."""
         idx = np.searchsorted(edges, column, side="left") - 1
         return np.clip(idx, 0, edges.size - 2).astype(int)
 
