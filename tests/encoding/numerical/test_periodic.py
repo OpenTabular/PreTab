@@ -71,3 +71,13 @@ def test_cyclic_rejects_non_positive_harmonics():
     X = np.array([[0], [6], [12], [18]])
     with pytest.raises(InvalidParamError):
         PeriodicEncodingTransformer(period=24, harmonics=0).fit(X)
+
+
+def test_cyclic_transform_wraps_out_of_range_input():
+    # fit rejects out-of-range values, but transform intentionally does not
+    # re-validate: it wraps them around the cycle, which is the mathematically
+    # correct result for a cyclic quantity.
+    transformer = PeriodicEncodingTransformer(period=24).fit(np.array([[0], [12]]))
+    out_of_range = transformer.transform(np.array([[30]]))
+    wrapped = transformer.transform(np.array([[6]]))
+    np.testing.assert_allclose(out_of_range, wrapped, atol=1e-12)

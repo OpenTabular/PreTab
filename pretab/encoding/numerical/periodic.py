@@ -45,6 +45,13 @@ class PeriodicEncodingTransformer(BasePreTabTransformer):
     (which applies one method uniformly across columns). Apply it directly to the
     relevant cyclical column instead.
 
+    :meth:`fit` rejects a value outside ``[0, period]``, but :meth:`transform` does not
+    repeat that check: the trigonometric encoding wraps any input around the cycle
+    automatically (``period + x`` maps to the same output as ``x``), which is the
+    mathematically correct result for a genuinely cyclic quantity. If you need
+    transform-time inputs strictly confined to ``[0, period]`` as well, validate them
+    before calling :meth:`transform`.
+
     Examples
     --------
     >>> import numpy as np
