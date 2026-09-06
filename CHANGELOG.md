@@ -7,6 +7,13 @@ This project adheres to [Semantic Versioning](https://semver.org/) and uses
 
 Going forward, this file is updated automatically by `cz bump` on each release.
 
+## v1.0.0 (2026-09-06)
+
+### Fix
+
+- make present task dependent
+- fit summary to report resolved methods
+
 ## v1.0.0rc5 (2026-09-06)
 
 ## v1.0.0rc4 (2026-09-06)
