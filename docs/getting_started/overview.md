@@ -32,69 +32,6 @@ pre = Preprocessor(feature_preprocessing={
 X = pre.fit_transform(df, y)
 ```
 
-## How this compares to scikit-learn's preprocessing transformers
-
-PreTab is not a competitor to scikit-learn. Every transformer subclasses `BaseEstimator` and
-`TransformerMixin` and drops into the same `Pipeline` and `ColumnTransformer` you already use.
-The real question is what PreTab adds where scope overlaps with scikit-learn's own
-`SplineTransformer`, `KBinsDiscretizer`, `PolynomialFeatures`, and `TargetEncoder`.
-
-| Capability                 | scikit-learn                                                                    | PreTab                                                                                                                                                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Knot / threshold placement | Uniform or quantile, fixed before fitting                                       | Optionally target-aware: a CART or LightGBM model places knots where the target changes fastest (`placement_strategy="cart"`)                                                                             |
-| How many basis functions   | You pick a fixed count                                                          | `adaptive=True` searches a width in `[min_output_dim, max_output_dim]` from the data                                                                                                                      |
-| Leakage safety             | `TargetEncoder` cross-fits internally; nothing else does, and nothing warns you | Every supervised representation emits a `LeakageWarning` outside a `Pipeline`, and any of them can be wrapped in `CrossFittedTransformer`                                                                 |
-| Feature provenance         | `get_feature_names_out()` returns names only                                    | A typed `RepresentationSpec` per transformer plus a `FeatureLineage` record per output column (family, component, target usage)                                                                           |
-| Persistence                | `pickle` / `joblib`, which execute arbitrary code on load                       | `to_spec()` / `from_spec()`: a versioned JSON spec for supported fitted state, plus a stable `fingerprint_`; restore trusted specs in the same environment                                                |
-| Choosing per column        | Hand-assemble a `ColumnTransformer` yourself                                    | One `Preprocessor(feature_preprocessing={...})`, validated against a capability registry so incompatible combinations (a required-target method without `y`, for example) raise a typed error at fit time |
-
-```{note}
-Piecewise-linear encoding (`ple`) and the neural-style basis maps (`rbf`, `relu`, `sigmoid`,
-`tanh`, deterministic `fourier`) have no scikit-learn equivalent. `rff` and `nystroem` are thin
-wrappers around scikit-learn's own `RBFSampler` and `Nystroem`; unlike the other methods on
-this page, they operate on the whole feature block at once, so they are standalone
-transformers rather than a per-column `Preprocessor` choice.
-```
-
-## When to reach for PreTab
-
-PreTab is a good fit when any of the following is true.
-
-- You pair a **simple or linear model** (Ridge, logistic regression, a GAM, a linear layer)
-  with tabular data and want it to capture non-linear structure.
-- You need **expressive numerical representations** such as splines, radial basis maps,
-  Fourier features, or piecewise-linear encoding without wiring each one by hand.
-- You want **per-column control** over preprocessing from a single configuration object.
-- You care about **reproducibility and inspection**: knowing exactly which input produced
-  each output column, serializing a fitted representation, and getting a stable fingerprint.
-- You are **researching representations** and want a common, typed intermediate form
-  (`RepresentationSpec` plus feature lineage) shared across every family.
-
-```{tip}
-Basis expansion helps most when the model downstream is comparatively simple. A rich,
-already-non-linear model such as gradient boosting can learn many of these shapes on its
-own, so the marginal benefit of an explicit basis is smaller there. See
-[Choosing a method](../representations/choosing_a_method.md) for the trade-offs.
-```
-
-## What PreTab is not
-
-Knowing the boundaries is as useful as knowing the features. PreTab deliberately does not
-try to be an everything-library.
-
-- **Not a modelling library.** PreTab produces features. It does not fit predictors, tune
-  models, or select features for you. It sits _in front of_ an estimator.
-- **Not a time-series toolkit.** Generic lag and rolling-window utilities were removed on
-  purpose. PreTab keeps the periodic encoding that expresses cyclic structure (hour, day,
-  month) but leaves sequence modelling to dedicated libraries.
-- **Not a data-cleaning suite.** It offers principled, centrally-defined policies for
-  missing values, constant columns, and out-of-range inputs, but it is not a substitute for
-  domain-specific data validation.
-- **Not a guaranteed accuracy win.** An expressive basis in front of a model that is already
-  flexible, or on a feature with no non-linear signal, can add columns without adding value.
-  The [failure modes](../representations/choosing_a_method.md#when-basis-expansion-does-not-help)
-  section is explicit about where it does not help.
-
 ## Two ways to use it
 
 PreTab exposes the same capabilities through two surfaces.
@@ -116,6 +53,72 @@ Every strategy is also a plain scikit-learn transformer you can import and compo
 ::::
 
 The [Choosing an interface](choosing_an_interface.md) page explains which to pick.
+
+## How this compares to scikit-learn's preprocessing transformers
+
+PreTab is not a competitor to scikit-learn. Every transformer subclasses `BaseEstimator` and
+`TransformerMixin` and drops into the same `Pipeline` and `ColumnTransformer` you already use.
+The real question is what PreTab adds where scope overlaps with scikit-learn's own
+`SplineTransformer`, `KBinsDiscretizer`, `PolynomialFeatures`, and `TargetEncoder`.
+
+| Capability                 | scikit-learn                                                                    | PreTab                                                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Knot / threshold placement | Fixed `n_knots`, placed `"uniform"` or `"quantile"` before fitting               | Configured via `output_dim` (how many basis functions you want); PreTab derives the knot count from it and places them with `placement_strategy`, optionally target-aware (a CART or LightGBM model places them where the target changes fastest) |
+| How many basis functions   | You pick a fixed count                                                          | `adaptive=True` searches a width in `[min_output_dim, max_output_dim]` from the data                                                                                                                      |
+| Leakage safety             | `TargetEncoder` cross-fits internally; nothing else does, and nothing warns you | Every supervised representation emits a `LeakageWarning` outside a `Pipeline`, and any of them can be wrapped in `CrossFittedTransformer`                                                                 |
+| Feature provenance         | `get_feature_names_out()` returns names only                                    | A typed `RepresentationSpec` per transformer plus a `FeatureLineage` record per output column (family, component, target usage)                                                                           |
+| Persistence                | `pickle` / `joblib`, which execute arbitrary code on load                       | `to_spec()` / `from_spec()`: a versioned JSON spec for supported fitted state, plus a stable `fingerprint_`; restore trusted specs in the same environment                                                |
+| Choosing per column        | Hand-assemble a `ColumnTransformer` yourself                                    | One `Preprocessor(feature_preprocessing={...})`, validated against a capability registry so incompatible combinations (a required-target method without `y`, for example) raise a typed error at fit time |
+
+```{note}
+Piecewise-linear encoding (`ple`) and the neural-style basis maps (`rbf`, `relu`, `sigmoid`,
+`tanh`, deterministic `fourier`) have no scikit-learn equivalent. `rff` and `nystroem` are thin
+wrappers around scikit-learn's own `RBFSampler` and `Nystroem`; unlike the other methods on
+this page, they operate on the whole feature block at once, so they are standalone
+transformers rather than a per-column `Preprocessor` choice.
+```
+
+## When to reach for PreTab
+
+PreTab is a good fit when any of the following is true.
+
+- You want an existing model, from a simple linear model (Ridge, logistic regression, a
+  GAM) to a deep learning architecture, to capture non-linear structure through the input
+  representation rather than through added model complexity.
+- You need **expressive numerical representations** such as splines, radial basis maps,
+  Fourier features, or piecewise-linear encoding without wiring each one by hand.
+- You want **per-column control** over preprocessing from a single configuration object.
+- You care about **reproducibility and inspection**: knowing exactly which input produced
+  each output column, serializing a fitted representation, and getting a stable fingerprint.
+- You are **researching representations** and want a common, typed intermediate form
+  (`RepresentationSpec` plus feature lineage) shared across every family.
+
+```{tip}
+The right representation depends on what sits downstream: linear and additive models gain
+the most, tree ensembles (gradient boosting, random forests) usually gain the least since
+they already partition each feature on their own, and neural networks benefit from methods
+like PLE and learned embeddings. See
+[Choosing a method](../representations/choosing_a_method.md#start-from-the-model) for the
+full breakdown.
+```
+
+## What PreTab is not
+
+Knowing the boundaries is as useful as knowing the features. PreTab deliberately does not
+try to be an everything-library.
+
+- **Not a modelling library.** PreTab produces features. It does not fit predictors, tune
+  models, or select features for you. It sits _in front of_ an estimator.
+- **Not a time-series toolkit.** Generic lag and rolling-window utilities were removed on
+  purpose. PreTab keeps the periodic encoding that expresses cyclic structure (hour, day,
+  month) but leaves sequence modelling to dedicated libraries.
+- **Not a data-cleaning suite.** It offers principled, centrally-defined policies for
+  missing values, constant columns, and out-of-range inputs, but it is not a substitute for
+  domain-specific data validation.
+- **Not a guaranteed accuracy win.** An expressive basis in front of a model that is already
+  flexible, or on a feature with no non-linear signal, can add columns without adding value.
+  The [failure modes](../representations/choosing_a_method.md#when-basis-expansion-does-not-help)
+  section is explicit about where it does not help.
 
 ## Where to go next
 
