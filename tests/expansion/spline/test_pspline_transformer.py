@@ -95,3 +95,15 @@ def test_pspline_transform_requires_fit():
         transformer.transform(np.random.rand(5, 1))
     with pytest.raises(NotFittedError):
         transformer.get_penalty_matrix()
+
+
+def test_pspline_out_of_range_transform_clips_to_boundary():
+    # Regression test: out-of-range transform inputs used to produce an abrupt
+    # all-zero row instead of clipping like the B/M/I splines already do.
+    X = np.linspace(0, 10, 100).reshape(-1, 1)
+    transformer = PSplineTransformer(output_dim=8).fit(X)
+    at_max = transformer.transform(np.array([[10.0]]))
+    just_past_max = transformer.transform(np.array([[10.0 + 1e-4]]))
+    far_past_max = transformer.transform(np.array([[20.0]]))
+    np.testing.assert_allclose(just_past_max, at_max, atol=1e-6)
+    np.testing.assert_allclose(far_past_max, at_max, atol=1e-6)

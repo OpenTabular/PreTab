@@ -12,6 +12,7 @@ import numpy as np
 from scipy.interpolate import BSpline
 
 from ...core.parameters import UNSET
+from ...core.policy import RepresentationPolicy
 from .base import BaseSplineTransformer
 
 
@@ -54,6 +55,7 @@ class ISplineTransformer(BaseSplineTransformer):
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = None,
+        policy: RepresentationPolicy | dict | None = None,
     ):
         super().__init__(
             output_dim=output_dim,
@@ -67,6 +69,7 @@ class ISplineTransformer(BaseSplineTransformer):
             min_output_dim=min_output_dim,
             max_output_dim=max_output_dim,
             random_state=random_state,
+            policy=policy,
         )
 
     def _feature_suffix(self) -> str:

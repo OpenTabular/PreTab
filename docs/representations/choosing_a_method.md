@@ -74,12 +74,15 @@ Very small samples
   and rely on a scaled input.
 
 Extrapolation beyond the fitted range
-: Bases are fitted on the training range, and PreTab's default policy is to extrapolate: a
-  value beyond the fitted range is passed straight into the basis rather than clamped, so the
-  spline or feature map keeps evaluating past its knots or centers. If your test data lies well
-  beyond training, that extrapolated value carries no real signal. Set
-  `policy=RepresentationPolicy(out_of_range="clip")` (or `"warn"` / `"error"`) if you would
-  rather cap or catch out-of-range inputs. See the edge-case behaviour below.
+: Bases are fitted on the training range, and each spline family has its own default
+  transform-time behavior for values beyond it: B/M/I-spline, P-spline, and tensor-product
+  clip to the fitted range, while natural-cubic and cubic-regression extrapolate smoothly
+  (their basis is defined for any input). If your test data lies well beyond training, an
+  extrapolated value carries no real signal. Pass
+  `policy=RepresentationPolicy(out_of_range="clip")` (or `"warn"` / `"error"`) directly to any
+  of these spline transformers to override their default for that instance. This is
+  standalone-transformer-only: it is not yet threaded through `Preprocessor`. See the
+  edge-case behaviour below.
 
 Pure noise features
 : Expanding a feature that carries no signal only gives the model more ways to fit noise. Drop
@@ -98,9 +101,12 @@ PreTab is explicit about degenerate inputs rather than failing silently.
   tensor-product) raise a typed error rather than fitting a meaningless basis. Numeric
   binning falls back to a single bin instead of raising, and PLE and the feature maps place
   all their bins or centers at the same value, a degenerate but still valid basis.
-- **Out-of-range input at transform**: by default, values beyond the fitted range extrapolate
-  (the basis keeps evaluating past its knots or centers); set the `out_of_range` policy to
-  `"clip"`, `"warn"`, or `"error"` for a different, explicit behaviour.
+- **Out-of-range input at transform**: B/M/I-spline, P-spline, and tensor-product clip
+  values beyond the fitted range by default; natural-cubic and cubic-regression extrapolate
+  smoothly by default. Pass `policy=RepresentationPolicy(out_of_range=...)` directly to any
+  of these transformers to override its default with `"clip"`, `"warn"`, or `"error"`
+  instead. This is standalone-transformer-only for now, not yet available through
+  `Preprocessor`.
 - **Unseen category**: `ContinuousOrdinalTransformer` (`"int"`) maps an unseen category to a
   reserved code rather than raising; one-hot encoding (`"one-hot"`) instead emits an all-zero
   row for it.

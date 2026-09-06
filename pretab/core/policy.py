@@ -7,11 +7,11 @@ to the recurring edge cases that would otherwise diverge silently per family:
 * ``out_of_range``: values at ``transform`` outside the fitted range
   (``"error"`` / ``"warn"`` / ``"clip"`` / ``"extrapolate"``).
 
-The defaults reproduce the library's historical behaviour (constant columns pass
-through, ranges extrapolate), so enabling the policy object changes nothing
-until a stricter choice is requested. Transformers may narrow specific axes
-through class-level override attributes without exposing a new constructor
-parameter (see :class:`~pretab.core.base.BasePreTabTransformer`).
+The defaults reproduce each family's historical behaviour (B/M/I-spline, P-spline, and
+tensor-product clip out-of-range inputs; natural-cubic and cubic-regression extrapolate;
+constant columns pass through everywhere), so leaving ``policy`` unset changes nothing.
+Transformers may narrow specific axes through class-level override attributes without
+exposing a new constructor parameter (see :class:`~pretab.core.base.BasePreTabTransformer`).
 
 Missing values and non-finite (``inf`` / ``-inf``) inputs are handled elsewhere:
 see ``Preprocessor.missing_policy`` for missing-value handling, and note that
@@ -19,13 +19,17 @@ see ``Preprocessor.missing_policy`` for missing-value handling, and note that
 policy (there is no configurable axis for it).
 
 .. note::
-   ``out_of_range`` is not yet reachable from any public API: no transformer
-   constructor accepts a ``policy`` argument, and ``Preprocessor.policy`` is
-   only used for its own top-level ``constant`` check, never threaded into
-   ``PreprocessorConfig`` or the transformers it builds. Wiring this through
-   (transformer constructors, the registry's ``allowed_args``, and
-   ``PreprocessorConfig``) is deferred to a follow-up; see the "Spline
+   ``out_of_range`` is reachable standalone: ``BSplineTransformer``, ``MSplineTransformer``,
+   ``ISplineTransformer``, ``PSplineTransformer``, ``TensorProductSplineTransformer``,
+   ``NaturalCubicSplineTransformer``, and ``CubicRegressionSplineTransformer`` all accept a
+   ``policy`` constructor parameter that is genuinely respected at ``transform`` time. It is
+   not yet threaded through ``Preprocessor``: ``Preprocessor.policy`` is still only used for
+   its own top-level ``constant`` check, never passed into ``PreprocessorConfig`` or the
+   transformers it builds. Wiring it through the registry's ``allowed_args`` and
+   ``PreprocessorConfig`` remains a separately-tracked follow-up; see the "Spline
    expansions" section of ``dev/todo/release-1.0.0/bugfixes-1.0.0.md``.
+   ``ThinPlateSplineTransformer`` is not wired (its penalty is already experimental and it
+   has no single-feature knot range in the same sense).
 """
 
 from __future__ import annotations

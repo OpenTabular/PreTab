@@ -4,6 +4,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from ....core.knots import bspline_basis
 from ....core.parameters import UNSET
+from ....core.policy import RepresentationPolicy, resolve_out_of_range
 from ....exceptions import InvalidParamError
 from ..mixins import SplineBasisMixin
 
@@ -70,6 +71,12 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     max_output_dim : int or None, default=None
         Unused for this unsupervised-only family (kept for API parity).
 
+    policy : RepresentationPolicy, dict, or None, default=None
+        Overrides this family's default ``out_of_range`` behavior (unconditional
+        clipping to each marginal dimension's fitted knot range). Pass e.g.
+        ``RepresentationPolicy(out_of_range="error")`` to raise instead. Leaving
+        this at ``None`` preserves the historical clip-on-transform behavior.
+
     Attributes
     ----------
     dim_ : int
@@ -126,6 +133,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     _representation_family = "tensorspline"
     _representation_scope = "multivariate"
     _representation_local_support = True
+    _out_of_range_policy = "clip"
 
     def __init__(
         self,
@@ -137,6 +145,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
+        policy: RepresentationPolicy | dict | None = None,
     ):
         self.output_dim = output_dim
         self.degree = degree
@@ -146,6 +155,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
+        self.policy = policy
 
     def _pad_knots(self, inner):
         return np.concatenate((np.repeat(inner[0], self.degree), inner, np.repeat(inner[-1], self.degree)))
@@ -219,9 +229,12 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         check_is_fitted(self, "marginal_sizes_")
         X = self._validate_allow_nan(X, reset=False)
 
+        policy = self._resolved_policy()
         bases = []
         for d in range(self.dim_):
-            basis = self._basis_matrix(X[:, d], self.knots_[d])
+            knots = self.knots_[d]
+            xd = resolve_out_of_range(X[:, d], knots[0], knots[-1], policy, estimator=self)
+            basis = self._basis_matrix(xd, knots)
             bases.append(basis)
 
         n_samples = X.shape[0]

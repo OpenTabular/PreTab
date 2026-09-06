@@ -28,6 +28,7 @@ from ...core.knots import (
     uniform_knots,
 )
 from ...core.parameters import UNSET, validate_placement
+from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...core.supervised import warn_target_leakage
 from ...exceptions import (
     IncompatibleParamsError,
@@ -93,6 +94,13 @@ class BaseSplineTransformer(BasePreTabTransformer):
     random_state : int or None, default=None
         Random state forwarded to the target-aware selector for reproducibility.
 
+    policy : RepresentationPolicy, dict, or None, default=None
+        Overrides this family's default ``out_of_range`` behavior (unconditional
+        clipping to the fitted knot range). Pass e.g.
+        ``RepresentationPolicy(out_of_range="error")`` to raise instead, or
+        ``"warn"`` / ``"extrapolate"`` for the other supported reactions. Leaving
+        this at ``None`` preserves the historical clip-on-transform behavior.
+
     Attributes
     ----------
     knots_ : list of ndarray
@@ -131,6 +139,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
     _representation_component_kind = "basis"
     _representation_supervision = "optional"
     _representation_local_support = True
+    _out_of_range_policy: ClassVar[str | None] = "clip"
 
     def __init__(
         self,
@@ -145,6 +154,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         min_output_dim=UNSET,
         max_output_dim=UNSET,
         random_state: int | None = None,
+        policy: RepresentationPolicy | dict | None = None,
     ):
         self.output_dim = output_dim
         self.degree = degree
@@ -157,6 +167,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
         self.random_state = random_state
+        self.policy = policy
 
     _selector_spline_type: ClassVar[Literal["bspline", "mspline", "ispline"]] = "bspline"
 
@@ -311,8 +322,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
         transformed = []
         for i in range(X.shape[1]):
             knots = self.knots_[i]
-            xi_clipped = np.clip(X[:, i], knots[0], knots[-1])
-            design = self._design_matrix(xi_clipped, knots)
+            xi = resolve_out_of_range(X[:, i], knots[0], knots[-1], self._resolved_policy(), estimator=self)
+            design = self._design_matrix(xi, knots)
             if self.include_bias:
                 design = np.hstack([np.ones((design.shape[0], 1)), design])
             transformed.append(design)

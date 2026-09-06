@@ -4,6 +4,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from ...core.knots import bspline_basis
 from ...core.parameters import UNSET
+from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...exceptions import InvalidParamError
 from .mixins import SplineBasisMixin
 
@@ -67,6 +68,12 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     max_output_dim : int or None, default=None
         Unused for this unsupervised-only family (kept for API parity).
 
+    policy : RepresentationPolicy, dict, or None, default=None
+        Overrides this family's default ``out_of_range`` behavior (unconditional
+        clipping to the fitted knot range). Pass e.g.
+        ``RepresentationPolicy(out_of_range="error")`` to raise instead. Leaving
+        this at ``None`` preserves the historical clip-on-transform behavior.
+
     Attributes
     ----------
     knots_ : list of ndarray
@@ -115,6 +122,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     _feature_suffix_value = "ps"
     _representation_family = "pspline"
     _representation_local_support = True
+    _out_of_range_policy = "clip"
 
     def __init__(
         self,
@@ -126,6 +134,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         adaptive: bool = False,
         min_output_dim=UNSET,
         max_output_dim=UNSET,
+        policy: RepresentationPolicy | dict | None = None,
     ):
         self.output_dim = output_dim
         self.degree = degree
@@ -135,6 +144,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         self.adaptive = adaptive
         self.min_output_dim = min_output_dim
         self.max_output_dim = max_output_dim
+        self.policy = policy
 
     def fit(self, X, y=None):
         X = self._validate_allow_nan(X, reset=True)
@@ -194,11 +204,12 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
 
         all_basis = []
         for i in range(X.shape[1]):
-            x = X[:, i]
-            nb = len(self.knots_[i]) - self.degree - 1
+            knots = self.knots_[i]
+            x = resolve_out_of_range(X[:, i], knots[0], knots[-1], self._resolved_policy(), estimator=self)
+            nb = len(knots) - self.degree - 1
             basis = np.zeros((len(x), nb))
             for j in range(nb):
-                basis[:, j] = bspline_basis(x, self.knots_[i], self.degree, j)
+                basis[:, j] = bspline_basis(x, knots, self.degree, j)
             if self.include_bias:
                 basis = np.hstack([np.ones((len(x), 1)), basis])
             all_basis.append(basis)
