@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   workflow_dispatch:
   workflow_call:
   push:
@@ -11,7 +12,7 @@ on:
       - main
 
 concurrency:
-  group: ci-${{ github.head_ref || github.sha }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.sha }}
   cancel-in-progress: true
 
 permissions:

@@ -51,7 +51,8 @@ jobs:
           python -m venv /tmp/pretab-wheel-test
           source /tmp/pretab-wheel-test/bin/activate
           pip install dist/*.whl
-          python -c "import pretab; print('version:', pretab.__version__)"
+          python -I scripts/quickstart.py
+          python -I -c "import pretab; print('version:', pretab.__version__); print(pretab.__file__)"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

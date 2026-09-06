@@ -16,14 +16,19 @@ permissions:
   id-token: write
 
 jobs:
-  ci:
-    name: Full CI (required before publish)
+  qa:
     uses: ./.github/workflows/ci.yml
-    secrets: inherit
+    permissions:
+      contents: read
+
+  docs:
+    uses: ./.github/workflows/docs.yml
+    permissions:
+      contents: read
 
   publish-rc:
+    needs: [qa, docs]
     runs-on: ubuntu-latest
-    needs: ci
     environment: testpypi-publish
 
     steps:
@@ -76,7 +81,8 @@ jobs:
           python -m venv /tmp/pretab-wheel-test
           source /tmp/pretab-wheel-test/bin/activate
           pip install dist/*.whl
-          python -c "import pretab; print(pretab.__version__)"
+          python -I scripts/quickstart.py
+          python -I -c "import pretab; print(pretab.__version__); print(pretab.__file__)"
 
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -116,4 +122,4 @@ jobs:
           done
 
       - name: Import smoke test
-        run: python -c "import pretab; print('version:', pretab.__version__)"
+        run: python -I -c "import pretab; print('version:', pretab.__version__); print(pretab.__file__)"
