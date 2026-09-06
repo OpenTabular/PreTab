@@ -98,3 +98,9 @@ def test_invalid_n_folds(data):
     X, y = data
     with pytest.raises(InvalidParamError):
         CrossFittedTransformer(PLETransformer(), n_folds=1).fit(X, y)
+
+
+def test_invalid_task_rejected(data):
+    X, y = data
+    with pytest.raises(InvalidParamError, match="task"):
+        CrossFittedTransformer(PLETransformer(), task="classificaton").fit_transform(X, y)
