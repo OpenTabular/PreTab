@@ -291,6 +291,21 @@ penalty = spline.get_penalty_matrix()   # (output_dim, output_dim) smoothing pen
 
 ## Advanced Features
 
+### Presets
+
+`preset` sets `numerical_method`, `categorical_method`, and the output width in one call,
+so you can start from a sensible default instead of choosing every parameter by hand.
+
+```python
+Preprocessor(preset="standard")   # bspline (regression) / ple (classification), int codes, output_dim=7
+Preprocessor(preset="expanded")   # same numerical method, one-hot codes, output_dim=10
+Preprocessor(preset="adaptive")   # same numerical method, int codes, adaptive width in [7, 15]
+```
+
+> **Note:** Every preset resolves `numerical_method` from `task`: `"bspline"` for regression,
+> `"ple"` for classification. Any parameter you also pass explicitly overrides the preset's
+> value for that parameter.
+
 ### Automatic feature-type detection
 
 By default PreTab inspects each column and classifies it as numerical or categorical.
