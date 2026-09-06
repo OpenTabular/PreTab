@@ -23,6 +23,34 @@ pre = Preprocessor(
 The defaults are `numerical_method="ple"` and `categorical_method="int"`. The full list of
 strategy strings is in the [representation comparison](../representations/comparison_table.md).
 
+## NumPy array input
+
+`Preprocessor` also accepts a plain `numpy.ndarray`, not just a `DataFrame`. Columns are
+named `feature_0`, `feature_1`, ... in position order, then detected as numerical or
+categorical exactly as they would be for a `DataFrame`.
+
+```python
+import numpy as np
+from pretab import Preprocessor
+
+X = np.random.default_rng(0).normal(size=(100, 3))
+y = np.random.default_rng(0).normal(size=100)
+
+pre = Preprocessor(numerical_method="ple").fit(X, y)
+pre.numerical_features_
+```
+
+```text
+['feature_0', 'feature_1', 'feature_2']
+```
+
+```{tip}
+`feature_preprocessing` works the same way on array input: target the synthetic name, for
+example `{"feature_0": "rbf"}`. Check `numerical_features_` / `categorical_features_` after
+`fit` (or `get_feature_info()`) to confirm the names PreTab assigned before writing the
+overrides, rather than guessing the column order.
+```
+
 ## Per-feature overrides
 
 Columns rarely want identical treatment. The `feature_preprocessing` dict assigns a strategy

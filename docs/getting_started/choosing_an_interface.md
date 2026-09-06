@@ -10,8 +10,9 @@ ergonomics, not capability. This page helps you pick.
 :gutter: 3
 
 :::{grid-item-card} `Preprocessor`
-Reads a `DataFrame`, detects numerical and categorical columns, and applies a strategy per
-column from a single configuration object. Returns a single stacked array by default.
+Reads a `DataFrame` or `numpy.ndarray`, detects numerical and categorical columns, and
+applies a strategy per column from a single configuration object. Returns a single stacked
+array by default.
 :::
 
 :::{grid-item-card} Standalone transformers
