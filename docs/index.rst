@@ -68,7 +68,4 @@
    :hidden:
 
    developer_guide/contributing
-   developer_guide/testing
-   developer_guide/documentation
-   developer_guide/versioning
    developer_guide/release

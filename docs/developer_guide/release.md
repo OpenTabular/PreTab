@@ -8,7 +8,7 @@ publishing itself runs on GitHub Actions using
 tokens are stored anywhere.
 
 For the SemVer rules and commit conventions that decide the next version, see
-[Versioning](versioning.md).
+[Versioning](contributing.md#versioning).
 
 ## Overview
 
