@@ -18,7 +18,7 @@ tensor-product extension, which underpin `PSplineTransformer` and
 `TensorProductSplineTransformer`.
 
 Kumar, M., Thielmann, A. F., Weisser, C., and Säfken, B. (2026). From uniform to learned
-knots: A study of spline-based numerical encodings for tabular deep learning.(TMLR).
+knots: A study of spline-based numerical encodings for tabular deep learning. _(TMLR)_.
 
 This study compares uniform and learned knot placement for spline-based numerical encodings
 against piecewise-linear encoding across regression and classification tasks, and motivates
