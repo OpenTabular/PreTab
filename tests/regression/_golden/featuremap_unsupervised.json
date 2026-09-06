@@ -1,8 +1,5 @@
 {
-  "shape": [
-    200,
-    20
-  ],
+  "shape": [200, 20],
   "feature_names": [
     "num_num_linear_rbf0",
     "num_num_linear_rbf1",

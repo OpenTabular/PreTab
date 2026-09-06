@@ -1,8 +1,5 @@
 {
-  "shape": [
-    200,
-    23
-  ],
+  "shape": [200, 23],
   "feature_names": [
     "num_num_linear_ple0",
     "num_num_linear_ple1",

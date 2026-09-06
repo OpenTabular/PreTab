@@ -51,6 +51,21 @@ def test_fingerprint_survives_round_trip(frame, target):
     assert restored.fingerprint_ == p.fingerprint_
 
 
+def test_fingerprint_stable_after_inference_and_lifecycle_changes(frame, target):
+    p = _fit(frame, target)
+    fingerprint = p.fingerprint_
+    for batch in (frame, frame.iloc[:3]):
+        p.transform(batch)
+        assert p.fingerprint_ == fingerprint
+    p.mark_stale("new training data available")
+    p.freeze()
+    assert p.fingerprint_ == fingerprint
+    restored = Preprocessor.from_spec(p.to_spec())
+    assert restored.fingerprint_ == fingerprint
+    assert restored.is_frozen()
+    assert restored.stale_reason_ == "new training data available"
+
+
 def test_fingerprint_changes_with_config(frame, target):
     a = _fit(frame, target, output_dim=6)
     b = _fit(frame, target, output_dim=9)

@@ -148,8 +148,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         feature range) or ``"quantile"`` (spaced by the data quantiles). Applies to the feature
         maps, PLE, and the knot-based splines (``"bspline"`` / ``"mspline"`` / ``"ispline"`` /
         ``"cubicspline"`` / ``"naturalspline"``); the always-target-aware ``"ple"`` only honors the
-        supervised strategies, while the penalized ``"pspline"`` / ``"tensorspline"`` (which assume
-        equally-spaced knots) and the kernel-based ``"tprs"`` only honor the unsupervised ones.
+        supervised strategies, while the penalized ``"pspline"`` only honors uniform placement.
+        Multivariate tensor-product and thin-plate splines are available as standalone transformers.
     task : str, default="regression"
         Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
         place basis units / knots against ``y``. Only consulted when ``target_aware`` is True.
@@ -302,8 +302,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     Available ``numerical_method`` values: ``"none"``, ``"minmax"``, ``"standardization"``,
     ``"robust"``, ``"quantile"``, ``"polynomial"``, ``"box-cox"``, ``"yeo-johnson"``, ``"ple"``,
     ``"custombin"``, ``"rbf"``, ``"relu"``, ``"sigmoid"``, ``"tanh"``, ``"cubicspline"``,
-    ``"naturalspline"``, ``"pspline"``, ``"tensorspline"``, ``"tprs"``, ``"bspline"``,
-    ``"mspline"``, ``"ispline"``.
+    ``"naturalspline"``, ``"pspline"``, ``"bspline"``, ``"mspline"``, ``"ispline"``,
+    ``"fourier"``.
 
     Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
     ``"pretrained"``, ``"none"``. The ``"pretrained"`` method requires the optional
@@ -313,7 +313,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"one-hot"``, ``"one_hot"`` and ``"OneHot"`` are equivalent. Common synonyms and abbreviations
     are also accepted, e.g. ``"std"`` / ``"standard"`` -> ``"standardization"``, ``"ohe"`` /
     ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
-    ``"polynomial"``, ``"thin-plate"`` -> ``"tprs"``, and ``"passthrough"`` -> ``"none"``.
+    ``"polynomial"``, and ``"passthrough"`` -> ``"none"``.
 
     ``transform`` returns a single stacked array by default (``output_structure="matrix"``),
     or a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` when
@@ -453,6 +453,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self : Preprocessor
             Fitted instance of the preprocessor.
         """
+
+        if self.is_frozen():
+            raise FrozenRepresentationError(
+                f"Cannot fit a frozen {type(self).__name__}. Use refit() to fit a fresh copy."
+            )
 
         verbose = int(self.verbose or 0)
         if verbose > 0:
@@ -966,8 +971,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         PreTab / numpy / scipy / scikit-learn versions, resolved parameters, a
         per-representation summary, the output-column order, and the encoded
         fitted state) that reconstructs this estimator bit-for-bit via
-        :meth:`from_spec`. Unlike :mod:`pickle`, loading a spec never executes
-        estimator code and only imports an allow-listed set of library modules.
+        :meth:`from_spec` in the same environment. Loading bypasses estimator
+        initialization and pickle hooks, but library imports can execute code.
+        Only load specs from trusted sources. Third-party representations and
+        pretrained language models are not supported by this serializer.
 
         Parameters
         ----------
@@ -1017,12 +1024,19 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     def _canonical_spec(self) -> dict:
         """Deterministic subset of the spec used for fingerprinting."""
         spec = preprocessor_to_spec(self)
+        # Runtime reports and advisory lifecycle flags do not change the fitted
+        # representation. Keep them in serialization, but out of its identity.
+        state = {
+            key: value
+            for key, value in spec["state"].items()
+            if key not in {"output_report_", "_frozen", "_stale_reason"}
+        }
         return {
             "schema_version": spec["schema_version"],
             "pretab_version": spec["pretab_version"],
             "library_versions": spec["library_versions"],
             "feature_names_out": spec["feature_names_out"],
-            "state": spec["state"],
+            "state": state,
         }
 
     @property
@@ -1033,7 +1047,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         configuration, dependency versions, output-column order, random seeds, and
         the fitted state (knot / center / bin locations, scaler statistics, encoder
         categories). The digest is deterministic across processes and machines, so
-        two preprocessors share a fingerprint iff they transform identically.
+        the same fitted state and configuration produce the same fingerprint.
         """
         check_is_fitted(self)
         canonical = json.dumps(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -1086,7 +1100,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return bool(getattr(self, "_frozen", False))
 
     def freeze(self) -> "Preprocessor":
-        """Freeze the fitted preprocessor, blocking further ``set_params`` mutation.
+        """Freeze the fitted preprocessor, blocking ``fit`` and ``set_params`` mutation.
 
         Returns ``self`` for chaining. A frozen preprocessor is intended as an
         immutable deployment artifact; use :meth:`clone_unfitted` or :meth:`refit`
