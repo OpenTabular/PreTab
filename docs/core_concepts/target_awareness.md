@@ -9,18 +9,11 @@ explicit and gives you leakage-safe tools. This page explains the contract.
 
 Every method declares how it uses `y` through three levels.
 
-`forbidden`
-: The method never uses the target. The scalers, one-hot, ordinal encoding, the Fourier map,
-and the P-spline are all unsupervised.
-
-`optional`
-: The method uses the target only when `target_aware=True`. The feature maps (RBF, ReLU,
-sigmoid, tanh) and the freely-placed knot splines (B, M, I, cubic, natural) are in this
-group.
-
-`required`
-: The method always places against the target. Piecewise-linear encoding (PLE) is the primary
-example and needs `y` at every fit.
+| Level        | Meaning                                                        | Numerical methods                                                                                   | Categorical methods |
+| ------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------- |
+| `forbidden`  | Never uses the target                                           | The scalers (`minmax`, `standardization`, `robust`, `quantile`, `box-cox`, `yeo-johnson`, `polynomial`), `custombin`, `fourier`, `pspline` | `int`, `one-hot`, `onehot_from_ordinal`, `pretrained` |
+| `optional`   | Uses the target only when `target_aware=True`                   | The feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) and the freely-placed knot splines (`bspline`, `mspline`, `ispline`, `cubicspline`, `naturalspline`) | -                     |
+| `required`   | Always places against the target                                 | `ple` (piecewise-linear encoding)                                                                        | -                     |
 
 ```python
 from pretab.transformers import PLETransformer
@@ -70,17 +63,51 @@ The safe patterns are:
 
 ## Cross-fitted features
 
-`CrossFittedTransformer` removes leakage from the training features themselves. It produces
-out-of-fold values for the training rows (each row is transformed by a model that did not see
-it) while `transform` on new data uses a model fit on all the training data.
+Even inside a `Pipeline`, fitting a supervised transformer once on the full training set and
+then using it to build the *training* features for the same rows introduces a subtle leak:
+each row's PLE bins were placed using its own target value. `CrossFittedTransformer` fixes
+this for the training features specifically. It splits the training data into folds, fits a
+fresh copy of the transformer on all folds *except* one, and uses that copy to transform the
+held-out fold, so every training row is transformed by a model that never saw its own target.
+`transform` on genuinely new data (a validation or test set) instead uses one model fit on all
+the training data, since there is no leakage risk there.
 
 ```python
+import numpy as np
+
 from pretab import CrossFittedTransformer
 from pretab.transformers import PLETransformer
 
-cf = CrossFittedTransformer(PLETransformer(), n_folds=5)
-X_train_features = cf.fit_transform(x_train, y_train)  # out-of-fold, leakage-free
-X_test_features = cf.transform(x_test)                 # uses the all-data model
+rng = np.random.default_rng(0)
+x_train = rng.uniform(-3.0, 3.0, size=(200, 1))
+y_train = rng.normal(size=200)
+
+# Naive: one PLE fit on all the training data, then used to transform that same data.
+naive = PLETransformer(output_dim=10, random_state=0).fit(x_train, y_train).transform(x_train)
+
+# Cross-fitted: each row is transformed by a model that did not see its own target.
+cf = CrossFittedTransformer(PLETransformer(output_dim=10, random_state=0), n_folds=5, random_state=0)
+out_of_fold = cf.fit_transform(x_train, y_train)
+
+changed = (~np.all(naive == out_of_fold, axis=1)).sum()
+changed, len(x_train)
+```
+
+```text
+(193, 200)
+```
+
+193 of the 200 training rows get different feature values once out-of-fold cross-fitting is
+used, which is the leakage `CrossFittedTransformer` removes: the naive version handed a
+downstream model features that were partly informed by the very target it is trying to
+predict.
+
+```{tip}
+Use `CrossFittedTransformer` when you need the **training features themselves** to be
+leakage-free, for example to feed a second-stage model or to report an honest training-set
+metric. A supervised transformer inside a plain `Pipeline` already keeps cross-validation
+honest for `cross_val_score` / `GridSearchCV`, since each fold refits from scratch; you only
+need cross-fitting when you build the training features once and reuse them directly.
 ```
 
 The fitted spec records `cross_fitted=True` and the number of folds, so the choice is
@@ -93,12 +120,49 @@ directly determines the bins. For unsupervised methods it is unnecessary.
 
 ## Searching over representations
 
+Choosing a numerical method by comparing validation scores is itself a form of model
+selection, and doing it carelessly (for example scoring each candidate on the same data used
+to fit it) leaks information the same way an unguarded supervised transformer does.
 `RepresentationSearchCV` cross-validates a downstream estimator over a set of candidate
-numerical methods and refits the best one. It is a convenient way to let the data choose the
-representation without leaking through the selection.
+`numerical_method` values, refits the best one on all the data, and keeps every candidate's
+scoring honest by fitting a fresh `Preprocessor` per fold.
 
 ```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import Ridge
+
 from pretab import RepresentationSearchCV
+
+rng = np.random.default_rng(0)
+X = pd.DataFrame({"x": rng.uniform(-3, 3, size=300)})
+y = np.sin(X["x"]) + rng.normal(0, 0.1, size=300)
+
+search = RepresentationSearchCV(
+    estimator=Ridge(),
+    methods=["minmax", "ple", "bspline", "rbf"],
+    cv=5,
+    random_state=0,
+)
+search.fit(X, y)
+search.cv_results_
+search.best_method_
+```
+
+```text
+{'minmax': 0.636, 'ple': 0.949, 'bspline': 0.973, 'rbf': 0.841}
+'bspline'
+```
+
+`bspline` scored highest across the 5 folds for this sine-shaped signal, so `search.
+best_preprocessor_` and `search.best_estimator_` are refit on all the data with `bspline` and
+ready to call `.predict(X_new)`.
+
+```{note}
+This is deliberately narrow: it only searches the single `numerical_method` axis with one
+global method for every numerical column, not a per-column `feature_preprocessing` search.
+Use it to answer "which single method suits this dataset" before committing to a
+`Preprocessor` configuration, not as a general hyperparameter search.
 ```
 
 See the [target-aware classification tutorial](../tutorials/target_aware_classification.md)
