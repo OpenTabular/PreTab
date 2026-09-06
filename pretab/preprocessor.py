@@ -84,6 +84,21 @@ _PRESET_PARAM_DEFAULTS = {
 }
 
 
+def _method_summary(features, *, is_numerical: bool, config: PreprocessorConfig) -> str:
+    """Summarize the resolved method(s) actually used across ``features``.
+
+    Returns the single method name when every feature resolves to the same one
+    (the common case, and historically what the fit-summary log line showed).
+    When ``feature_preprocessing`` overrides make features of the same kind
+    resolve to different methods, returns a "mixed: ..." listing instead of
+    silently reporting just the global default.
+    """
+    methods = sorted({config.method_for(feature, is_numerical=is_numerical) for feature in features})
+    if len(methods) <= 1:
+        return methods[0] if methods else "none"
+    return "mixed: " + ", ".join(methods)
+
+
 class Preprocessor(TransformerMixin, BaseEstimator):
     r"""
     Preprocessor class for automated tabular feature preprocessing using scikit-learn-compatible pipelines.
@@ -560,12 +575,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self._enforce_output_budget(X.shape[0])
 
         if verbose >= 1:
+            numerical_summary = _method_summary(numerical_features, is_numerical=True, config=config)
+            categorical_summary = _method_summary(categorical_features, is_numerical=False, config=config)
             logger.info(
                 "fit complete: %d numerical (%s) + %d categorical (%s) feature(s) -> %d output columns in %.3fs",
                 len(numerical_features),
-                config.numerical_method,
+                numerical_summary,
                 len(categorical_features),
-                config.categorical_method,
+                categorical_summary,
                 len(self.get_feature_names_out()),
                 time.perf_counter() - start_time,
             )

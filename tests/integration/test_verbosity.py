@@ -75,6 +75,31 @@ def test_verbose_1_logs_fit_summary(sample_data, caplog):
     assert [r for r in caplog.records if r.levelno == logging.DEBUG] == []
 
 
+def test_verbose_1_summary_reflects_per_feature_overrides(sample_data, caplog):
+    """Regression guard: the fit summary must report the methods actually
+    resolved per column, not just the global numerical_method/categorical_method,
+    once feature_preprocessing overrides diverge from the global default."""
+    X, y = sample_data
+    caplog.set_level(logging.DEBUG, logger="pretab")
+    Preprocessor(
+        feature_preprocessing={"num2": "rbf"},
+        numerical_method="ple",
+        verbose=1,
+    ).fit(X, y)
+    assert "mixed: ple, rbf" in caplog.text
+    assert "(ple)" not in caplog.text
+
+
+def test_verbose_1_summary_stays_single_method_without_overrides(sample_data, caplog):
+    """No feature_preprocessing overrides -> the summary still names the one
+    global method actually used, unchanged from before the mixed-method fix."""
+    X, y = sample_data
+    caplog.set_level(logging.DEBUG, logger="pretab")
+    Preprocessor(numerical_method="ple", verbose=1).fit(X, y)
+    assert "(ple)" in caplog.text
+    assert "mixed" not in caplog.text
+
+
 def test_verbose_2_logs_feature_table(sample_data, caplog):
     X, y = sample_data
     caplog.set_level(logging.DEBUG, logger="pretab")
