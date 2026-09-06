@@ -16,8 +16,8 @@ from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
-from ..transformers.encoders.floats import ToFloatTransformer
-from ..transformers.encoders.missing import MissingStateIndicator
+from ..preprocessing.floats import ToFloatTransformer
+from ..preprocessing.missing import MissingStateIndicator
 from .config import PreprocessorConfig
 from .registry import (
     CATEGORICAL_ALIASES,
@@ -128,7 +128,15 @@ def get_numerical_transformer_steps(
     }
     if scaling is not None:
         scaling = resolve_method(scaling, NUMERICAL_METHODS, NUMERICAL_ALIASES)
-    if scaling in scalers and scaling != method:
+        if scaling not in scalers and scaling != "none":
+            raise invalid_param_error(
+                "get_numerical_transformer_steps",
+                "scaling",
+                scaling,
+                "must name a scaler or disable scaling",
+                valid={*scalers, "none"},
+            )
+    if scaling in scalers and scaling != method and method != "none":
         steps.append(scalers[scaling])
 
     if method not in NUMERICAL_METHODS:
@@ -199,7 +207,8 @@ def get_categorical_transformer_steps(
             valid=set(CATEGORICAL_METHODS),
         )
 
-    cls = get_spec(method).transformer_cls
+    spec = get_spec(method)
+    cls = spec.transformer_cls
 
     if method == "int":
         steps.append(("continuous_ordinal", cls()))
@@ -215,6 +224,10 @@ def get_categorical_transformer_steps(
         steps.append(("none", cls()))
     elif method == "onehot_from_ordinal":
         steps.append(("onehot_from_ordinal", cls()))
+    else:
+        call_kwargs = _filter_kwargs(spec.allowed_args, kwargs)
+        call_kwargs.update(_placement_kwargs(spec, kwargs))
+        steps.append((method, cls(**call_kwargs)))
 
     return steps
 
@@ -261,11 +274,27 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             **config.seed_kwargs,
         )
     else:
+        constructor_kwargs = {}
+        if known:
+            shared_kwargs = {
+                "task": config.task,
+                "target_aware": config.target_aware,
+                "output_dim": config.output_dim,
+                "adaptive": config.adaptive,
+                "min_output_dim": config.min_output_dim if config.adaptive else None,
+                "max_output_dim": config.max_output_dim if config.adaptive else None,
+                "degree": config.degree,
+                "placement_strategy": config.placement_strategy,
+                **config.seed_kwargs,
+            }
+            constructor_kwargs = _filter_kwargs(spec.allowed_args, shared_kwargs)
+            constructor_kwargs.update(_placement_kwargs(spec, shared_kwargs))
         steps = get_categorical_transformer_steps(
             method,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
             add_missing_indicator=plan["add_indicator"],
+            **constructor_kwargs,
         )
 
     pipeline = Pipeline(steps)
@@ -276,7 +305,13 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
     return pipeline
 
 
-def build_column_transformer(config: PreprocessorConfig, numerical_features, categorical_features) -> ColumnTransformer:
+def build_column_transformer(
+    config: PreprocessorConfig,
+    numerical_features,
+    categorical_features,
+    *,
+    sparse_threshold: float = 0.3,
+) -> ColumnTransformer:
     """Assemble the per-column pipelines into the final ColumnTransformer.
 
     Numerical features are prefixed ``num_`` and categorical features ``cat_`` to
@@ -292,4 +327,8 @@ def build_column_transformer(config: PreprocessorConfig, numerical_features, cat
         method = config.method_for(feature, is_numerical=False)
         pipeline = create_transformer(method, is_numerical=False, config=config)
         transformers.append((f"cat_{feature}", pipeline, [feature]))
-    return ColumnTransformer(transformers=transformers, remainder="passthrough")
+    return ColumnTransformer(
+        transformers=transformers,
+        remainder="passthrough",
+        sparse_threshold=sparse_threshold,
+    )

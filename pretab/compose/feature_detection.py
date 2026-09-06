@@ -8,7 +8,7 @@ sequence of delegations rather than inlining the classification heuristic.
 import numpy as np
 import pandas as pd
 
-from ..exceptions import invalid_param_error
+from ..exceptions import PretabDataError, invalid_param_error
 
 __all__ = ["detect_column_types", "to_dataframe"]
 
@@ -18,12 +18,27 @@ def to_dataframe(X, *, copy: bool = False) -> pd.DataFrame:
 
     Dicts and NumPy arrays are wrapped in a fresh DataFrame; an existing
     DataFrame is returned as-is, or copied when ``copy`` is True.
+
+    Raises
+    ------
+    PretabDataError
+        If the resulting columns contain a duplicate label. A
+        :class:`~sklearn.compose.ColumnTransformer` keys its per-column steps by
+        name, so a duplicate cannot be routed unambiguously.
     """
     if isinstance(X, dict):
-        return pd.DataFrame(X)
-    if isinstance(X, np.ndarray):
-        return pd.DataFrame(X, columns=pd.Index([f"feature_{i}" for i in range(X.shape[1])]))
-    return X.copy() if copy else X
+        X = pd.DataFrame(X)
+    elif isinstance(X, np.ndarray):
+        X = pd.DataFrame(X, columns=pd.Index([f"feature_{i}" for i in range(X.shape[1])]))
+    else:
+        X = X.copy() if copy else X
+
+    duplicated = X.columns[X.columns.duplicated()].unique().tolist()
+    if duplicated:
+        raise PretabDataError(
+            f"Duplicate column names are not supported: {duplicated}.\nFix: rename the columns so every name is unique."
+        )
+    return X
 
 
 def detect_column_types(X, *, cat_cutoff, treat_all_integers_as_numerical, estimator_name="Preprocessor"):
@@ -51,7 +66,7 @@ def detect_column_types(X, *, cat_cutoff, treat_all_integers_as_numerical, estim
         num_unique_values = X[col].nunique()
         total_samples = len(X[col])
 
-        if treat_all_integers_as_numerical and X[col].dtype.kind == "i":
+        if treat_all_integers_as_numerical and X[col].dtype.kind in "iu":
             numerical_features.append(col)
         else:
             if isinstance(cat_cutoff, float):
@@ -66,7 +81,7 @@ def detect_column_types(X, *, cat_cutoff, treat_all_integers_as_numerical, estim
                     "must be a float (unique-ratio cutoff) or an int (absolute unique-count cutoff)",
                 )
 
-            if X[col].dtype.kind not in "iufc" or (X[col].dtype.kind == "i" and cutoff_condition):
+            if X[col].dtype.kind not in "iufc" or (X[col].dtype.kind in "iu" and cutoff_condition):
                 categorical_features.append(col)
             else:
                 numerical_features.append(col)

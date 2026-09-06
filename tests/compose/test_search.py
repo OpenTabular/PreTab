@@ -88,6 +88,15 @@ def test_classification_uses_stratified_cv():
     assert 0.0 <= search.score(X, y) <= 1.0
 
 
+def test_candidates_share_randomized_folds(nonlinear_data):
+    X, y = nonlinear_data
+    # These aliases resolve to the same method. With identical folds their
+    # scores must agree even when the splitter has mutable RNG state.
+    cv = KFold(n_splits=3, shuffle=True, random_state=np.random.RandomState(42))
+    search = _search(LinearRegression(), ["standardization", "standard"], cv=cv).fit(X, y)
+    assert search.cv_results_["standardization"] == search.cv_results_["standard"]
+
+
 def test_empty_methods_raises(nonlinear_data):
     X, y = nonlinear_data
     with pytest.raises(InvalidParamError):

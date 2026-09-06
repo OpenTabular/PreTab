@@ -89,13 +89,16 @@ class RepresentationSearchCV(BaseEstimator):
         y_arr = np.asarray(y).ravel()
         n_samples = X.shape[0] if hasattr(X, "shape") else len(X)
         cv = cast(BaseCrossValidator, check_cv(self.cv, y_arr, classifier=is_classifier(self.estimator)))
+        # Reuse the same held-out rows for every candidate, including splitters
+        # whose random state advances on each call to split().
+        splits = list(cv.split(np.zeros(n_samples), y_arr))
 
         cv_results: dict[str, float] = {}
         best_score = -np.inf
         best_method = methods[0]
         for method in methods:
             fold_scores = []
-            for train_idx, test_idx in cv.split(np.zeros(n_samples), y_arr):
+            for train_idx, test_idx in splits:
                 pre = self._make_preprocessor(method)
                 est = cast(PredictorLike, clone(self.estimator))
                 x_train = pre.fit_transform(_row_subset(X, train_idx), y_arr[train_idx], return_array=True)

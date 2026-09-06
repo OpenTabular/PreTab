@@ -108,8 +108,8 @@ pre = Preprocessor(
     output_dim=12,
 )
 
-X_tr = pre.fit_transform(X_train, y_train, return_array=True)
-X_te = pre.transform(X_test, return_array=True)
+X_tr = pre.fit_transform(X_train, y_train)
+X_te = pre.transform(X_test)
 
 model = Ridge(alpha=1.0).fit(X_tr, y_train)
 pred = model.predict(X_te)
@@ -120,25 +120,25 @@ print(f"MAE: {mean_absolute_error(y_test, pred):.2f}")
 ```
 
 ```text
-features: 41
-R2:  0.968
-MAE: 2.16
+features: 40
+R2:  0.983
+MAE: 1.78
 ```
 
 The data and the `Ridge` model are unchanged, but the expressive features let it capture the
-nonlinear structure. The $R^2$ jumps from `0.124` to `0.968` and the mean absolute error drops
-from `11.20` to `2.16`.
+nonlinear structure. The $R^2$ jumps from `0.124` to `0.983` and the mean absolute error drops
+from `11.20` to `1.78`.
 
 ```{tip}
-`Preprocessor.transform` returns a dict of feature blocks by default. When you feed a plain
-estimator, call it with `return_array=True` to get a single stacked matrix. To compose
-everything inside one scikit-learn `Pipeline` instead, use the standalone transformers, shown
-in the [sklearn pipeline tutorial](sklearn_pipeline.md).
+`Preprocessor.transform` returns a single stacked array by default, so it drops straight into
+a plain scikit-learn estimator or `Pipeline`. Pass `output_structure="blocks"` (or
+`return_array=False` for a single call) for the dict-of-feature-blocks form instead. See the
+[sklearn pipeline tutorial](sklearn_pipeline.md) for wiring each column's transformer by hand.
 ```
 
 ## What actually changed
 
-The `Preprocessor` expands four raw columns into 41 features. Inspect the resolved layout with
+The `Preprocessor` expands four raw columns into 40 features. Inspect the resolved layout with
 `get_feature_info`:
 
 ```python
@@ -148,14 +148,14 @@ pre.get_feature_info()
 ```text
 feature  kind         pipeline                        dim   cats
 ----------------------------------------------------------------
-age      numerical    imputer -> minmax -> bspline     13      -
+age      numerical    imputer -> minmax -> bspline     12      -
 income   numerical    imputer -> minmax -> ple         12      -
 tenure   numerical    imputer -> minmax -> rbf         12      -
 city     categorical  imputer -> onehot -> to_float     4      4
 ```
 
 Each numeric column is imputed, scaled, then expanded into a basis the linear model can weight
-independently: 13 spline coefficients for `age`, 12 PLE bins for `income`, and 12 RBF bumps for
+independently: 12 spline coefficients for `age`, 12 PLE bins for `income`, and 12 RBF bumps for
 `tenure`, while `city` becomes four one-hot columns. To trace any single output column back to
 its source, use [feature lineage](../core_concepts/outputs_and_inspection.md).
 

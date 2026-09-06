@@ -180,6 +180,18 @@ def test_fixed_resolution_non_adaptive_conflict():
         FixedResolution(adaptive=False).resolve(3, 5, None, floor=1)
 
 
+def test_not_yet_implemented_resolution_stubs_are_not_public():
+    # Regression guard: CardinalityAwareResolution / DataSizeAwareResolution
+    # always raise NotImplementedError, so they must not be part of the public
+    # pretab.placement API (no user-facing "usable" class should always fail).
+    import pretab.placement as placement_pkg
+
+    assert "CardinalityAwareResolution" not in placement_pkg.__all__
+    assert "DataSizeAwareResolution" not in placement_pkg.__all__
+    assert not hasattr(placement_pkg, "CardinalityAwareResolution")
+    assert not hasattr(placement_pkg, "DataSizeAwareResolution")
+
+
 # --------------------------------------------------------------------------- #
 # Adapters
 # --------------------------------------------------------------------------- #

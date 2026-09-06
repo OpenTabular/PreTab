@@ -21,8 +21,8 @@ def fitted_ct(make_config, sample_frame):
 
 
 def test_get_output_slices_are_ordered_and_named(fitted_ct):
-    ct, X = fitted_ct
-    slices = get_output_slices(ct, X)
+    ct, _ = fitted_ct
+    slices = get_output_slices(ct)
     names = [name for name, _, _ in slices]
     assert "num_age" in names and "cat_city" in names
     starts = [start for _, start, _ in slices]
@@ -42,6 +42,18 @@ def test_build_feature_info_reports_embeddings(fitted_ct):
     ct, _ = fitted_ct
     _, _, embeddings = build_feature_info(ct, embeddings=True, embedding_dimensions={"embedding_1": 8})
     assert embeddings == {"embedding_1": {"preprocessing": None, "dimension": 8, "categories": None}}
+
+
+def test_build_feature_info_does_not_infer_kind_from_cat_in_feature_name(make_config):
+    feature = "education_category_score"
+    frame = pd.DataFrame({feature: np.linspace(0.0, 1.0, 8)})
+    ct = build_column_transformer(make_config(numerical_method="robust"), [feature], [])
+    ct.fit(frame)
+
+    numerical, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert feature in numerical
+    assert feature not in categorical
 
 
 def test_build_transformer_summary_has_header_and_rows():

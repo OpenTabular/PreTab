@@ -148,7 +148,7 @@ def test_categorical_alias_matches_canonical_output(sample_data, alias, canonica
 
 def test_alias_in_feature_preprocessing(sample_data):
     X, y = sample_data
-    pre = Preprocessor(feature_preprocessing={"num1": "STD", "cat1": "OneHot"})
+    pre = Preprocessor(feature_preprocessing={"num1": "STD", "cat1": "OneHot"}, output_structure="blocks")
     out = pre.fit_transform(X, y)
     assert "num_num1" in out
     assert "cat_cat1" in out

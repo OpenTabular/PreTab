@@ -30,7 +30,9 @@ class AdaptiveResolutionMixin:
       checking ``output_dim`` is consistent with any explicitly supplied
       ``min``/``max`` request.
     * ``adaptive is True`` -> ``lo``/``hi`` come from the requested
-      ``min``/``max`` (each falling back to ``output_dim`` when unset).
+      ``min``/``max`` (each falling back to ``output_dim`` when unset). When both
+      ``min_output_dim`` and ``max_output_dim`` are supplied, ``output_dim`` is
+      not consulted at all -- it has no effect on the resolved window.
 
     The resolved window is then validated against a family-specific ``floor``
     (minimum admissible count, e.g. ``degree + 1`` basis functions or ``1`` bin)
@@ -88,14 +90,13 @@ class AdaptiveResolutionMixin:
 
         label = floor_label if floor_label is not None else str(floor)
         if lo < floor:
+            name = "min_output_dim" if self.adaptive and min_req is not None else "output_dim"
             raise InvalidParamError(
-                f"min_output_dim must be >= {label}, got {lo}.\n"
-                "Fix: raise min_output_dim to at least the family minimum."
+                f"{name} must be >= {label}, got {lo}.\nFix: raise {name} to at least the family minimum."
             )
         if ceil is not None and hi > ceil:
-            raise InvalidParamError(
-                f"max_output_dim should be <= {ceil}, got {hi}.\nFix: lower max_output_dim to at most {ceil}."
-            )
+            name = "max_output_dim" if self.adaptive and max_req is not None else "output_dim"
+            raise InvalidParamError(f"{name} should be <= {ceil}, got {hi}.\nFix: lower {name} to at most {ceil}.")
         if lo > hi:
             raise IncompatibleParamsError(
                 f"min_output_dim must be <= max_output_dim (got min_output_dim={lo}, max_output_dim={hi})."

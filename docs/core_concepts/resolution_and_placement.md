@@ -1,6 +1,6 @@
 # Resolution and placement
 
-Two questions define any basis expansion: *how many* units to use, and *where* to put them.
+Two questions define any basis expansion: _how many_ units to use, and _where_ to put them.
 PreTab keeps these separate on purpose. Resolution answers "how many" (the output width), and
 placement answers "where" (the knots, centers, or bin edges). This page explains both and how
 they combine.
@@ -8,15 +8,21 @@ they combine.
 ## Resolution: the `output_dim` width
 
 `output_dim` is the main capacity control. It sets the number of non-bias output columns per
-input feature: bins for PLE and binning, centers for the feature maps, and basis functions
-for the splines. A larger value captures finer structure at the cost of more columns and a
-higher chance of overfitting. A smaller value is more compact and regularizes the
-representation.
+input feature: basis functions for the splines, centers for the feature maps, and bins for
+PLE. A larger value captures finer structure at the cost of more columns and a higher chance
+of overfitting. A smaller value is more compact and regularizes the representation.
 
 ```{note}
 When you configure through the `Preprocessor`, its single `output_dim` (default `7`) is
 forwarded to **every** numerical method. Per-transformer defaults only apply when you build a
 transformer directly, for example `RBFExpansionTransformer()`.
+```
+
+```{warning}
+Numeric binning (`custombin`) is the one exception: `output_dim` sets the number of *bins*,
+but with the default `encode="ordinal"` each input feature still emits a single output
+column holding the bin index. Pass `encode="onehot"` or `encode="soft"` if you want
+`output_dim` to also control the output width.
 ```
 
 ### Spline width has a floor
@@ -25,12 +31,12 @@ Each spline enforces a minimum width tied to its degree. Requesting fewer basis 
 than the floor raises an error at `fit` time rather than silently clamping, so keep
 `output_dim` at or above the floor.
 
-| Family | Minimum width (floor) |
-| --- | --- |
+| Family                            | Minimum width (floor)                             |
+| --------------------------------- | ------------------------------------------------- |
 | B, M, I, P-spline, tensor-product | `degree + 1` (so `4` at the default cubic degree) |
-| Cubic regression spline | `3` (three polynomial terms plus interior knots) |
-| Natural cubic spline | `2` (places `output_dim + 1` knots) |
-| Feature maps, PLE, binning | `1` |
+| Cubic regression spline           | `3` (three polynomial terms plus interior knots)  |
+| Natural cubic spline              | `2` (places `output_dim + 1` knots)               |
+| Feature maps, PLE, binning        | `1`                                               |
 
 ```{warning}
 For the tensor-product spline the width grows as the **product** across marginal dimensions.
@@ -46,12 +52,18 @@ instead.
 
 `adaptive`
 : When `True`, the width for each feature is chosen from the data and kept inside
-  `[min_output_dim, max_output_dim]`. Fixed-width methods such as the plain scalers ignore
-  this flag.
+`[min_output_dim, max_output_dim]`. Fixed-width methods such as the plain scalers ignore
+this flag.
 
 `min_output_dim`, `max_output_dim`
 : The lower and upper bounds that apply only when `adaptive=True` (defaults `5` and `10`).
-  They are ignored otherwise.
+They are ignored otherwise.
+
+```{note}
+When `adaptive=True` and both `min_output_dim` and `max_output_dim` are set, `output_dim` has
+no effect at all: the window comes entirely from the two bounds. `output_dim` only matters in
+adaptive mode when one of the bounds is left unset, where it fills in for the missing one.
+```
 
 ```python
 from pretab import Preprocessor
@@ -78,17 +90,19 @@ placement subsystem so no transformer re-implements it, and it is driven by two 
 `placement_strategy`
 : How the positions are chosen. Valid values depend on `target_aware`.
 
-| `target_aware` | Allowed `placement_strategy` | Meaning |
-| --- | --- | --- |
-| `False` | `"uniform"` | Evenly spaced across the observed range. |
-| `False` | `"quantile"` | Spaced by data density, more units where data is dense. |
-| `True` | `"cart"` | Split points from a per-feature decision tree fit against `y`. |
-| `True` | `"lightgbm"` | Split points aggregated from gradient-boosted trees (needs the `lightgbm` extra). |
+| `target_aware` | Allowed `placement_strategy` | Meaning                                                                           |
+| -------------- | ---------------------------- | --------------------------------------------------------------------------------- |
+| `False`        | `"uniform"`                  | Evenly spaced across the observed range.                                          |
+| `False`        | `"quantile"`                 | Spaced by data density, more units where data is dense.                           |
+| `True`         | `"cart"`                     | Split points from a per-feature decision tree fit against `y`.                    |
+| `True`         | `"lightgbm"`                 | Split points aggregated from gradient-boosted trees (needs the `lightgbm` extra). |
 
 ```{warning}
 The unsupervised and target-aware rows are mutually exclusive. Combining them, for example
-`target_aware=True` with `placement_strategy="quantile"`, raises an error. Leave
-`placement_strategy` unset to get the sensible default for whichever mode you picked.
+`target_aware=True` with `placement_strategy="quantile"`, raises an error.
+`Preprocessor.placement_strategy` defaults to `"cart"` (paired with `target_aware=True`), so
+switching to `target_aware=False` also means passing `placement_strategy="uniform"` or
+`"quantile"` explicitly, otherwise the mismatched default raises an error.
 ```
 
 Target-aware placement is a supervised decision and carries leakage considerations. See
@@ -106,13 +120,13 @@ are enforced from the capability registry, so an invalid request fails loudly.
 
 ## Method-specific placement rules
 
-| Method | Placement behaviour |
-| --- | --- |
-| PLE | Target-aware always (`"cart"` or `"lightgbm"`). |
-| P-spline | `"uniform"` only, unsupervised (the difference penalty assumes regular knots). |
-| Feature maps, freely-placed knot splines | Any of the four strategies. |
-| Thin-plate spline | Landmark points (k-means), not ordinary knots. |
-| Fourier features | Frequencies derived from the data, not placement knots. |
+| Method                                   | Placement behaviour                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------ |
+| PLE                                      | Target-aware always (`"cart"` or `"lightgbm"`).                                |
+| P-spline                                 | `"uniform"` only, unsupervised (the difference penalty assumes regular knots). |
+| Feature maps, freely-placed knot splines | Any of the four strategies.                                                    |
+| Thin-plate spline                        | Landmark points (k-means), not ordinary knots.                                 |
+| Fourier features                         | Frequencies derived from the data, not placement knots.                        |
 
 ## Where to go next
 

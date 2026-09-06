@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from pretab.compose.feature_detection import detect_column_types, to_dataframe
-from pretab.exceptions import InvalidParamError
+from pretab.exceptions import InvalidParamError, PretabDataError
 
 
 def test_to_dataframe_wraps_ndarray_with_feature_names():
@@ -22,6 +22,17 @@ def test_to_dataframe_returns_same_object_without_copy():
     df = pd.DataFrame({"a": [1, 2]})
     assert to_dataframe(df) is df
     assert to_dataframe(df, copy=True) is not df
+
+
+def test_to_dataframe_rejects_duplicate_columns():
+    """Regression guard for issue #37: a duplicate column label must raise a
+
+    clear PretabDataError instead of an opaque AttributeError deep inside
+    column-type detection.
+    """
+    df = pd.DataFrame(np.column_stack([np.zeros(5), np.ones(5)]), columns=pd.Index(["a", "a"]))
+    with pytest.raises(PretabDataError, match=r"Duplicate column names.*\['a'\]"):
+        to_dataframe(df)
 
 
 def test_float_cutoff_uses_unique_ratio():
@@ -44,6 +55,38 @@ def test_treat_all_integers_as_numerical_overrides_cutoff():
     df = pd.DataFrame({"x": [1, 2, 3, 1, 2, 3]})
     num, cat = detect_column_types(df, cat_cutoff=0.9, treat_all_integers_as_numerical=True)
     assert num == ["x"] and cat == []
+
+
+@pytest.mark.parametrize("dtype", [np.int8, np.uint8])
+@pytest.mark.parametrize(
+    "cat_cutoff, expected_numerical, expected_categorical",
+    [
+        (0.6, [], ["x"]),
+        (0.4, ["x"], []),
+        (4, [], ["x"]),
+        (2, ["x"], []),
+    ],
+)
+def test_signed_and_unsigned_integers_follow_same_cutoff(dtype, cat_cutoff, expected_numerical, expected_categorical):
+    df = pd.DataFrame({"x": np.array([1, 2, 3, 1, 2, 3], dtype=dtype)})
+    numerical, categorical = detect_column_types(
+        df,
+        cat_cutoff=cat_cutoff,
+        treat_all_integers_as_numerical=False,
+    )
+    assert numerical == expected_numerical
+    assert categorical == expected_categorical
+
+
+def test_treat_all_unsigned_integers_as_numerical_overrides_cutoff():
+    df = pd.DataFrame({"x": np.array([0, 1, 0, 1], dtype=np.uint8)})
+    numerical, categorical = detect_column_types(
+        df,
+        cat_cutoff=0.9,
+        treat_all_integers_as_numerical=True,
+    )
+    assert numerical == ["x"]
+    assert categorical == []
 
 
 def test_object_dtype_is_always_categorical():

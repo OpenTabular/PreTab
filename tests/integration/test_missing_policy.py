@@ -161,9 +161,104 @@ def test_separate_state_on_categorical(y):
     assert any(n.endswith("__missing") for n in names)
 
 
+def test_separate_state_feature_info_reports_both_branches(frame_with_nan, y):
+    p = _bspline(missing_policy="separate_state").fit(frame_with_nan, y)
+
+    numerical, categorical, embeddings = p.get_feature_info(verbose=False)
+
+    assert categorical == {}
+    assert embeddings == {}
+    for feature in frame_with_nan.columns:
+        assert "representation(" in numerical[feature]["preprocessing"]
+        assert "+ missing" in numerical[feature]["preprocessing"]
+        assert numerical[feature]["dimension"] == p.output_dims_[feature]
+
+
+def test_separate_state_verbose_two_does_not_break_fit(frame_with_nan, y):
+    fitted = _bspline(missing_policy="separate_state", verbose=2).fit(frame_with_nan, y)
+    assert fitted.total_output_dim_ > 0
+
+
+def test_separate_state_lineage_distinguishes_missing_indicator(frame_with_nan, y):
+    p = Preprocessor(numerical_method="minmax", missing_policy="separate_state").fit(frame_with_nan, y)
+
+    lineage = p.get_feature_lineage()
+    representation = [record for record in lineage if record.family != "missing_state"]
+    missing = [record for record in lineage if record.family == "missing_state"]
+
+    assert len(missing) == len(frame_with_nan.columns)
+    assert all(record.family == "minmax" and record.component == "raw" for record in representation)
+    assert all(record.component == "indicator" for record in missing)
+    assert all(record.output_feature.endswith("__missing") for record in missing)
+    assert [record.output_feature for record in lineage] == list(p.get_feature_names_out())
+
+
 # --- validation ----------------------------------------------------------------
 
 
 def test_invalid_missing_policy_raises(frame_with_nan, y):
     with pytest.raises(InvalidParamError):
         _bspline(missing_policy="nonsense").fit(frame_with_nan, y)
+
+
+# --- add_missing_indicator with imputation disabled ----------------------------
+
+
+def test_add_missing_indicator_with_imputation_none_emits_standalone_column(frame_with_nan, y):
+    """Regression guard: add_missing_indicator=True must work even when the
+    imputer for that column kind is disabled, per the documented "standalone
+    indicator when imputation is disabled" contract."""
+    p = Preprocessor(
+        numerical_method="minmax",
+        numerical_imputation=None,
+        add_missing_indicator=True,
+    ).fit(frame_with_nan, y)
+
+    names = list(p.get_feature_names_out())
+    missing_cols = [n for n in names if n.endswith("__missing")]
+    assert len(missing_cols) == len(frame_with_nan.columns)
+
+
+def test_add_missing_indicator_with_imputation_none_still_propagates_nan(frame_with_nan, y):
+    """The representation branch is unaffected: NaN still reaches the transformer
+    unchanged, only the standalone indicator is added alongside it."""
+    p = Preprocessor(
+        numerical_method="minmax",
+        numerical_imputation=None,
+        add_missing_indicator=True,
+    ).fit(frame_with_nan, y)
+
+    out = np.asarray(p.transform(frame_with_nan, return_array=True))
+    assert np.isnan(out).any()
+
+
+def test_add_missing_indicator_numerical_only_disabled(y):
+    """Regression guard: a numerical-only imputation=None combined with a
+    categorical column that has no missing values must still produce the
+    standalone numerical indicator (previously silently dropped)."""
+    frame = pd.DataFrame({"a": [1.0, 2.0, np.nan, 4.0], "c": ["x", "y", "x", "y"]})
+    p = Preprocessor(
+        numerical_method="minmax",
+        categorical_method="int",
+        numerical_imputation=None,
+        add_missing_indicator=True,
+    ).fit(frame, y[:4])
+
+    names = list(p.get_feature_names_out())
+    assert any(n.endswith("__missing") for n in names)
+
+
+def test_add_missing_indicator_no_longer_requires_imputation_enabled(frame_with_nan, y):
+    """add_missing_indicator=True with both imputations disabled used to raise
+    IncompatibleParamsError; it must now fit successfully via standalone
+    indicators for every column."""
+    p = Preprocessor(
+        numerical_method="minmax",
+        numerical_imputation=None,
+        categorical_imputation=None,
+        add_missing_indicator=True,
+    ).fit(frame_with_nan, y)
+    out = np.asarray(p.transform(frame_with_nan, return_array=True))
+    assert out.size > 0
+    assert np.isnan(out).any()
+    assert p.total_output_dim_ > 0

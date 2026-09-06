@@ -1,6 +1,23 @@
 # Installation
 
-pretab supports Python 3.10 to 3.13.
+pretab supports Python 3.10 to 3.13, with the following minimum core dependency versions:
+
+| Dependency     | Minimum |
+| -------------- | ------- |
+| `numpy`        | 1.24    |
+| `pandas`       | 2.0     |
+| `scipy`        | 1.10    |
+| `scikit-learn` | 1.6     |
+
+```{note}
+`scikit-learn>=1.6` is required for the `__sklearn_tags__` tag-dispatch API pretab's
+transformers use. A dedicated CI job installs exactly these minimum versions and runs the
+test suite against them, so this floor is verified, not just declared.
+```
+
+The core dependencies are NumPy >=1.24,<3, pandas >=2,<3, SciPy >=1.10,<2,
+and scikit-learn >=1.6,<2. The scikit-learn minimum matches the validation and
+estimator-tag APIs used by PreTab.
 
 ## From PyPI
 
@@ -25,10 +42,32 @@ to use the `pretrained` categorical strategy.
 ```
 
 The `lightgbm` extra enables the gradient-boosted `placement_strategy="lightgbm"` for
-supervised knot, center, and threshold selection:
+supervised knot, center, and threshold selection. By default, PreTab uses the built-in
+`"cart"` strategy for target-aware placement, so LightGBM is only needed when you
+explicitly opt into the boosted strategy:
 
 ```bash
 pip install "pretab[lightgbm]"
+```
+
+```{note}
+The `lightgbm` extra is required only for `placement_strategy="lightgbm"`. If you do
+not set that strategy explicitly, PreTab uses the default `"cart"` path and does not
+need the optional dependency installed.
+```
+
+The `polars` extra enables `set_output(transform="polars")`, so `Preprocessor.transform`
+returns a `polars.DataFrame` instead of a NumPy array or dict:
+
+```bash
+pip install "pretab[polars]"
+```
+
+```{note}
+`polars` is only needed for the `set_output(transform="polars")` output path; every other
+output (`output_structure="matrix"`/`"blocks"`, `output_format="dense"`/`"sparse"`,
+`set_output(transform="pandas")`) works without it. Requesting `"polars"` output without the
+extra installed raises a clear `OptionalDependencyError`.
 ```
 
 Use the convenience `all` extra to install every optional dependency at once:

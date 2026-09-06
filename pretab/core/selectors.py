@@ -26,7 +26,7 @@ import numpy as np
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from ..exceptions import IncompatibleParamsError, OptionalDependencyError
-from .knots import quantile_knots
+from .knots import quantile_knots, select_knots
 
 Task = Literal["regression", "classification"]
 
@@ -129,7 +129,12 @@ class BaseLocationSelector(ABC):
         raise NotImplementedError
 
     def _enforce_spacing(self, split_points: list[float], x: np.ndarray) -> list[float]:
-        """Drop locations closer than ``min_location_spacing`` of the range."""
+        """Drop locations closer than ``min_location_spacing`` of the range.
+
+        Compares each candidate against every already-kept location so the filter
+        is order-independent and honours both ascending (CART) and gain-descending
+        (LightGBM) ordering.
+        """
         if len(split_points) <= 1:
             return split_points
 
@@ -138,19 +143,28 @@ class BaseLocationSelector(ABC):
 
         spaced = [split_points[0]]
         for point in split_points[1:]:
-            if point - spaced[-1] >= min_distance:
+            if all(abs(point - kept) >= min_distance for kept in spaced):
                 spaced.append(point)
 
         return spaced
 
     def _supplement(self, existing: list[float], x: np.ndarray, target_count: int) -> list[float]:
-        """Top up an under-filled location set with quantile locations."""
-        if target_count - len(existing) <= 0:
+        """Top up an under-filled location set with quantile locations.
+
+        Keeps every existing (selector-found) location and fills only the
+        shortfall with quantile candidates, rather than truncating the union
+        (which would preferentially drop the largest existing values).
+        """
+        missing = target_count - len(existing)
+        if missing <= 0:
             return existing
 
-        quantile_candidates = quantile_knots(x, target_count)
-        all_locations = set(existing) | set(quantile_candidates.tolist())
-        return sorted(all_locations)[:target_count]
+        existing_set = set(existing)
+        candidates = [c for c in quantile_knots(x, target_count).tolist() if c not in existing_set]
+        combined = sorted(existing_set | set(candidates[:missing]))
+        if len(combined) > target_count:
+            combined = select_knots(np.array(combined), target_count).tolist()
+        return combined
 
 
 class CARTLocationSelector(BaseLocationSelector):

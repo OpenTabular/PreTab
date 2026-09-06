@@ -55,6 +55,18 @@ def test_set_params_allowed_before_freeze(frame, target):
     assert p.output_dim == 9
 
 
+@pytest.mark.parametrize("method", ["fit", "fit_transform"])
+def test_frozen_fit_rejected_without_mutating_state(frame, target, method):
+    p = _make().fit(frame, target).freeze()
+    fingerprint = p.fingerprint_
+    original = p.transform(frame, return_array=True)
+    changed = frame.assign(a=frame["a"] * 100)
+    with pytest.raises(FrozenRepresentationError, match="frozen"):
+        getattr(p, method)(changed, target)
+    assert p.fingerprint_ == fingerprint
+    np.testing.assert_array_equal(p.transform(frame, return_array=True), original)
+
+
 def test_clone_unfitted_returns_fresh_unfrozen(frame, target):
     p = _make().fit(frame, target).freeze()
     clone = p.clone_unfitted()

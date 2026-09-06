@@ -1,8 +1,5 @@
 {
-  "shape": [
-    200,
-    29
-  ],
+  "shape": [200, 29],
   "feature_names": [
     "num_num_linear_ncs0",
     "num_num_linear_ncs1",

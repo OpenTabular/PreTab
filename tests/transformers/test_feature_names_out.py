@@ -6,6 +6,7 @@ instead of raising, for ``NoTransformer``, ``ToFloatTransformer`` and
 import numpy as np
 import pytest
 
+from pretab.exceptions import PretabDataError
 from pretab.transformers import (
     ContinuousOrdinalTransformer,
     NoTransformer,
@@ -45,3 +46,18 @@ def test_continuous_ordinal_passthrough_names():
         transformer.get_feature_names_out(["c1", "c2"]),
         np.asarray(["c1", "c2"], dtype=object),
     )
+
+
+@pytest.mark.parametrize(
+    "X_transform",
+    [
+        np.array([["a"], ["b"]], dtype=object),
+        np.array([["a", "x", "extra"], ["b", "y", "extra"]], dtype=object),
+    ],
+)
+def test_continuous_ordinal_rejects_fitted_feature_count_mismatch(X_transform):
+    X_fit = np.array([["a", "x"], ["b", "y"]], dtype=object)
+    transformer = ContinuousOrdinalTransformer().fit(X_fit)
+
+    with pytest.raises(PretabDataError, match="is expecting 2 features"):
+        transformer.transform(X_transform)

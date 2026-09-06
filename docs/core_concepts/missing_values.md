@@ -1,23 +1,15 @@
 # Missing values
 
-Missing data is handled explicitly in PreTab, never silently. You control it with a small set
-of imputation parameters and, when you need finer behaviour, a single `missing_policy`. This
-page explains both and the rule that ties them together: imputers are fit on the training
-data only, and no rows are ever dropped.
+Missing data is handled explicitly, never silently: a small set of imputation parameters
+covers the common case, and a single `missing_policy` gives finer control when you need it.
 
 ## Imputation parameters
 
-Three parameters on `Preprocessor` control the common case.
-
-`numerical_imputation`
-: Strategy for numerical columns. Default `"median"`. Set to `None` to disable.
-
-`categorical_imputation`
-: Strategy for categorical columns. Default `"most_frequent"`. Set to `None` to disable.
-
-`add_missing_indicator`
-: When `True`, adds a binary indicator column marking where a value was missing. Default
-  `False`.
+| Parameter                | Meaning                                                           | Default           |
+| ------------------------ | ----------------------------------------------------------------- | ----------------- |
+| `numerical_imputation`   | Strategy for numerical columns. `None` disables it.               | `"median"`        |
+| `categorical_imputation` | Strategy for categorical columns. `None` disables it.             | `"most_frequent"` |
+| `add_missing_indicator`  | Adds a binary indicator column marking where a value was missing. | `False`           |
 
 ```python
 from pretab import Preprocessor
@@ -30,27 +22,18 @@ pre = Preprocessor(
 ```
 
 ```{note}
-Setting an imputation strategy to `None` disables imputation for that column kind. The
-missing values then reach the transformer directly: scikit-learn scalers tolerate `NaN`,
-while finite-only representations such as PLE, the splines, the feature maps, and binning
-raise a typed error. That is intentional, an expansion of an undefined value has no meaning.
+Disabling imputation lets `NaN` reach the transformer directly. Scalers, splines, and the
+feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) tolerate it, so an affected row's output is
+itself undefined; finite-only methods (PLE, numeric binning, periodic encoding, Fourier
+features, `rff`, `nystroem`) raise a typed error instead, since expanding an undefined value
+has no meaning for them. `add_missing_indicator=True` still works with imputation disabled: it
+routes through the same `__missing` branch `missing_policy="separate_state"` uses below.
 ```
-
-```{warning}
-Requesting `add_missing_indicator=True` while both imputation strategies are disabled raises
-`IncompatibleParamsError`. An indicator without a filled value leaves the basis with nothing
-to expand.
-```
-
-## Fit on train, apply to test
-
-Imputers learn their fill values from the data passed to `fit`, and only that data. When you
-later call `transform` on new rows, the stored fill values are reused. This keeps the split
-clean and prevents test statistics from leaking into training.
 
 ```{important}
-PreTab never drops rows to deal with missing values. Every input row produces an output row.
-This preserves alignment with your target and any parallel arrays.
+Imputers fit their fill values only on the data passed to `fit`, and reuse those values
+unchanged at `transform`. PreTab never drops a row for missing values: every input row
+produces an output row.
 ```
 
 ## The `missing_policy` control
@@ -58,13 +41,13 @@ This preserves alignment with your target and any parallel arrays.
 For finer control, `missing_policy` selects one of five behaviours for the whole
 preprocessor.
 
-| Policy | Behaviour |
-| --- | --- |
-| `"error"` | Reject any missing value at `fit` and `transform`. |
-| `"propagate"` | Pass missing values through to the transformer unchanged. |
-| `"impute"` | Fill using the imputation parameters above. |
-| `"impute_with_indicator"` | Impute and add a missing indicator column. |
-| `"separate_state"` | Impute the basis, and add a dedicated `__missing` column that does not activate the ordinary basis. |
+| Policy                    | Behaviour                                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| `"error"`                 | Reject any missing value at `fit` and `transform`.                                                  |
+| `"propagate"`             | Pass missing values through to the transformer unchanged.                                           |
+| `"impute"`                | Fill using the imputation parameters above.                                                         |
+| `"impute_with_indicator"` | Impute and add a missing indicator column.                                                          |
+| `"separate_state"`        | Impute the basis, and add a dedicated `__missing` column that does not activate the ordinary basis. |
 
 ```python
 pre = Preprocessor(missing_policy="separate_state")
@@ -72,26 +55,17 @@ pre = Preprocessor(missing_policy="separate_state")
 
 ### Separate state
 
-`"separate_state"` is the most expressive option. For each affected column it keeps the
-imputed value flowing into the normal basis and, in parallel, emits a `__missing` indicator
-that a model can weight on its own. This lets the model learn a distinct effect for
-"missing" without corrupting the shape learned on observed values.
+`"separate_state"` is the most expressive option: it keeps the imputed value flowing into the
+normal basis while emitting a parallel `__missing` indicator a model can weight on its own, so
+it can learn a distinct effect for "missing" without corrupting the shape learned on observed
+values.
 
 ```{tip}
-Reach for `"separate_state"` when missingness is itself informative, for example a field that
-users leave blank for a meaningful reason. Reach for plain `"impute"` when a value is missing
-purely at random.
+Reach for `"separate_state"` (or `add_missing_indicator=True`) when missingness itself carries
+signal. Reach for plain `"impute"` when a value is missing purely at random, `"error"` to catch
+missingness as a data bug, and `"propagate"` (with imputation disabled) to handle it upstream
+yourself.
 ```
-
-## Choosing an approach
-
-- **Missing at random, not informative**: `numerical_imputation` / `categorical_imputation`
-  (the default), no indicator.
-- **Missingness may carry signal**: add `add_missing_indicator=True`, or use
-  `missing_policy="separate_state"`.
-- **Missing values are a data error you want to catch**: `missing_policy="error"`.
-- **You will handle missingness upstream**: `missing_policy="propagate"` with imputation
-  disabled.
 
 ## Where to go next
 

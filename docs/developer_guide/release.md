@@ -8,15 +8,47 @@ publishing itself runs on GitHub Actions using
 tokens are stored anywhere.
 
 For the SemVer rules and commit conventions that decide the next version, see
-[Versioning](versioning.md).
+[Versioning](contributing.md#versioning).
 
 ## Overview
 
-| Stage             | Trigger                         | Workflow                     | Target   |
-| ----------------- | ------------------------------- | ---------------------------- | -------- |
-| Build check       | `workflow_dispatch` (manual)    | `build-check.yml`            | Artifact |
-| Release candidate | Tag `vX.Y.ZrcN`                 | `publish-testpypi.yml`       | TestPyPI |
-| Stable release    | Tag `vX.Y.Z`                    | `publish-pypi.yml`           | PyPI     |
+| Stage             | Trigger                      | Workflow               | Target   |
+| ----------------- | ---------------------------- | ---------------------- | -------- |
+| Build check       | `workflow_dispatch` (manual) | `build-check.yml`      | Artifact |
+| Release candidate | Tag `vX.Y.ZrcN`              | `publish-testpypi.yml` | TestPyPI |
+| Stable release    | Tag `vX.Y.Z`                 | `publish-pypi.yml`     | PyPI     |
+
+## What runs when
+
+`ci.yml` and `docs.yml` trigger on both `main` and `release/**` branches, so a commit
+pushed straight to a release branch (step 4 below) gets the same feedback as a commit on
+`main`, without waiting for the next RC tag.
+
+| Event                |   `ci.yml`    |      `docs.yml`      | Publish workflow       |
+| -------------------- | :-----------: | :------------------: | ---------------------- |
+| PR into `main`       |      ✅       | ✅ (docs paths only) | -                      |
+| Push to `main`       |      ✅       |          ✅          | -                      |
+| Push to `release/**` |      ✅       |          ✅          | -                      |
+| Push tag `vX.Y.ZrcN` | ✅ (via `qa`) |   ✅ (via `docs`)    | `publish-testpypi.yml` |
+| Push tag `vX.Y.Z`    | ✅ (via `qa`) |   ✅ (via `docs`)    | `publish-pypi.yml`     |
+
+Every publish workflow re-runs the full `ci.yml`/`docs.yml` gate on the exact tagged
+commit before anything is uploaded, rather than trusting whatever last passed on `main`.
+
+## QA gate checks
+
+| Check                                                | Job in `ci.yml`                |
+| ---------------------------------------------------- | ------------------------------ |
+| Lint (`ruff check`, `ruff format --check`)           | `lint`                         |
+| Type checking (`pyright`)                            | `typecheck`                    |
+| Package build + `twine check`                        | `build`                        |
+| Full test matrix (3.10-3.13, 3 OSes)                 | `tests`                        |
+| Minimum supported dependency versions                | `minimum-deps`                 |
+| Smoke test + quickstart script                       | `smoke`                        |
+| Coverage (fails under 90%)                           | `coverage`                     |
+| Optional extras (`embeddings`, `lightgbm`, `polars`) | `optional-deps`                |
+| Docs build (`sphinx-build -W --keep-going`)          | `docs.yml` (separate workflow) |
+| Wheel install + import smoke test                    | publish workflow's own steps   |
 
 ## Prerequisites
 
@@ -73,8 +105,16 @@ pip install --index-url https://test.pypi.org/simple/ \
 python -c "import pretab; print(pretab.__version__)"
 ```
 
-If the candidate has problems, fix them on the branch, then repeat step 3 to produce the
-next RC (`rc2`, `rc3`, ...).
+If the candidate has problems, fix them on the branch and produce the next RC:
+
+```bash
+just bump-rc-preview     # confirm the proposed version (e.g. 1.0.0rc2)
+just bump-rc             # apply the bump: pyproject.toml, CHANGELOG.md, commit, tag
+git push origin release/vX.Y.Z
+git push origin vX.Y.ZrcN
+```
+
+Repeat for each additional RC (`rc3`, `rc4`, ...) until the build is clean.
 
 ### 5. Merge to main
 
@@ -95,6 +135,9 @@ git push origin vX.Y.Z
 
 The `publish-pypi.yml` workflow builds the package, verifies the tag matches the project
 version, publishes to PyPI, and creates the GitHub Release.
+
+See [What runs when](#what-runs-when) and [QA gate checks](#qa-gate-checks) above for
+exactly what both publishing workflows wait on before uploading.
 
 ### 7. Confirm
 

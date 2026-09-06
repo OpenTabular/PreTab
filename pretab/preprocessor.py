@@ -1,5 +1,4 @@
 import hashlib
-import inspect
 import json
 import os
 import time
@@ -22,9 +21,16 @@ from .compose.inspection import (
     clean_feature_names,
     get_output_slices,
 )
-from .compose.output import compute_output_report, format_output, to_dataframe_output
+from .compose.output import (
+    compute_output_report,
+    format_output,
+    resolve_embedding_dimensions,
+    to_dataframe_output,
+    validate_embedding_request,
+)
 from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
 from .core.logging import configure_logging, get_logger
+from .core.parameters import UNSET
 from .core.policy import RepresentationPolicy, apply_constant_policy
 from .exceptions import (
     ConfigWarning,
@@ -39,28 +45,67 @@ logger = get_logger(__name__)
 
 #: Named parameter bundles exposed through ``Preprocessor(preset=...)``. Each
 #: preset supplies values only for the listed parameters; any parameter the caller
-#: sets explicitly (i.e. away from its ``__init__`` default) overrides the preset.
+#: sets explicitly overrides the preset. ``__init__`` defaults every parameter listed
+#: here to :data:`~pretab.core.parameters.UNSET` (rather than its ordinary value) so
+#: "left unset" can be told apart from "explicitly passed the same value the default
+#: happens to have" -- see :meth:`Preprocessor._resolved_params`. ``numerical_method``
+#: is deliberately absent here: every preset resolves it from ``task`` instead, via
+#: :func:`_preset_numerical_method`.
 PRESETS = {
     "standard": {
-        "numerical_method": "ple",
         "categorical_method": "int",
         "output_dim": 7,
         "adaptive": False,
     },
     "expanded": {
-        "numerical_method": "ple",
         "categorical_method": "one-hot",
-        "output_dim": 16,
+        "output_dim": 10,
         "adaptive": False,
     },
     "adaptive": {
-        "numerical_method": "ple",
         "categorical_method": "int",
         "adaptive": True,
-        "min_output_dim": 5,
-        "max_output_dim": 16,
+        "min_output_dim": 7,
+        "max_output_dim": 15,
     },
 }
+
+
+def _preset_numerical_method(task) -> str:
+    """Return the preset numerical method for a given ``task``.
+
+    Splines (``"bspline"``) are the preset default for regression, and piecewise-linear
+    encoding (``"ple"``) remains the default for classification.
+    """
+    return "bspline" if task == "regression" else "ple"
+
+
+#: True ``__init__`` defaults for the parameters presets may override. These are
+#: substituted back in by :meth:`Preprocessor._resolved_params` wherever the
+#: constructor received :data:`~pretab.core.parameters.UNSET`.
+_PRESET_PARAM_DEFAULTS = {
+    "numerical_method": "ple",
+    "categorical_method": "int",
+    "output_dim": 7,
+    "adaptive": False,
+    "min_output_dim": 7,
+    "max_output_dim": 10,
+}
+
+
+def _method_summary(features, *, is_numerical: bool, config: PreprocessorConfig) -> str:
+    """Summarize the resolved method(s) actually used across ``features``.
+
+    Returns the single method name when every feature resolves to the same one
+    (the common case, and historically what the fit-summary log line showed).
+    When ``feature_preprocessing`` overrides make features of the same kind
+    resolve to different methods, returns a "mixed: ..." listing instead of
+    silently reporting just the global default.
+    """
+    methods = sorted({config.method_for(feature, is_numerical=is_numerical) for feature in features})
+    if len(methods) <= 1:
+        return methods[0] if methods else "none"
+    return "mixed: " + ", ".join(methods)
 
 
 class Preprocessor(TransformerMixin, BaseEstimator):
@@ -93,9 +138,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     categorical_method : str, default="int"
         Preprocessing strategy applied to every categorical column unless overridden per feature.
         Choices: ``"int"`` (contiguous integer codes), ``"one-hot"`` (dummy columns),
-        ``"onehot_from_ordinal"`` (integer codes then one-hot), ``"pretrained"`` (sentence-transformer
-        language embeddings), and ``"custombin"`` (discretized bin codes). Pass ``None`` (resolved to
-        ``"none"``) to leave categorical columns unchanged.
+        ``"onehot_from_ordinal"`` (one-hot from an already integer-coded column; raises if the
+        input is not already ordinal-encoded), and ``"pretrained"`` (sentence-transformer
+        language embeddings). Pass ``None`` (resolved to ``"none"``) to leave categorical
+        columns unchanged.
     feature_preprocessing : dict, optional
         Mapping of individual column names to a method, overriding the global ``numerical_method`` /
         ``categorical_method`` for those columns only, e.g.
@@ -106,6 +152,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         columns produced per input feature (bins for PLE/binning, centers for the feature maps,
         basis functions for the splines). The B/M/I splines clamp it into their supported
         ``[5, 50]`` range. Used as the fixed per-feature width when ``adaptive`` is False.
+        When ``adaptive`` is True *and* both ``min_output_dim`` and ``max_output_dim`` are
+        set, ``output_dim`` is ignored entirely: the per-feature width is chosen freely within
+        ``[min_output_dim, max_output_dim]``.
     degree : int, default=3
         Polynomial / spline basis degree, used by ``"polynomial"`` and the spline methods
         (``"cubicspline"``, ``"pspline"``, ``"bspline"``, ...). Ignored by methods without a degree.
@@ -123,16 +172,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         feature range) or ``"quantile"`` (spaced by the data quantiles). Applies to the feature
         maps, PLE, and the knot-based splines (``"bspline"`` / ``"mspline"`` / ``"ispline"`` /
         ``"cubicspline"`` / ``"naturalspline"``); the always-target-aware ``"ple"`` only honors the
-        supervised strategies, while the penalized ``"pspline"`` / ``"tensorspline"`` (which assume
-        equally-spaced knots) and the kernel-based ``"tprs"`` only honor the unsupervised ones.
+        supervised strategies, while the penalized ``"pspline"`` only honors uniform placement.
+        Multivariate tensor-product and thin-plate splines are available as standalone transformers.
     task : str, default="regression"
         Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
         place basis units / knots against ``y``. Only consulted when ``target_aware`` is True.
     adaptive : bool, default=False
         Whether adaptive-capable methods size each feature's output dimension from the data
         (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
-        Fixed-width methods (e.g. plain scalers) ignore this flag.
-    min_output_dim : int, default=5
+        Fixed-width methods (e.g. plain scalers) ignore this flag. When True and both bounds
+        are set, ``output_dim`` itself has no effect (see above).
+    min_output_dim : int, default=7
         Lower bound on the per-feature output dimension when ``adaptive`` is True. Ignored by
         fixed-width methods and when ``adaptive`` is False.
     max_output_dim : int, default=10
@@ -166,8 +216,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         disables imputation for categorical columns.
     add_missing_indicator : bool, default=False
         If True, append a binary missing-value indicator column for each imputed feature (via the
-        imputer's ``add_indicator``; a standalone ``MissingIndicator`` is used when imputation is
-        disabled). Applies to both numerical and categorical pipelines.
+        imputer's ``add_indicator``; a standalone :class:`~pretab.transformers.MissingStateIndicator`
+        is used instead when imputation is disabled for that column kind). Applies to both
+        numerical and categorical pipelines.
     missing_policy : {"error", "propagate", "impute", "impute_with_indicator", "separate_state"} or None, default=None
         High-level missing-value strategy. ``None`` (default) keeps the explicit
         ``numerical_imputation`` / ``categorical_imputation`` / ``add_missing_indicator``
@@ -206,6 +257,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         :class:`~pretab.exceptions.OutputBudgetError`, ``"warn"`` emits a
         :class:`~pretab.exceptions.ConfigWarning`, ``"ignore"`` proceeds silently.
         Only takes effect when at least one budget parameter above is set.
+    output_structure : {"matrix", "blocks"}, default="matrix"
+        Top-level shape ``transform`` / ``fit_transform`` return when ``return_array`` is not
+        passed explicitly. ``"matrix"`` (the default) returns a single stacked array, so a
+        plain ``sklearn.pipeline.Pipeline([("pretab", Preprocessor(...)), ("model",
+        estimator)])`` composes like any other transformer. ``"blocks"`` returns the dict of
+        per-feature blocks instead (the library's pre-1.0 default), useful for inspection or
+        when a downstream step consumes named blocks directly. Passing ``return_array``
+        explicitly to ``transform`` / ``fit_transform`` always overrides this setting.
     output_format : {"dense", "sparse", "auto"}, default="dense"
         Container used for the transformed output. ``"dense"`` (the default, for
         backward compatibility) returns NumPy arrays; ``"sparse"`` returns SciPy
@@ -235,10 +294,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     preset : {"standard", "expanded", "adaptive"} or None, default=None
         Optional named configuration bundle applied as a transparent alias. A preset only
         fills in parameters left at their defaults; any parameter set explicitly always wins.
-        ``"standard"`` is the PLE + integer-code baseline, ``"expanded"`` widens the
-        numerical basis and one-hot encodes categoricals, and ``"adaptive"`` sizes each
-        feature's width from the data. Call :meth:`get_resolved_config` to see the effective
-        parameters. ``None`` (default) uses the individual parameters unchanged.
+        Every preset resolves ``numerical_method`` from ``task``: ``"bspline"`` for
+        ``task="regression"``, ``"ple"`` for ``task="classification"``.
+        ``"standard"`` is the balanced baseline, ``"expanded"`` widens the numerical basis
+        and one-hot encodes categoricals, and ``"adaptive"`` sizes each feature's width
+        from the data within ``[7, 15]``. Call :meth:`get_resolved_config` to see the
+        effective parameters. ``None`` (default) uses the individual parameters unchanged.
 
     Attributes
     ----------
@@ -267,21 +328,23 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     Available ``numerical_method`` values: ``"none"``, ``"minmax"``, ``"standardization"``,
     ``"robust"``, ``"quantile"``, ``"polynomial"``, ``"box-cox"``, ``"yeo-johnson"``, ``"ple"``,
     ``"custombin"``, ``"rbf"``, ``"relu"``, ``"sigmoid"``, ``"tanh"``, ``"cubicspline"``,
-    ``"naturalspline"``, ``"pspline"``, ``"tensorspline"``, ``"tprs"``, ``"bspline"``,
-    ``"mspline"``, ``"ispline"``.
+    ``"naturalspline"``, ``"pspline"``, ``"bspline"``, ``"mspline"``, ``"ispline"``,
+    ``"fourier"``.
 
     Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
-    ``"pretrained"``, ``"custombin"``, ``"none"``. The ``"pretrained"`` method requires the optional
+    ``"pretrained"``, ``"none"``. The ``"pretrained"`` method requires the optional
     ``sentence-transformers`` dependency (``pip install "pretab[embeddings]"``).
 
     Method names are resolved case-insensitively and ignore ``-`` / ``_`` / space separators, so
     ``"one-hot"``, ``"one_hot"`` and ``"OneHot"`` are equivalent. Common synonyms and abbreviations
     are also accepted, e.g. ``"std"`` / ``"standard"`` -> ``"standardization"``, ``"ohe"`` /
     ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
-    ``"polynomial"``, ``"thin-plate"`` -> ``"tprs"``, and ``"passthrough"`` -> ``"none"``.
+    ``"polynomial"``, and ``"passthrough"`` -> ``"none"``.
 
-    ``transform`` returns a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` by
-    default, or a single stacked array when ``return_array=True``.
+    ``transform`` returns a single stacked array by default (``output_structure="matrix"``),
+    or a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` when
+    ``output_structure="blocks"``. Passing ``return_array`` explicitly to ``transform`` /
+    ``fit_transform`` always overrides ``output_structure`` for that call.
 
     Examples
     --------
@@ -293,8 +356,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     >>> y = [0.1, 0.4, 0.9, 1.2]
     >>> pre = Preprocessor()
     >>> out = pre.fit_transform(df, y)
-    >>> sorted(out.keys())
-    ['cat_gender', 'num_age']
+    >>> out.ndim
+    2
 
     Cubic-spline basis for numerics with one-hot encoded categoricals:
 
@@ -313,28 +376,35 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     >>> pre = Preprocessor(feature_preprocessing={"age": "pspline", "gender": "one-hot"})
     >>> out = pre.fit_transform(df, y)
 
-    Data-driven (adaptive) width, returned as a single stacked array:
+    Data-driven (adaptive) width:
 
     >>> pre = Preprocessor(numerical_method="ple", adaptive=True,
     ...                    min_output_dim=4, max_output_dim=12)
-    >>> arr = pre.fit_transform(df, y, return_array=True)
+    >>> arr = pre.fit_transform(df, y)
     >>> arr.ndim
     2
+
+    Per-feature blocks instead of a single matrix:
+
+    >>> pre = Preprocessor(output_structure="blocks")
+    >>> out = pre.fit_transform(df, y)
+    >>> sorted(out.keys())
+    ['cat_gender', 'num_age']
     """
 
     def __init__(
         self,
-        numerical_method="ple",
-        categorical_method="int",
+        numerical_method=UNSET,
+        categorical_method=UNSET,
         feature_preprocessing=None,
-        output_dim=7,
+        output_dim=UNSET,
         degree=3,
         target_aware=True,
         placement_strategy="cart",
         task="regression",
-        adaptive=False,
-        min_output_dim=5,
-        max_output_dim=10,
+        adaptive=UNSET,
+        min_output_dim=UNSET,
+        max_output_dim=UNSET,
         random_state=None,
         scaling="minmax",
         cat_cutoff=0.03,
@@ -348,6 +418,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         max_features_per_input=None,
         max_dense_memory=None,
         overflow_policy="error",
+        output_structure="matrix",
         output_format="dense",
         dtype=None,
         verbose=0,
@@ -384,6 +455,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.max_features_per_input = max_features_per_input
         self.max_dense_memory = max_dense_memory
         self.overflow_policy = overflow_policy
+        self.output_structure = output_structure
         self.output_format = output_format
         self.dtype = dtype
         self.verbose = verbose
@@ -407,6 +479,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self : Preprocessor
             Fitted instance of the preprocessor.
         """
+
+        if self.is_frozen():
+            raise FrozenRepresentationError(
+                f"Cannot fit a frozen {type(self).__name__}. Use refit() to fit a fresh copy."
+            )
 
         verbose = int(self.verbose or 0)
         if verbose > 0:
@@ -439,6 +516,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         X = to_dataframe(X)
 
+        if self.feature_preprocessing:
+            unknown_features = set(self.feature_preprocessing) - set(X.columns)
+            if unknown_features:
+                raise invalid_param_error(
+                    type(self).__name__,
+                    "feature_preprocessing",
+                    sorted(unknown_features),
+                    "every key must name a column present in X",
+                    valid=X.columns,
+                )
+
         if self.missing_policy == "error":
             self._reject_missing(X)
 
@@ -446,11 +534,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.embedding_dimensions_ = {}
         if embeddings is not None:
             self.embeddings_ = True
-            if isinstance(embeddings, np.ndarray):
-                self.embedding_dimensions_["embedding_1"] = embeddings.shape[1]
-            elif isinstance(embeddings, list):
-                for i, e in enumerate(embeddings):
-                    self.embedding_dimensions_[f"embedding_{i + 1}"] = e.shape[1]
+            self.embedding_dimensions_ = resolve_embedding_dimensions(embeddings, n_samples=len(X))
 
         numerical_features, categorical_features = detect_column_types(
             X,
@@ -466,10 +550,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             numeric_values = X[numerical_features].to_numpy(dtype=np.float64, na_value=np.nan)
             apply_constant_policy(numeric_values, self.policy_, estimator=self)
 
-        self.column_transformer_ = build_column_transformer(config, numerical_features, categorical_features)
-        self.column_transformer_.fit(X, y)
-        self.n_features_in_ = X.shape[1]
-
         valid_formats = ("auto", "dense", "sparse")
         if self.output_format not in valid_formats:
             raise invalid_param_error(
@@ -480,15 +560,40 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 valid=set(valid_formats),
             )
 
+        valid_structures = ("matrix", "blocks")
+        if self.output_structure not in valid_structures:
+            raise invalid_param_error(
+                type(self).__name__,
+                "output_structure",
+                self.output_structure,
+                "must be one of 'matrix', 'blocks'",
+                valid=set(valid_structures),
+            )
+
+        # Ask ColumnTransformer to assemble the representation in the requested
+        # container whenever its component outputs permit it. In particular,
+        # explicit sparse output must not densely stack sparse one-hot blocks.
+        sparse_threshold = {"dense": 0.0, "auto": 0.3, "sparse": 1.0}[self.output_format]
+        self.column_transformer_ = build_column_transformer(
+            config,
+            numerical_features,
+            categorical_features,
+            sparse_threshold=sparse_threshold,
+        )
+        self.column_transformer_.fit(X, y)
+        self.n_features_in_ = X.shape[1]
+
         self._enforce_output_budget(X.shape[0])
 
         if verbose >= 1:
+            numerical_summary = _method_summary(numerical_features, is_numerical=True, config=config)
+            categorical_summary = _method_summary(categorical_features, is_numerical=False, config=config)
             logger.info(
                 "fit complete: %d numerical (%s) + %d categorical (%s) feature(s) -> %d output columns in %.3fs",
                 len(numerical_features),
-                config.numerical_method,
+                numerical_summary,
                 len(categorical_features),
-                config.categorical_method,
+                categorical_summary,
                 len(self.get_feature_names_out()),
                 time.perf_counter() - start_time,
             )
@@ -501,7 +606,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         return self
 
-    def transform(self, X, embeddings=None, return_array=False):
+    def transform(self, X, embeddings=None, return_array=None):
         """
         Transform the input data using the fitted column transformer.
 
@@ -510,17 +615,23 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         X : pandas.DataFrame, numpy.ndarray, or dict
             Input features to transform.
         embeddings : np.ndarray or list of np.ndarray, optional
-            Optional external embeddings to attach to the transformation.
-        return_array : bool, default=False
-            If True, return a single stacked NumPy array. If False, return a dict of transformed arrays.
+            External embeddings to attach to dictionary output. Required when
+            embeddings were supplied during ``fit`` and unsupported when the
+            resolved output is a single array or :meth:`set_output` requests a DataFrame.
+        return_array : bool or None, default=None
+            If True, return a single stacked NumPy array; if False, return a dict of
+            transformed arrays. ``None`` (the default) resolves from ``output_structure``:
+            ``"matrix"`` behaves like ``True``, ``"blocks"`` like ``False``. Pass this
+            explicitly to override ``output_structure`` for a single call.
 
         Returns
         -------
         dict, np.ndarray, scipy.sparse matrix, or DataFrame
-            Transformed data. By default a dictionary of per-feature blocks; a
-            single stacked array when ``return_array=True``; a SciPy CSR matrix (or
-            CSR blocks) when ``output_format`` resolves to ``"sparse"``; or a pandas
-            / polars DataFrame when configured via :meth:`set_output`.
+            Transformed data. A single stacked array by default (``output_structure=
+            "matrix"``); a dict of per-feature blocks when ``output_structure="blocks"``
+            (or ``return_array=False``); a SciPy CSR matrix (or CSR blocks) when
+            ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
+            when configured via :meth:`set_output`.
         """
 
         check_is_fitted(self)
@@ -530,30 +641,35 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if self.missing_policy == "error":
             self._reject_missing(X)
 
+        resolved_return_array = (self.output_structure == "matrix") if return_array is None else return_array
+
+        container = _get_output_config("transform", self)["dense"]
+        output_kind = container if container in ("pandas", "polars") else ("array" if resolved_return_array else "dict")
+        validate_embedding_request(embeddings, expected=self.embeddings_, output_kind=output_kind)
+
         transformed_X = self.column_transformer_.transform(X)
-        if sp.issparse(transformed_X):
-            transformed_X = transformed_X.toarray()  # type: ignore
-        transformed_X = np.asarray(transformed_X)
+        if not sp.issparse(transformed_X):
+            transformed_X = np.asarray(transformed_X)
         if self.dtype is not None:
             transformed_X = transformed_X.astype(self.dtype, copy=False)
 
         fmt, self.output_report_ = compute_output_report(transformed_X, self.output_format)
 
-        container = _get_output_config("transform", self)["dense"]
         if container in ("pandas", "polars"):
             return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
 
-        slices = None if return_array else get_output_slices(self.column_transformer_, X)
+        slices = None if resolved_return_array else get_output_slices(self.column_transformer_)
         return format_output(
             transformed_X,
-            return_array=return_array,
+            return_array=resolved_return_array,
             slices=slices,
             embeddings=embeddings,
             embeddings_expected=self.embeddings_,
+            embedding_dimensions=self.embedding_dimensions_,
             output_format=fmt,
         )
 
-    def fit_transform(self, X, y=None, embeddings=None, return_array=False):
+    def fit_transform(self, X, y=None, embeddings=None, return_array=None):
         """
         Convenience method that fits the preprocessor and transforms the data.
 
@@ -565,8 +681,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             Target values.
         embeddings : np.ndarray or list of np.ndarray, optional
             Optional embedding arrays.
-        return_array : bool, default=False
-            Whether to return a stacked NumPy array or a dictionary of arrays.
+        return_array : bool or None, default=None
+            Whether to return a stacked NumPy array or a dictionary of arrays. ``None``
+            (the default) resolves from ``output_structure``.
 
         Returns
         -------
@@ -576,27 +693,24 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         return self.fit(X, y, embeddings=embeddings).transform(X, embeddings, return_array)
 
-    @classmethod
-    def _param_defaults(cls):
-        """Return the ``__init__`` parameter defaults, keyed by name."""
-        signature = inspect.signature(cls.__init__)
-        return {
-            name: parameter.default
-            for name, parameter in signature.parameters.items()
-            if parameter.default is not inspect.Parameter.empty
-        }
-
     def _resolved_params(self):
         """Return the effective parameters after expanding ``preset``.
 
-        A preset fills in only the parameters left at their ``__init__`` default;
-        explicitly-set parameters always take precedence. The ``preset`` key is
-        dropped from the returned mapping.
+        Parameters that presets can fill in default to :data:`UNSET` in
+        ``__init__`` rather than to their ordinary value, so a caller who
+        explicitly passes that same ordinary value (e.g. ``adaptive=False``,
+        which is also the plain constructor default) is still recognized as
+        having set it -- an explicit value always takes precedence over the
+        preset, no matter what it equals. Parameters left at ``UNSET`` fall
+        back to the preset's value, or to their ordinary default when no
+        preset supplies one. The ``preset`` key is dropped from the returned
+        mapping.
         """
         params = self.get_params(deep=False)
         preset = params.pop("preset", None)
+        resolved = {key: (_PRESET_PARAM_DEFAULTS[key] if value is UNSET else value) for key, value in params.items()}
         if preset is None:
-            return params
+            return resolved
         if preset not in PRESETS:
             raise invalid_param_error(
                 type(self).__name__,
@@ -605,11 +719,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 "must be one of " + ", ".join(repr(name) for name in sorted(PRESETS)),
                 valid=set(PRESETS),
             )
-        defaults = self._param_defaults()
-        resolved = dict(params)
         for key, preset_value in PRESETS[preset].items():
-            if key in defaults and params.get(key) == defaults[key]:
+            if params.get(key, UNSET) is UNSET:
                 resolved[key] = preset_value
+        if params.get("numerical_method", UNSET) is UNSET:
+            resolved["numerical_method"] = _preset_numerical_method(resolved["task"])
         return resolved
 
     def get_resolved_config(self):
@@ -709,8 +823,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return dims
 
     def _output_itemsize(self) -> int:
-        """Bytes per element of the dense transformed array (float64 for now)."""
-        return np.dtype(np.float64).itemsize
+        """Bytes per element of the dense transformed array.
+
+        Reflects the configured ``dtype`` when set (the cast :meth:`transform`
+        actually applies); falls back to ``float64``, the natural output dtype
+        of most representations when no cast is requested.
+        """
+        return np.dtype(self.dtype if self.dtype is not None else np.float64).itemsize
 
     def estimate_output_shape(self, X) -> tuple:
         """Estimate the shape of the dense transformed array for ``X``.
@@ -874,7 +993,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 if hasattr(last_step, attr):
                     logger.debug("%s.%s = %r", name, attr, getattr(last_step, attr))
 
-    # --- Portable serialization (P9.1) ---
+    # --- Portable serialization ---
     def to_spec(self, path=None) -> dict:
         """Serialize the fitted preprocessor to a portable, versioned spec.
 
@@ -882,8 +1001,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         PreTab / numpy / scipy / scikit-learn versions, resolved parameters, a
         per-representation summary, the output-column order, and the encoded
         fitted state) that reconstructs this estimator bit-for-bit via
-        :meth:`from_spec`. Unlike :mod:`pickle`, loading a spec never executes
-        estimator code and only imports an allow-listed set of library modules.
+        :meth:`from_spec` in the same environment. Loading bypasses estimator
+        initialization and pickle hooks, but library imports can execute code.
+        Only load specs from trusted sources. Third-party representations and
+        pretrained language models are not supported by this serializer.
 
         Parameters
         ----------
@@ -929,16 +1050,23 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             raise PretabSerializationError(f"Spec reconstructed a {type(obj).__name__}, expected {cls.__name__}.")
         return obj
 
-    # --- Fingerprint & reproducibility (P9.2) ---
+    # --- Fingerprint & reproducibility ---
     def _canonical_spec(self) -> dict:
         """Deterministic subset of the spec used for fingerprinting."""
         spec = preprocessor_to_spec(self)
+        # Runtime reports and advisory lifecycle flags do not change the fitted
+        # representation. Keep them in serialization, but out of its identity.
+        state = {
+            key: value
+            for key, value in spec["state"].items()
+            if key not in {"output_report_", "_frozen", "_stale_reason"}
+        }
         return {
             "schema_version": spec["schema_version"],
             "pretab_version": spec["pretab_version"],
             "library_versions": spec["library_versions"],
             "feature_names_out": spec["feature_names_out"],
-            "state": spec["state"],
+            "state": state,
         }
 
     @property
@@ -949,7 +1077,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         configuration, dependency versions, output-column order, random seeds, and
         the fitted state (knot / center / bin locations, scaler statistics, encoder
         categories). The digest is deterministic across processes and machines, so
-        two preprocessors share a fingerprint iff they transform identically.
+        the same fitted state and configuration produce the same fingerprint.
         """
         check_is_fitted(self)
         canonical = json.dumps(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -983,7 +1111,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             "representations": representations,
         }
 
-    # --- Immutable lifecycle (P9.3) ---
+    # --- Immutable lifecycle ---
     @property
     def lifecycle_state_(self) -> str:
         """Current lifecycle state: ``UNFITTED``, ``FITTED``, ``FROZEN``, or ``STALE``."""
@@ -1002,7 +1130,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return bool(getattr(self, "_frozen", False))
 
     def freeze(self) -> "Preprocessor":
-        """Freeze the fitted preprocessor, blocking further ``set_params`` mutation.
+        """Freeze the fitted preprocessor, blocking ``fit`` and ``set_params`` mutation.
 
         Returns ``self`` for chaining. A frozen preprocessor is intended as an
         immutable deployment artifact; use :meth:`clone_unfitted` or :meth:`refit`

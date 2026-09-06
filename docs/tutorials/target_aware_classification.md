@@ -5,9 +5,10 @@ regressor. The same idea works for classification, with one added concern: when 
 representation is supervised, the evaluation must keep it from seeing the test labels. This
 tutorial shows an expressive classifier and how to evaluate it without leakage.
 
-Here the target has a **ring-shaped** boundary, where the positive class sits near the origin
-of two coordinates, plus a categorical `plan` effect. A plain `LogisticRegression` draws a
-single straight boundary and struggles; radial basis features let it curve around the ring.
+Here the target has a **circular** decision boundary, where the positive class sits near the
+origin of two coordinates, plus a categorical `plan` effect. A plain `LogisticRegression`
+draws a single straight boundary and struggles; radial basis features let it curve around the
+circle.
 
 ## The dataset
 
@@ -36,7 +37,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 ```
 
-The positive class lives inside a ring around the origin, shifted by the plan. The classes are
+The positive class lives inside a disk around the origin, shifted by the plan. The classes are
 imbalanced, roughly one positive to three negatives.
 
 ## Baseline: scaling and LogisticRegression
@@ -69,7 +70,7 @@ ROC AUC:  0.569
 
 Accuracy looks acceptable only because the classes are imbalanced; the model mostly predicts
 the majority class. The `ROC AUC` of `0.569` shows it has barely learned to rank positives
-above negatives, because a straight boundary cannot enclose the ring.
+above negatives, because a straight boundary cannot enclose the disk.
 
 ```{warning}
 On imbalanced data, accuracy misleads. A model that always predicts the majority class already
@@ -92,8 +93,8 @@ pre = Preprocessor(
     output_dim=10,
 )
 
-X_tr = pre.fit_transform(X_train, y_train, return_array=True)
-X_te = pre.transform(X_test, return_array=True)
+X_tr = pre.fit_transform(X_train, y_train)
+X_te = pre.transform(X_test)
 
 clf = LogisticRegression(max_iter=1000).fit(X_tr, y_train)
 proba = clf.predict_proba(X_te)[:, 1]
@@ -103,12 +104,12 @@ print(f"ROC AUC:  {roc_auc_score(y_test, proba):.3f}")
 ```
 
 ```text
-accuracy: 0.872
+accuracy: 0.870
 ROC AUC:  0.927
 ```
 
-The RBF features let the linear classifier bend around the ring. Accuracy rises from `0.742`
-to `0.872`, and the `ROC AUC` jumps from `0.569` to `0.927`.
+The RBF features let the linear classifier bend around the circular boundary. Accuracy rises
+from `0.742` to `0.870`, and the `ROC AUC` jumps from `0.569` to `0.927`.
 
 ```{note}
 `target_aware=True` lets supervised expansions use `y` during `fit` to place their basis
@@ -128,9 +129,9 @@ from sklearn.model_selection import cross_val_score
 from pretab.transformers import RBFExpansionTransformer
 
 features = ColumnTransformer([
-    ("x1", RBFExpansionTransformer(output_dim=10, target_aware=True), ["x1"]),
-    ("x2", RBFExpansionTransformer(output_dim=10, target_aware=True), ["x2"]),
-    ("hours", RBFExpansionTransformer(output_dim=10, target_aware=True), ["hours"]),
+    ("x1", RBFExpansionTransformer(output_dim=10, target_aware=True, task="classification"), ["x1"]),
+    ("x2", RBFExpansionTransformer(output_dim=10, target_aware=True, task="classification"), ["x2"]),
+    ("hours", RBFExpansionTransformer(output_dim=10, target_aware=True, task="classification"), ["hours"]),
     ("plan", OneHotEncoder(handle_unknown="ignore"), ["plan"]),
 ])
 

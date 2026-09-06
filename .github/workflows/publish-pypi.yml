@@ -15,7 +15,20 @@ permissions:
   id-token: write
 
 jobs:
+  qa:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    if: ${{ !contains(github.ref_name, 'rc') }}
+
+  docs:
+    uses: ./.github/workflows/docs.yml
+    permissions:
+      contents: read
+    if: ${{ !contains(github.ref_name, 'rc') }}
+
   publish:
+    needs: [qa, docs]
     runs-on: ubuntu-latest
     environment: pypi-publish
     # The "v*.*.*" trigger also matches RC tags (e.g. v2.0.0rc2), so guard
@@ -73,7 +86,8 @@ jobs:
           python -m venv /tmp/pretab-wheel-test
           source /tmp/pretab-wheel-test/bin/activate
           pip install dist/*.whl
-          python -c "import pretab; print(pretab.__version__)"
+          python -I scripts/quickstart.py
+          python -I -c "import pretab; print(pretab.__version__); print(pretab.__file__)"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

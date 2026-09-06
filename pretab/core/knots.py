@@ -18,12 +18,43 @@ from ..exceptions import invalid_param_error
 
 __all__ = [
     "basis_to_knots",
+    "bspline_basis",
     "generate_internal_knots",
     "quantile_knots",
     "select_knots",
     "spanning_knots",
     "uniform_knots",
 ]
+
+
+def bspline_basis(x: np.ndarray, knots: np.ndarray, degree: int, i: int, last: int | None = None) -> np.ndarray:
+    """Evaluate the i-th B-spline basis function of ``degree`` via Cox-de Boor recursion.
+
+    The degree-0 base uses a half-open interval ``[k_j, k_{j+1})``, except for the
+    last non-degenerate (positive-width) span which is closed on the right so the
+    range maximum belongs to exactly one basis function (partition-of-unity at the
+    boundary).  ``last`` caches that index across recursive calls.
+    """
+    if degree == 0:
+        if last is None:
+            # last positive-width span in a padded knot vector (repeated boundary knots)
+            last = max((j for j in range(len(knots) - 1) if knots[j + 1] > knots[j]), default=len(knots) - 2)
+        if i == last:
+            return np.where((x >= knots[i]) & (x <= knots[i + 1]), 1.0, 0.0)
+        return np.where((x >= knots[i]) & (x < knots[i + 1]), 1.0, 0.0)
+    denom1 = knots[i + degree] - knots[i]
+    denom2 = knots[i + degree + 1] - knots[i + 1]
+    term1: np.ndarray = (
+        np.zeros_like(x, dtype=float)
+        if denom1 == 0
+        else (x - knots[i]) / denom1 * bspline_basis(x, knots, degree - 1, i, last)
+    )
+    term2: np.ndarray = (
+        np.zeros_like(x, dtype=float)
+        if denom2 == 0
+        else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1, last)
+    )
+    return term1 + term2
 
 
 def basis_to_knots(n_basis: int, degree: int) -> int:

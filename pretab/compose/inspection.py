@@ -8,6 +8,7 @@ collects per-feature preprocessing / dimension / category metadata, and
 """
 
 import numpy as np
+from sklearn.pipeline import FeatureUnion
 
 from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
@@ -23,24 +24,24 @@ __all__ = [
 ]
 
 
-def get_output_slices(column_transformer, X):
+def get_output_slices(column_transformer):
     """Return ordered ``(name, start, width)`` spans for each output block.
 
-    The width of each transformer's block is obtained by transforming its input
-    columns, matching the order in which the fitted ColumnTransformer stacks its
-    outputs.
+    Reads widths from ``output_indices_`` — the fitted index map that
+    ``ColumnTransformer`` already maintains — so no second transform is needed.
     """
+    indices = column_transformer.output_indices_
     slices = []
-    start = 0
-    for name, transformer, columns in column_transformer.transformers_:
+    for name, transformer, _columns in column_transformer.transformers_:
         if transformer == "drop":
             continue
-        if hasattr(transformer, "transform"):
-            width = transformer.transform(X[columns]).shape[1]
-        else:
-            width = 1
-        slices.append((name, start, width))
-        start += width
+        span = indices.get(name)
+        if span is None:
+            continue
+        width = span.stop - span.start
+        if width == 0:
+            continue
+        slices.append((name, span.start, width))
     return slices
 
 
@@ -75,6 +76,16 @@ def clean_feature_names(column_transformer, names):
     return cleaned
 
 
+def _separate_state_branches(transformer):
+    """Return the representation and missing branches of a separate-state union."""
+    if not isinstance(transformer, FeatureUnion):
+        return None
+    branches = dict(transformer.transformer_list)
+    if "representation" not in branches or "missing" not in branches:
+        return None
+    return branches["representation"], branches["missing"]
+
+
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
     """Collect per-feature metadata (preprocessing, dimension, categories).
 
@@ -98,10 +109,20 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
         transformer_pipeline,
         columns,
     ) in column_transformer.transformers_:
-        steps = [step[0] for step in transformer_pipeline.steps]
+        separate_state = _separate_state_branches(transformer_pipeline)
+        if separate_state is not None:
+            representation_pipeline, _missing_indicator = separate_state
+            steps = [step[0] for step in representation_pipeline.steps]
+            preprocessing_type = f"representation({' -> '.join(steps)}) + missing"
+            span = column_transformer.output_indices_.get(name)
+            separate_state_dimension = None if span is None else span.stop - span.start
+        else:
+            representation_pipeline = transformer_pipeline
+            steps = [step[0] for step in representation_pipeline.steps]
+            preprocessing_type = " -> ".join(steps)
+            separate_state_dimension = None
 
         for feature_name in columns:
-            preprocessing_type = " -> ".join(steps)
             dimension = None
             categories = None
 
@@ -116,7 +137,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                     "box-cox",
                 ]
             ):
-                last_step = transformer_pipeline.steps[-1][1]
+                last_step = representation_pipeline.steps[-1][1]
                 if hasattr(last_step, "transform"):
                     dummy_input = np.zeros((1, 1)) + 1e-05
                     try:
@@ -129,6 +150,8 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                             exc,
                         )
                         dimension = None
+                if separate_state_dimension is not None:
+                    dimension = separate_state_dimension
                 numerical_feature_info[feature_name] = {
                     "preprocessing": preprocessing_type,
                     "dimension": dimension,
@@ -136,9 +159,9 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                 }
 
             elif "continuous_ordinal" in steps:
-                step = transformer_pipeline.named_steps["continuous_ordinal"]
+                step = representation_pipeline.named_steps["continuous_ordinal"]
                 categories = len(step.mapping_[columns.index(feature_name)])
-                dimension = 1
+                dimension = separate_state_dimension if separate_state_dimension is not None else 1
                 categorical_feature_info[feature_name] = {
                     "preprocessing": preprocessing_type,
                     "dimension": dimension,
@@ -146,10 +169,12 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                 }
 
             elif "onehot" in steps:
-                step = transformer_pipeline.named_steps["onehot"]
+                step = representation_pipeline.named_steps["onehot"]
                 if hasattr(step, "categories_"):
                     categories = sum(len(cat) for cat in step.categories_)
                     dimension = categories
+                if separate_state_dimension is not None:
+                    dimension = separate_state_dimension
                 categorical_feature_info[feature_name] = {
                     "preprocessing": preprocessing_type,
                     "dimension": dimension,
@@ -157,7 +182,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                 }
 
             else:
-                last_step = transformer_pipeline.steps[-1][1]
+                last_step = representation_pipeline.steps[-1][1]
                 if hasattr(last_step, "transform"):
                     dummy_input = np.zeros((1, 1))
                     try:
@@ -170,7 +195,9 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                             exc,
                         )
                         dimension = None
-                if "cat" in name:
+                if separate_state_dimension is not None:
+                    dimension = separate_state_dimension
+                if name.startswith("cat_"):
                     categorical_feature_info[feature_name] = {
                         "preprocessing": preprocessing_type,
                         "dimension": dimension,
@@ -282,6 +309,49 @@ def build_feature_lineage(column_transformer):
                         source_features=(_passthrough_source(columns, offset, feature_names_in),),
                         family="passthrough",
                         component="raw",
+                        component_index=offset,
+                        uses_target=False,
+                        is_interaction=False,
+                    )
+                )
+            continue
+
+        separate_state = _separate_state_branches(transformer)
+        if separate_state is not None:
+            representation_pipeline, _missing_indicator = separate_state
+            union_names = [str(value) for value in transformer.get_feature_names_out(list(columns))]
+            representation_width = sum(value.startswith("representation__") for value in union_names)
+            missing_width = sum(value.startswith("missing__") for value in union_names)
+            if representation_width + missing_width != width:
+                representation_width = width - missing_width
+
+            family, component, uses_target, is_interaction = _resolve_block_representation(
+                representation_pipeline, columns
+            )
+            source_features = tuple(str(column) for column in columns)
+            for offset in range(representation_width):
+                index = span.start + offset
+                records.append(
+                    FeatureLineage(
+                        output_feature=output_names[index],
+                        output_index=index,
+                        source_features=source_features,
+                        family=family,
+                        component=component,
+                        component_index=offset,
+                        uses_target=uses_target,
+                        is_interaction=is_interaction,
+                    )
+                )
+            for offset in range(missing_width):
+                index = span.start + representation_width + offset
+                records.append(
+                    FeatureLineage(
+                        output_feature=output_names[index],
+                        output_index=index,
+                        source_features=source_features,
+                        family="missing_state",
+                        component="indicator",
                         component_index=offset,
                         uses_target=False,
                         is_interaction=False,

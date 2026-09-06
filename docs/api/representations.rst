@@ -7,8 +7,8 @@ view, see the :doc:`comparison table <../representations/comparison_table>`.
 
 .. currentmodule:: pretab.transformers
 
-Splines
--------
+Spline expansions
+------------------
 
 .. autosummary::
    :toctree: _autosummary
@@ -20,11 +20,23 @@ Splines
    CubicRegressionSplineTransformer
    NaturalCubicSplineTransformer
    PSplineTransformer
+
+Canonical import: ``pretab.expansion.spline``.
+
+Multivariate splines
+---------------------
+
+.. autosummary::
+   :toctree: _autosummary
+   :nosignatures:
+
    TensorProductSplineTransformer
    ThinPlateSplineTransformer
 
-Feature maps
-------------
+Canonical import: ``pretab.expansion.spline.multivariate``.
+
+Functional expansions
+----------------------
 
 .. autosummary::
    :toctree: _autosummary
@@ -35,12 +47,23 @@ Feature maps
    SigmoidExpansionTransformer
    TanhExpansionTransformer
    FourierFeatureTransformer
-   PeriodicEncodingTransformer
+
+Canonical import: ``pretab.expansion.functional``.
+
+Kernel approximation
+----------------------
+
+.. autosummary::
+   :toctree: _autosummary
+   :nosignatures:
+
    RandomFourierFeaturesTransformer
    NystroemFeaturesTransformer
 
-Binning and piecewise-linear encoding
--------------------------------------
+Canonical import: ``pretab.kernel_approximation``.
+
+Numerical encoding
+--------------------
 
 .. autosummary::
    :toctree: _autosummary
@@ -48,9 +71,12 @@ Binning and piecewise-linear encoding
 
    NumericBinningTransformer
    PLETransformer
+   PeriodicEncodingTransformer
 
-Categorical
------------
+Canonical import: ``pretab.encoding.numerical``.
+
+Categorical encoding
+-----------------------
 
 .. autosummary::
    :toctree: _autosummary
@@ -58,10 +84,22 @@ Categorical
 
    ContinuousOrdinalTransformer
    OneHotFromOrdinalTransformer
+
+Canonical import: ``pretab.encoding.categorical``.
+
+Embeddings
+------------
+
+.. autosummary::
+   :toctree: _autosummary
+   :nosignatures:
+
    LanguageEmbeddingTransformer
 
-Utility transformers
---------------------
+Canonical import: ``pretab.embedding``.
+
+Preprocessing utilities
+--------------------------
 
 .. autosummary::
    :toctree: _autosummary
@@ -70,3 +108,5 @@ Utility transformers
    MissingStateIndicator
    NoTransformer
    ToFloatTransformer
+
+Canonical import: ``pretab.preprocessing``.

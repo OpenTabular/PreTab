@@ -20,10 +20,10 @@ import pandas as pd
 import pytest
 
 from pretab.exceptions import InvalidParamError
+from pretab.expansion.spline.b_spline import BSplineTransformer
+from pretab.expansion.spline.i_spline import ISplineTransformer
+from pretab.expansion.spline.m_spline import MSplineTransformer
 from pretab.preprocessor import Preprocessor
-from pretab.transformers.splines.b_spline import BSplineTransformer
-from pretab.transformers.splines.i_spline import ISplineTransformer
-from pretab.transformers.splines.m_spline import MSplineTransformer
 
 OUTPUT_DIM = 6
 
@@ -54,8 +54,9 @@ FIXED_WIDTH = {
     "pspline": OUTPUT_DIM,
     "mspline": OUTPUT_DIM,
     "ispline": OUTPUT_DIM,
-    # B-spline defaults to include_bias=True -> output_dim + 1
-    "bspline": OUTPUT_DIM + 1,
+    # B-spline: include_bias defaults to False (a bias column would be collinear
+    # with the partition-of-unity basis), so width == output_dim like its siblings
+    "bspline": OUTPUT_DIM,
 }
 
 # Families that honor the adaptive window when driven through the Preprocessor.
@@ -96,7 +97,7 @@ def data():
 def _num_width(X, y, method, **kwargs):
     """Fit a Preprocessor on one numerical feature and return its block width."""
     pre = Preprocessor(numerical_method=method, categorical_method="none", **kwargs)
-    out = cast("dict[str, np.ndarray]", pre.fit(X, y).transform(X))
+    out = cast("dict[str, np.ndarray]", pre.fit(X, y).transform(X, return_array=False))
     return out["num_x"].shape[1]
 
 
@@ -139,7 +140,7 @@ def test_custombin_respects_bin_count(data, output_dim):
     """Numerical ``custombin`` yields a single column of at most output_dim codes."""
     X, y = data
     pre = Preprocessor(numerical_method="custombin", categorical_method="none", output_dim=output_dim)
-    block = cast("dict[str, np.ndarray]", pre.fit(X, y).transform(X))["num_x"]
+    block = cast("dict[str, np.ndarray]", pre.fit(X, y).transform(X, return_array=False))["num_x"]
     assert block.shape[1] == 1
     assert int(block.max()) < output_dim
     assert len(np.unique(block)) <= output_dim

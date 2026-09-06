@@ -7,28 +7,102 @@ This project adheres to [Semantic Versioning](https://semver.org/) and uses
 
 Going forward, this file is updated automatically by `cz bump` on each release.
 
-## Unreleased
+## v1.0.0rc5 (2026-09-06)
 
-> **Note:** `0.1.0` is an internal development marker for the pre-1.0 restructure
-> line and **will not be published**. The next released version is **1.0.0** (a
-> deliberate major release due to the package restructure and breaking API
-> changes; `major_version_zero` will be flipped to `false` at that point). The
-> entries below are curated from the conventional commits since `v0.0.2` and are
-> the reconciliation source for the 1.0.0 roadmap.
+## v1.0.0rc4 (2026-09-06)
 
 ### Feat
 
-- **extension**: add a public, discoverable extension protocol: a `BaseRepresentation` base class (declaring `representation_name` / `feature_kind` / `scope` / `supervision`) that inherits the shared scikit-learn contract; `register_representation(name, cls)` plus opt-in `load_entry_point_representations()` (the `pretab.representations` entry-point group) to add third-party methods so they are selectable via `Preprocessor(numerical_method=...)`; `list_representations(feature_kind=, scope=, supervised=, periodic=, sparse_output=, adaptive=)` capability discovery; and a `check_representation(cls)` conformance suite (raising the new `RepresentationConformanceError`) verifying fit-returns-self, no input mutation, stable shape, matching feature names, determinism, fitted-state checks, and declared scope/supervision. `Preprocessor` gains transparent `preset="standard"|"expanded"|"adaptive"` aliases and `get_resolved_config()`; `TransformerSpec` gains `periodic` / `sparse_output` capability flags. A runnable sibling example lives at `examples/pretab-chebyshev` (all new symbols exported from `pretab`)
-- **serialize**: add portable, versioned serialization to `Preprocessor` (`to_spec` / `from_spec`) that captures a fitted preprocessor as a schema- and dependency-versioned JSON document and reconstructs it bit-for-bit, an auditable, allow-listed alternative to `pickle` that never executes estimator code on load; add a stable cross-process `fingerprint_` (sha256 over the resolved config, seeds, versions, output order, and fitted state) with a `reproducibility_report()`; and add an immutable lifecycle (`lifecycle_state_` ∈ `UNFITTED` / `FITTED` / `FROZEN` / `STALE`, `freeze` / `is_frozen` / `mark_stale` / `clone_unfitted` / `refit`) where `set_params` on a frozen preprocessor raises the new `PretabSerializationError` / `FrozenRepresentationError` (both exported from `pretab`)
-- **missing**: add a high-level `Preprocessor(missing_policy=...)` control (`error` / `propagate` / `impute` / `impute_with_indicator` / `separate_state`) that overrides the low-level imputation parameters; `separate_state` emits a dedicated `__missing` column (new `MissingStateIndicator`, wired through a per-column `FeatureUnion`) that stays outside the ordinary representation basis, and `error` rejects missing input at fit/transform; pin the end-to-end edge-case behaviour (constant features, `custombin` determinism, duplicate support points, missing values, unseen categories) in `tests/regression/test_edge_cases.py`
-- **output**: add output-budget controls to `Preprocessor` (`max_output_features`, `max_features_per_input`, `max_dense_memory`, `overflow_policy`, plus `estimate_output_shape` / `estimate_memory`, raising the new `OutputBudgetError`) and first-class output-format control (`output_format ∈ {auto, dense, sparse}`, `dtype`, an `output_report_` memory report, and `set_output(transform="pandas"|"polars")` DataFrame wrapping); defaults (`dense`, no budgets) reproduce historical behaviour
-- **policy**: add a central `RepresentationPolicy(missing, constant, out_of_range, invalid)` (exported from `pretab`) and a `Preprocessor(policy=...)` hook (resolved to `policy_` at fit) governing constant-column, out-of-range, and non-finite handling; defaults reproduce historical behaviour. Pin the per-family edge-case contract (constant column, all-missing, partial-missing propagation, tiny n, duplicate support points, out-of-range, infinity, feature-count mismatch) in `tests/test_edge_case_contract.py`, and fix silent-corruption gaps so every spline family raises a typed `PretabDataError` on a constant or all-missing column (and cleanly propagates partial-missing rows), feature maps reject all-missing columns, and `NumericBinningTransformer` rejects non-finite input
-- **supervised**: add a leakage-safe supervised contract: `requires_y` / `is_supervised` / fitted `uses_target_` on every transformer, a `LeakageWarning` when a target-aware transformer is fit on `(X, y)` outside a Pipeline / cross-validation context, a `CrossFittedTransformer` wrapper that produces out-of-fold training features (recording `cross_fitted` / `n_folds` in the spec), and a `RepresentationSearchCV` skeleton (all exported from `pretab`)
-- **representation**: add typed `RepresentationSpec` and per-output-column `FeatureLineage` (exported from `pretab`); every transformer family exposes `get_representation_spec()` and `Preprocessor.get_feature_lineage()` maps each output column to its source feature(s), representation family, component, and target-usage flag
-- **transformers**: add `FourierFeatureTransformer` (deterministic sine/cosine feature map with `harmonic` / `log_spaced` / `random` frequencies), selectable as the `"fourier"` numerical method
-- **transformers**: add `RandomFourierFeaturesTransformer` and `NystroemFeaturesTransformer`, standalone multivariate kernel-approximation feature maps (`"rff"` / `"nystroem"`)
-- **binning**: make `NumericBinningTransformer` a stateful, multi-feature encoder with learned `bin_edges_` and `encode` (`ordinal` / `onehot` / `soft`) plus `placement_strategy` (`uniform` / `quantile`) options
-- **transformers**: add `harmonics` and `include_original` options to `PeriodicEncodingTransformer` for multi-harmonic periodic encodings
+- default Preprocessor output to a single array
+
+### Fix
+
+- raise scikit-learn minimum and use scipy trapezoid
+- validate cross-fitting task name
+- reuse identical CV folds across search candidates
+- correct serialization safety claims and bypass **new** hooks
+- reject fit on a frozen preprocessor
+- clip P-spline and tensor-product out-of-range transforms via policy
+- document periodic transform wrap-around and correct binning docstring
+- add missing polars optional dependency and its tests
+- numerical_method=none no longer applies scaling
+- validate feature_preprocessing keys against input columns
+- remove unimplemented resolution stubs from public placement API
+- raise scikit-learn minimum and use scipy trapezoid
+- use configured dtype in output-budget memory estimate
+- drop unwired policy fields and encoding/embedding NaN bugs
+- **spline**: correct penalty matrices and validate diff_order
+- **ple**: remove boundary-bin discontinuity in PLETransformer
+- **serialize**: reject unsafe classes in from_spec
+
+## v1.0.0rc3 (2026-09-01)
+
+### Fix
+
+- **tests**: sort imports in test_adaptive_output_dim
+- add missing indicator
+- validate embedding during fit
+- remove unused ple parameters
+
+### Refactor
+
+- **preprocessing**: move floats and missing encoders to pretab.preprocessing
+- **embedding**: move language embedding to pretab.embedding
+- **kernel-approximation**: split kernel approximations into pretab.kernel_approximation
+- **encoding**: move categorical encoders to pretab.encoding.categorical
+- **encoding**: move numerical encoders to pretab.encoding.numerical
+- **expansion**: move functional expansions to pretab.expansion.functional
+- **expansion**: move spline transformers to pretab.expansion.spline
+
+## v1.0.0rc2 (2026-08-21)
+
+### Fix
+
+- missclassify numerical to cat feature based on name
+- enfore feature count for cat transformer
+- unassigned int cat cuttoff
+- missing policy feature inspection, embedding silient failure
+- sparse to dense conversion for sparse output
+- custom representation usage for cat features
+- supplied parameter override preset
+- appropriate error message for out_dim and min_out_dim (#38)
+- raise error for duplicate columns (#37)
+- follow sklearn contract for binning (#36)
+- reject unrecognized scalar (#35)
+- validate embedding against fitted dimension (#34)
+- set include_bias to False as default (#33)
+- **embeddings**: accept list input in LanguageEmbeddingTransformer.fit (issue #21)
+- **core**: raise on mismatched input_features length in get_feature_names_out (issue #21)
+- **locations**: keep importance aligned with locations after sort/dedupe (issue #21)
+- keep location provided by tree when suplementing
+- provide appropriate error for onehot_from_ordinal input
+- **splines,transformers**: close B-spline final span and fix ContinuousOrdinalTransformer DataFrame input (issues #12, #14)
+- **selectors**: make \_enforce_spacing order-independent to fix lightgbm clustering (issue #10)
+
+### Perf
+
+- **splines**: drop retained training design matrices (issue #19)
+- **preprocessor**: slice dict blocks from output*indices* instead of re-transforming (issue #20)
+
+## v1.0.0rc1 (2026-08-15)
+
+### Feat
+
+- PreTab 1.0.0 restructuring
+- PreTab 1.0.0 restructure and refactoring
+- add quickstart script as a ci smoke test and reviewer artifact
+- **extension**: add representation protocol, discovery, and presets
+- **serialize**: add to_spec/from_spec, fingerprint, and frozen lifecycle
+- **missing**: add missing_policy and edge-case tests
+- **output**: add output budgets and sparse/dataframe output
+- **policy**: add RepresentationPolicy and edge-case contract
+- **supervised**: add leakage-safe contract, cross-fitting, and representation search
+- **representation**: add RepresentationSpec and feature lineage
+- **transformers**: add Fourier, random-Fourier, and Nystroem feature maps
+- **transformers**: rewrite binning, periodic encoding, and thin-plate spline
+- **params**: replace handle_missing with imputation params
+- prep 1.0.0 release
+- restructure package toward 1.0.0 release
 - update default output_dim
 - unsupervised feature-map default
 - wire custombin output_dim
@@ -36,19 +110,18 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 - **pipeline**: make cubic and natural splines target-aware
 - **pipeline**: use selector and adaptive setting to splines
 - **pipeline**: accept preprocessing method name variations
-- **preprocessor**: expose total_output_dim_, output_dims_ attribute
-- **preprocessor**: add random_state parameter
-- **preprocessor**: add numerical_imputation / categorical_imputation / add_missing_indicator parameters (replacing handle_missing)
+- **preprocessor**: expose total*output_dim*, output*dims* attribute
+- **preprocessor**: add random_state, handle_missing parameters
 - **sklearn-compat**: enforce n_features consistency, fix mixin order/tags
 - **exceptions**: route all raises through typed exceptions
 - **logging**: add verbose level, route warnings
 - **adaptive**: unify adaptive/fixed output size across expansion families via AdaptiveResolutionMixin
 - **preprocessor**: rename constructor params to the canonical vocabulary and add adaptive parameter
 - **pipeline**: thread output_dim through registry and Preprocessor
-- **ple,binning**: rename count knob to output_dim and set total_output_dim_
+- **ple,binning**: rename count knob to output*dim and set total_output_dim*
 - **feature_maps**: rename count knob to output_dim
-- **splines**: invert output_dim to knots per family and expose n_knots_
-- **core**: make output_dim the canonical width param and add total_output_dim_
+- **splines**: invert output*dim to knots per family and expose n_knots*
+- **core**: make output*dim the canonical width param and add total_output_dim*
 - add include_bias and feature_index parity to thin-plate spline
 - add strategy/selector/task/include_bias parity to knot splines
 - add selector-aware spanning-knot placement to spline mixin
@@ -68,6 +141,15 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Fix
 
+- **types**: silence optional lightgbm import and narrow array_equal args
+- **tests**: narrow transform return type for pyright csr_matrix ufunc check
+- formatting
+- linting and formatting
+- **embeddings**: add get_feature_names_out to LanguageEmbeddingTransformer
+- **preprocessor**: collapse duplicated feature name in output column names
+- **docs**: define missing dataset in two tutorial snippets
+- **types**: resolve remaining type errors across pretab
+- **types**: annotate cloned estimators in cross-fitting and search
 - **embeddings**: encode each text column separately
 - **categorical**: ignore unknown categories in one-hot
 - **onehot**: handle out-of-range codes
@@ -79,19 +161,18 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 
 ### Refactor
 
-- **preprocessor**: collapse the duplicated feature name in `Preprocessor` output column names (`get_feature_names_out()`, `return_array=True`, `set_output(transform="pandas"|"polars")`, and `get_feature_lineage()`); a column previously named `num_annual_income__annual_income_ncs0` is now `num_annual_income_ncs0`. Dict-mode output keys (`num_<col>` / `cat_<col>`) and standalone transformer usage outside `Preprocessor` are unaffected
-- **splines**: reformulate `ThinPlateSplineTransformer` as a multivariate low-rank thin-plate regression spline (landmark selection + eigen/Nyström basis via `n_components` / `landmark_strategy` / `rank_strategy`, replacing the univariate `output_dim` form)
-- **transformers**: rename `CustomBinTransformer` → `NumericBinningTransformer`, `CyclicalTimeTransformer` → `PeriodicEncodingTransformer`, and `CubicSplineTransformer` → `CubicRegressionSplineTransformer` (intention-revealing public names)
-- **transformers**: remove `LagFeatureTransformer` and `RollingStatsTransformer` (row-count-changing time-series utilities outside the tabular scope)
-- **splines**: restrict `PSplineTransformer` to `placement_strategy="uniform"` (penalized splines require equally-spaced knots)
-- **compose**: exclude the multivariate `tensorspline` / `tprs` methods from the per-column `Preprocessor` whitelist (they remain available as standalone transformers)
-- **categorical**: deprecate `OneHotFromOrdinalTransformer` (use the `"one-hot"` categorical method backed by scikit-learn's `OneHotEncoder`)
+- **core**: rename typing module to \_typing and add estimator protocols
+- **transformers**: move Fourier and kernel-approximation maps into feature_maps/
+- **transformers**: rename core transformers, drop temporal utils
+- **compose**: add capability registry and slim preprocessor
+- **placement**: centralize location placement and migrate transformers to it
+- **layout**: restructure package toward 1.0 and drop compat shims
 - consistent param order
 - remove dead selection helpers
 - **ple**: use location selectors for thresholds
 - add shared resolve_locations helper
-- **feature_maps**: move strategy/task validation from __init__ to fit
-- **transformers**: drop utils, move BaseCenterExpansion to feature_maps
+- **feature_maps**: move strategy/task validation from `__init__` to fit
+- **transformers**: drop utils, move BaseCenterExpansion ti feature_maps
 - **preprocessor**: make it a compliant sklearn estimator
 - canonicalize pipeline kwargs to avoid deprecation warnings
 - point preprocessor at pretab.pipeline
@@ -107,14 +188,6 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 - vectorize ple encoding and remove eval
 - source package version dynamically from metadata
 
-### Build & Tooling
+## v0.0.2 (2025-04-13)
 
-- Migrated packaging from setuptools to Poetry (`pyproject.toml`, `poetry.lock`); removed `setup.py`, `requirements.txt`, and `MANIFEST.in`
-- Dynamic versioning: the version is now sourced from `pyproject.toml` via `importlib.metadata`; removed the hardcoded `__version__.py`
-- Adopted a Poetry + OIDC release pipeline publishing to PyPI (`v*.*.*`) and TestPyPI (`v*.*.*rc*`), plus a manual `build-check` dry-run workflow
-- Added a `justfile` and pre-commit configuration for the local development workflow
-- Added project meta documentation: `CHANGELOG.md`, `CONVENTIONAL_COMMITS.md`, and `CODE_OF_CONDUCT.md`
-- Drove `pyright` to zero errors across the package and test suite and promoted the CI `typecheck` job from advisory to required
-- Hardened `ci.yml` with an `optional-deps` job that installs the `embeddings` and `lightgbm` extras and runs the suite against each, and wired a `--cov-fail-under=90` gate into the coverage job
-- Added `scripts/quickstart.py`, a runnable, CI-gated smoke test covering mixed-type preprocessing, feature lineage, leakage-safe cross-fitting, sklearn `Pipeline` compatibility, serialization round-trips, and representation discovery (`just quickstart`)
-- Added root `CONTRIBUTING.md` and `SECURITY.md` so GitHub surfaces the contributor guide and a private vulnerability-reporting channel
+## v0.0.1 (2025-04-12)

@@ -276,10 +276,10 @@ code.literal {
 }
 
 /* ── Code block sizing and shape ─────────────────────────────────────────── */
-/* Single border lives on pre; div.highlight only clips the radius. */
+/* Border and radius live on pre; div.highlight must stay overflow: visible so
+   the theme's injected copy-button tooltip can appear above the code block. */
 div.highlight {
   border-radius: 8px;
-  overflow: hidden;
 }
 
 .highlight pre {

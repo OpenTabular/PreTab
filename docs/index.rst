@@ -9,7 +9,6 @@
    getting_started/overview
    getting_started/installation
    getting_started/quickstart
-   getting_started/choosing_an_interface
    getting_started/migration_to_1_0
 
 .. toctree::
@@ -33,11 +32,12 @@
    representations/overview
    representations/comparison_table
    representations/choosing_a_method
-   representations/splines
-   representations/feature_maps
-   representations/binning_and_ple
-   representations/categorical
-   representations/references
+   representations/spline_expansions
+   representations/functional_expansions
+   representations/kernel_approximation
+   representations/numerical_encoding
+   representations/categorical_encoding
+   representations/embeddings
 
 .. toctree::
    :caption: Tutorials
@@ -57,7 +57,10 @@
    :maxdepth: 2
    :hidden:
 
-   api/index
+   api/preprocessor
+   api/representations
+   api/search_and_cross_fitting
+   api/extension
 
 .. toctree::
    :caption: Developer Guide
@@ -65,7 +68,4 @@
    :hidden:
 
    developer_guide/contributing
-   developer_guide/testing
-   developer_guide/documentation
-   developer_guide/versioning
    developer_guide/release

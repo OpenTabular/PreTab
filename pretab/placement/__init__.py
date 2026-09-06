@@ -19,8 +19,6 @@ from .base import BasePlacementStrategy, PlacementResult
 from .factory import create_placement_strategy
 from .resolution import (
     BaseResolutionPolicy,
-    CardinalityAwareResolution,
-    DataSizeAwareResolution,
     FixedResolution,
 )
 from .supervised import CARTPlacement, LightGBMPlacement
@@ -30,8 +28,6 @@ __all__ = [
     "BasePlacementStrategy",
     "BaseResolutionPolicy",
     "CARTPlacement",
-    "CardinalityAwareResolution",
-    "DataSizeAwareResolution",
     "FixedResolution",
     "LightGBMPlacement",
     "PLEPlacementAdapter",

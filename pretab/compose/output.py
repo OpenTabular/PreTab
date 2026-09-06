@@ -14,14 +14,16 @@ or polars DataFrame for :meth:`~pretab.Preprocessor.set_output`.
 import numpy as np
 from scipy import sparse as sp
 
-from ..exceptions import IncompatibleParamsError, OptionalDependencyError
+from ..exceptions import IncompatibleParamsError, OptionalDependencyError, PretabDataError
 
 __all__ = [
     "attach_embeddings",
     "build_output_dict",
     "compute_output_report",
     "format_output",
+    "resolve_embedding_dimensions",
     "to_dataframe_output",
+    "validate_embedding_request",
 ]
 
 # Density at or below which ``output_format="auto"`` switches to a sparse matrix,
@@ -33,6 +35,31 @@ _EMBEDDINGS_NOT_EXPECTED = (
     "Fix: configure an embedding feature in feature_preprocessing before "
     "passing embeddings to transform, or omit the embeddings argument."
 )
+_EMBEDDINGS_REQUIRED = (
+    "External embeddings were supplied during fit and are required during transform.\n"
+    "Fix: pass embeddings with the same number of blocks and dimensions used during fit."
+)
+_EMBEDDINGS_DICT_ONLY = (
+    "External embeddings are supported only with dictionary output.\n"
+    "Fix: call transform(..., return_array=False) with set_output(transform='default')."
+)
+
+
+def validate_embedding_request(embeddings, *, expected: bool, output_kind: str = "dict") -> None:
+    """Validate embedding presence and the requested output container.
+
+    External embeddings are separate named feature blocks, so they are available
+    only through dictionary output. Once supplied during fit, they are required on
+    every transform to keep the fitted and transformed feature contracts aligned.
+    """
+    if embeddings is None:
+        if expected:
+            raise PretabDataError(_EMBEDDINGS_REQUIRED)
+        return
+    if not expected:
+        raise IncompatibleParamsError(_EMBEDDINGS_NOT_EXPECTED)
+    if output_kind != "dict":
+        raise IncompatibleParamsError(_EMBEDDINGS_DICT_ONLY)
 
 
 def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESHOLD):
@@ -40,8 +67,9 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
 
     Parameters
     ----------
-    array : numpy.ndarray
-        The dense stacked output.
+    array : numpy.ndarray or scipy.sparse matrix
+        The stacked output. Sparse inputs are inspected through their shape,
+        dtype, and stored values without converting them to a dense array.
     output_format : {"auto", "dense", "sparse"}
         Requested format. ``"auto"`` picks ``"sparse"`` when the density is below
         ``threshold``.
@@ -55,8 +83,10 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
         ``format``, ``shape``, ``density``, ``dense_bytes``, ``actual_bytes``, and
         ``memory_saved_bytes``.
     """
-    density = float(np.count_nonzero(array)) / array.size if array.size else 0.0
-    dense_bytes = int(array.nbytes)
+    size = int(np.prod(array.shape, dtype=np.int64))
+    nonzero = int(array.count_nonzero()) if sp.issparse(array) else int(np.count_nonzero(array))
+    density = float(nonzero) / size if size else 0.0
+    dense_bytes = size * int(array.dtype.itemsize)
 
     if output_format == "sparse":
         use_sparse = True
@@ -66,7 +96,7 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
         use_sparse = False
 
     if use_sparse:
-        csr = sp.csr_matrix(array)
+        csr = array.tocsr(copy=False) if sp.issparse(array) else sp.csr_matrix(array)
         actual_bytes = int(csr.data.nbytes + csr.indices.nbytes + csr.indptr.nbytes)
         fmt = "sparse"
     else:
@@ -89,8 +119,9 @@ def to_dataframe_output(array, columns, container):
 
     Parameters
     ----------
-    array : numpy.ndarray
-        Dense stacked output.
+    array : numpy.ndarray or scipy.sparse matrix
+        Stacked output. Sparse input is intentionally densified because
+        ``set_output`` requests a dense pandas or polars container.
     columns : sequence of str
         One name per output column (from ``get_feature_names_out``).
     container : {"pandas", "polars"}
@@ -102,6 +133,8 @@ def to_dataframe_output(array, columns, container):
         If ``container="polars"`` but polars is not installed.
     """
     columns = list(columns)
+    if sp.issparse(array):
+        array = array.toarray()
     if container == "pandas":
         import pandas as pd
 
@@ -117,7 +150,7 @@ def to_dataframe_output(array, columns, container):
 
 
 def build_output_dict(transformed, slices, *, as_sparse=False) -> dict:
-    """Split a stacked array into a name -> block dict using ``slices``.
+    """Split a stacked dense or sparse array into a name -> block dict.
 
     ``slices`` is an ordered iterable of ``(name, start, width)`` describing each
     transformer's contiguous span in the stacked output. When ``as_sparse`` is
@@ -126,25 +159,86 @@ def build_output_dict(transformed, slices, *, as_sparse=False) -> dict:
     result = {}
     for name, start, width in slices:
         block = transformed[:, start : start + width]
-        result[name] = sp.csr_matrix(block) if as_sparse else block
+        if as_sparse:
+            result[name] = block.tocsr(copy=False) if sp.issparse(block) else sp.csr_matrix(block)
+        else:
+            result[name] = block.toarray() if sp.issparse(block) else block
     return result
 
 
-def attach_embeddings(result: dict, embeddings, *, expected: bool) -> dict:
+def _validate_embedding_array(arr, name: str, *, expected_width=None, n_samples=None):
+    """Validate one embedding array is 2D with the expected width and row count."""
+    arr = np.asarray(arr)
+    if arr.ndim != 2:
+        raise PretabDataError(
+            f"{name} must be 2D (n_samples, n_dims); got shape {arr.shape}.\n"
+            "Fix: reshape the embedding array to 2 dimensions."
+        )
+    if expected_width is not None and arr.shape[1] != expected_width:
+        raise PretabDataError(
+            f"{name} has {arr.shape[1]} column(s) but {expected_width} were fitted.\n"
+            "Fix: pass an embedding array with the same width used at fit time."
+        )
+    if n_samples is not None and arr.shape[0] != n_samples:
+        raise PretabDataError(
+            f"{name} has {arr.shape[0]} row(s) but X has {n_samples}.\n"
+            "Fix: pass an embedding array with one row per sample in X."
+        )
+    return arr
+
+
+def resolve_embedding_dimensions(embeddings, n_samples: int) -> dict:
+    """Validate embeddings at fit time and return their ``name -> width`` mapping.
+
+    Each array (or each array in a list) must be 2D and have exactly ``n_samples``
+    rows, i.e. one row per sample in ``X``. Catches the same shape mistakes at
+    ``fit`` time that :func:`attach_embeddings` catches at ``transform`` time,
+    instead of only surfacing them (or a bare ``IndexError`` for 1D input) later.
+
+    Raises
+    ------
+    PretabDataError
+        If an array is not 2D or its row count does not match ``n_samples``.
+    """
+    arrays = [embeddings] if isinstance(embeddings, np.ndarray) else list(embeddings)
+    dimensions = {}
+    for idx, arr in enumerate(arrays):
+        name = f"embedding_{idx + 1}"
+        arr = _validate_embedding_array(arr, name, n_samples=n_samples)
+        dimensions[name] = arr.shape[1]
+    return dimensions
+
+
+def attach_embeddings(result: dict, embeddings, *, expected: bool, embedding_dimensions=None, n_samples=None) -> dict:
     """Attach external embedding blocks to a transformed-output dict.
+
+    Validates the arrays against what ``fit`` recorded in ``embedding_dimensions``
+    (a ``name -> width`` mapping): the number of arrays, that each is 2D, that
+    each array's width matches its fitted dimension, and that each array's row
+    count matches ``n_samples``. Both are optional and skip the corresponding
+    check when omitted (``None``), so callers without fit-time metadata keep
+    working.
 
     Raises
     ------
     IncompatibleParamsError
         If ``embeddings`` are provided but none were configured at fit time.
+    PretabDataError
+        If the number of arrays, an array's shape, or its row count does not
+        match what ``fit`` recorded.
     """
-    if not expected:
-        raise IncompatibleParamsError(_EMBEDDINGS_NOT_EXPECTED)
-    if isinstance(embeddings, np.ndarray):
-        result["embedding_1"] = embeddings.astype(np.float32)
-    elif isinstance(embeddings, list):
-        for idx, e in enumerate(embeddings):
-            result[f"embedding_{idx + 1}"] = e.astype(np.float32)
+    validate_embedding_request(embeddings, expected=expected)
+    arrays = [embeddings] if isinstance(embeddings, np.ndarray) else list(embeddings)
+    if embedding_dimensions is not None and len(arrays) != len(embedding_dimensions):
+        raise PretabDataError(
+            f"Expected {len(embedding_dimensions)} embedding array(s) (as fitted) but got {len(arrays)}.\n"
+            "Fix: pass the same number of embedding arrays that were passed to fit."
+        )
+    for idx, arr in enumerate(arrays):
+        name = f"embedding_{idx + 1}"
+        expected_width = embedding_dimensions.get(name) if embedding_dimensions is not None else None
+        arr = _validate_embedding_array(arr, name, expected_width=expected_width, n_samples=n_samples)
+        result[name] = arr.astype(np.float32)
     return result
 
 
@@ -155,14 +249,15 @@ def format_output(
     slices=None,
     embeddings=None,
     embeddings_expected=False,
+    embedding_dimensions=None,
     output_format="dense",
 ):
     """Return the transformed data as a stacked array or a per-block dict.
 
     Parameters
     ----------
-    transformed : numpy.ndarray
-        The dense stacked array produced by the fitted ColumnTransformer.
+    transformed : numpy.ndarray or scipy.sparse matrix
+        The stacked output produced by the fitted ColumnTransformer.
     return_array : bool
         If True, return the stacked array (dense or CSR); otherwise build the dict.
     slices : iterable of (str, int, int), optional
@@ -172,15 +267,35 @@ def format_output(
         External embedding blocks to attach to the dict output.
     embeddings_expected : bool, default=False
         Whether embedding blocks were configured at fit time.
+    embedding_dimensions : dict, optional
+        ``name -> width`` mapping recorded at fit time, used to validate the
+        arrays passed here.
     output_format : {"dense", "sparse"}, default="dense"
         Resolved output format. ``"sparse"`` returns a CSR matrix (array path) or
         CSR blocks (dict path).
     """
+    validate_embedding_request(
+        embeddings,
+        expected=embeddings_expected,
+        output_kind="array" if return_array else "dict",
+    )
+
     as_sparse = output_format == "sparse"
+    if as_sparse:
+        transformed = transformed.tocsr(copy=False) if sp.issparse(transformed) else sp.csr_matrix(transformed)
+    elif sp.issparse(transformed):
+        transformed = transformed.toarray()
+
     if return_array:
-        return sp.csr_matrix(transformed) if as_sparse else transformed
+        return transformed
 
     result = build_output_dict(transformed, slices or [], as_sparse=as_sparse)
     if embeddings is not None:
-        attach_embeddings(result, embeddings, expected=embeddings_expected)
+        attach_embeddings(
+            result,
+            embeddings,
+            expected=embeddings_expected,
+            embedding_dimensions=embedding_dimensions,
+            n_samples=transformed.shape[0] if transformed.shape else None,
+        )
     return result

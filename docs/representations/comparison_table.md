@@ -6,74 +6,79 @@ source of truth, and these tables mirror it.
 
 ## Reading the columns
 
-`Key`
-: The string you pass to `numerical_method`, `categorical_method`, or per-feature config.
-
-`Scope`
-: `univariate` (one column) or `multivariate` (several columns jointly).
-
-`Target`
-: `forbidden`, `optional` (used when `target_aware=True`), or `required`.
-
-`Adaptive`
-: Supports data-driven width selection between `min_output_dim` and `max_output_dim`.
-
-`Penalty`
-: Exposes `get_penalty_matrix()` for smoothing penalties.
-
-`Selectable`
-: Can be chosen through `Preprocessor` as a per-column method.
+| Column       | Meaning                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------- |
+| `Key`        | The string passed to `numerical_method`, `categorical_method`, or a per-feature config. |
+| `Scope`      | `univariate` for one column or `multivariate` for several columns modeled jointly.      |
+| `Target`     | `forbidden`, `optional` (used when `target_aware=True`), or `required`.                 |
+| `Adaptive`   | Supports data-driven width selection between `min_output_dim` and `max_output_dim`.     |
+| `Penalty`    | Exposes `get_penalty_matrix()` for smoothing penalties.                                 |
+| `Selectable` | Can be chosen through `Preprocessor` as a per-column method.                            |
 
 ## Numerical: scalers and simple transforms
 
-| Method | Key | Scope | Target | Selectable |
-| --- | --- | --- | --- | --- |
-| Standardization | `standardization` | univariate | forbidden | yes |
-| Min-max scaling | `minmax` | univariate | forbidden | yes |
-| Robust scaling | `robust` | univariate | forbidden | yes |
-| Quantile transform | `quantile` | univariate | forbidden | yes |
-| Polynomial features | `polynomial` | univariate | forbidden | yes |
-| Box-Cox | `box-cox` | univariate | forbidden | yes |
-| Yeo-Johnson | `yeo-johnson` | univariate | forbidden | yes |
-| Passthrough | `none` | univariate | forbidden | yes |
+| Method              | Key               | Scope      | Target    | Selectable |
+| ------------------- | ----------------- | ---------- | --------- | ---------- |
+| Standardization     | `standardization` | univariate | forbidden | yes        |
+| Min-max scaling     | `minmax`          | univariate | forbidden | yes        |
+| Robust scaling      | `robust`          | univariate | forbidden | yes        |
+| Quantile transform  | `quantile`        | univariate | forbidden | yes        |
+| Polynomial features | `polynomial`      | univariate | forbidden | yes        |
+| Box-Cox             | `box-cox`         | univariate | forbidden | yes        |
+| Yeo-Johnson         | `yeo-johnson`     | univariate | forbidden | yes        |
+| Passthrough         | `none`            | univariate | forbidden | yes        |
 
-## Numerical: splines
+## Spline expansions
 
-| Method | Key | Scope | Target | Adaptive | Penalty | Selectable |
-| --- | --- | --- | --- | --- | --- | --- |
-| B-spline | `bspline` | univariate | optional | yes | no | yes |
-| M-spline | `mspline` | univariate | optional | yes | no | yes |
-| I-spline | `ispline` | univariate | optional | yes | no | yes |
-| Cubic regression spline | `cubicspline` | univariate | optional | yes | yes | yes |
-| Natural cubic spline | `naturalspline` | univariate | optional | yes | yes | yes |
-| Penalized spline (P-spline) | `pspline` | univariate | forbidden | yes | yes | yes |
-| Tensor-product spline | `tensorspline` | multivariate | forbidden | yes | yes | no |
-| Thin-plate spline | `tprs` | multivariate | forbidden | no | yes | no |
+| Method                      | Key             | Scope        | Target    | Adaptive | Penalty      | Selectable |
+| --------------------------- | --------------- | ------------ | --------- | -------- | ------------ | ---------- |
+| B-spline                    | `bspline`       | univariate   | optional  | yes      | yes          | yes        |
+| M-spline                    | `mspline`       | univariate   | optional  | yes      | yes          | yes        |
+| I-spline                    | `ispline`       | univariate   | optional  | yes      | yes          | yes        |
+| Cubic regression spline     | `cubicspline`   | univariate   | optional  | yes      | yes          | yes        |
+| Natural cubic spline        | `naturalspline` | univariate   | optional  | yes      | yes          | yes        |
+| Penalized spline (P-spline) | `pspline`       | univariate   | forbidden | no       | yes          | yes        |
+| Tensor-product spline       | `tensorspline`  | multivariate | forbidden | no       | yes          | no         |
+| Thin-plate spline           | `tprs`          | multivariate | forbidden | no       | experimental | no         |
 
 ```{note}
 The multivariate splines (`tensorspline`, `tprs`) model several inputs jointly and are used
 standalone, not selected per column through `Preprocessor`. The alias `thinplate` resolves to
-`tprs`.
+`tprs`. `ThinPlateSplineTransformer.get_penalty_matrix()` is experimental: it is not guaranteed
+positive semi-definite (the retained eigenvalues of the projected landmark kernel can be
+negative) and emits a `ConfigWarning` on every call. `transform()` is unaffected; only the
+penalty is experimental.
 ```
 
-## Numerical: feature maps
+## Functional expansions
 
-| Method | Key | Scope | Target | Adaptive | Selectable |
-| --- | --- | --- | --- | --- | --- |
-| RBF expansion | `rbf` | univariate | optional | yes | yes |
-| ReLU expansion | `relu` | univariate | optional | yes | yes |
-| Sigmoid expansion | `sigmoid` | univariate | optional | yes | yes |
-| Tanh expansion | `tanh` | univariate | optional | yes | yes |
-| Fourier features | `fourier` | univariate | forbidden | no | yes |
-| Random Fourier features | `rff` | multivariate | forbidden | no | no |
-| Nyström kernel map | `nystroem` | multivariate | forbidden | no | no |
+| Method            | Key       | Scope      | Target    | Adaptive | Selectable |
+| ----------------- | --------- | ---------- | --------- | -------- | ---------- |
+| RBF expansion     | `rbf`     | univariate | optional  | yes      | yes        |
+| ReLU expansion    | `relu`    | univariate | optional  | yes      | yes        |
+| Sigmoid expansion | `sigmoid` | univariate | optional  | yes      | yes        |
+| Tanh expansion    | `tanh`    | univariate | optional  | yes      | yes        |
+| Fourier features  | `fourier` | univariate | forbidden | no       | yes        |
 
-## Numerical: discretization
+## Kernel approximation
 
-| Method | Key | Scope | Target | Adaptive | Selectable |
-| --- | --- | --- | --- | --- | --- |
-| Numeric binning | `custombin` | univariate | forbidden | no | yes |
-| Piecewise-linear encoding (PLE) | `ple` | univariate | required | yes | yes |
+| Method                  | Key        | Scope        | Target    | Adaptive | Selectable |
+| ----------------------- | ---------- | ------------ | --------- | -------- | ---------- |
+| Random Fourier features | `rff`      | multivariate | forbidden | no       | no         |
+| Nyström kernel map      | `nystroem` | multivariate | forbidden | no       | no         |
+
+```{note}
+Random Fourier features and Nyström model the whole input matrix jointly and are used
+standalone, not selected per column through `Preprocessor`.
+```
+
+## Numerical encoding
+
+| Method                          | Key         | Scope      | Target    | Adaptive | Selectable |
+| ------------------------------- | ----------- | ---------- | --------- | -------- | ---------- |
+| Numeric binning                 | `custombin` | univariate | forbidden | no       | yes        |
+| Piecewise-linear encoding (PLE) | `ple`       | univariate | required  | yes      | yes        |
+| Periodic encoding               | n/a         | univariate | forbidden | no       | no         |
 
 ```{important}
 PLE is the only numerical method that **requires** the target. It always places its bins
@@ -81,22 +86,43 @@ against `y`, so it must be fit with a target and is best used with cross-fitting
 [Target awareness](../core_concepts/target_awareness.md).
 ```
 
-## Categorical
+```{note}
+Periodic encoding has no registry key: it takes a required per-feature `period`, so it is not
+selectable through `Preprocessor`. Instantiate `PeriodicEncodingTransformer` directly.
+```
 
-| Method | Key | Scope | Target | Selectable |
-| --- | --- | --- | --- | --- |
-| Ordinal (integer) encoding | `int` | univariate | forbidden | yes |
-| One-hot encoding | `one-hot` | univariate | forbidden | yes |
-| One-hot from ordinal | `onehot_from_ordinal` | univariate | forbidden | yes |
-| Pretrained language embedding | `pretrained` | univariate | forbidden | yes |
-| Passthrough | `none` | univariate | forbidden | yes |
+## Categorical encoding
+
+| Method                     | Key                   | Scope      | Target    | Selectable |
+| -------------------------- | --------------------- | ---------- | --------- | ---------- |
+| Ordinal (integer) encoding | `int`                 | univariate | forbidden | yes        |
+| One-hot encoding           | `one-hot`             | univariate | forbidden | yes        |
+| One-hot from ordinal       | `onehot_from_ordinal` | univariate | forbidden | yes        |
+| Passthrough                | `none`                | univariate | forbidden | yes        |
 
 ```{note}
-`pretrained` requires the optional `embeddings` extra. The alias `ohe` resolves to `one-hot`.
+The alias `ohe` resolves to `one-hot`.
+```
+
+```{warning}
+`onehot_from_ordinal` (`OneHotFromOrdinalTransformer`) is deprecated and emits a
+`DeprecationWarning`. Use `"one-hot"` instead, which wraps scikit-learn's `OneHotEncoder`
+directly.
+```
+
+## Embeddings
+
+| Method                        | Key          | Scope      | Target    | Selectable |
+| ----------------------------- | ------------ | ---------- | --------- | ---------- |
+| Pretrained language embedding | `pretrained` | univariate | forbidden | yes        |
+
+```{note}
+`pretrained` requires the optional `embeddings` extra.
 ```
 
 ## Where to go next
 
 - [Choosing a method](choosing_a_method.md) for guidance on which of these to reach for.
-- [Splines](splines.md), [Feature maps](feature_maps.md),
-  [Binning and PLE](binning_and_ple.md), [Categorical](categorical.md) for the details.
+- [Spline expansions](spline_expansions.md), [Functional expansions](functional_expansions.md),
+  [Kernel approximation](kernel_approximation.md), [Numerical encoding](numerical_encoding.md),
+  [Categorical encoding](categorical_encoding.md), [Embeddings](embeddings.md) for the details.

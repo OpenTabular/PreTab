@@ -10,6 +10,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
+from ..exceptions import invalid_param_error
 from .adaptive import AdaptiveResolutionMixin
 from .parameters import AliasResolverMixin
 from .policy import RepresentationPolicy, apply_constant_policy
@@ -34,14 +35,16 @@ class BasePreTabTransformer(
     (``_policy``). A family narrows individual axes through the ``_constant_policy``
     / ``_out_of_range_policy`` / ``_duplicate_policy`` class attributes (``None``
     means "inherit the shared policy"); :meth:`_resolved_policy` merges them.
+    Transformers that expose their own ``policy`` constructor parameter let a
+    caller override those defaults per-instance; see :meth:`_resolved_policy`.
     """
 
     _allow_nan: bool = True
     _requires_y: bool = False
     _feature_suffix_value: str = "f"
 
-    #: Shared, central edge-case policy (decision D9). Its defaults reproduce the
-    #: library's historical behaviour, so it is inert until narrowed.
+    #: Shared, central edge-case policy. Its defaults reproduce the library's
+    #: historical behaviour, so it is inert until narrowed.
     _policy: RepresentationPolicy = RepresentationPolicy()
 
     #: Per-family policy overrides; ``None`` inherits the corresponding ``_policy``
@@ -53,7 +56,17 @@ class BasePreTabTransformer(
     n_features_in_: int
 
     def _resolved_policy(self) -> RepresentationPolicy:
-        """Return the shared policy narrowed by this family's override attributes."""
+        """Return the effective edge-case policy for this instance.
+
+        An explicit ``policy`` constructor argument, on the transformers that expose
+        one, always wins verbatim over the class-level defaults below. Otherwise, the
+        shared default policy is narrowed by this family's ``_constant_policy`` /
+        ``_out_of_range_policy`` class attributes, which record each family's
+        historical, non-configurable default behavior.
+        """
+        instance_policy = getattr(self, "policy", None)
+        if instance_policy is not None:
+            return RepresentationPolicy.resolve(instance_policy)
         return self._policy.merge(
             constant=self._constant_policy,
             out_of_range=self._out_of_range_policy,
@@ -79,6 +92,13 @@ class BasePreTabTransformer(
         check_is_fitted(self, "n_features_in_")
         if input_features is None:
             input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        elif len(input_features) != self.n_features_in_:
+            raise invalid_param_error(
+                type(self).__name__,
+                "get_feature_names_out.input_features",
+                len(input_features),
+                f"must have exactly {self.n_features_in_} entries (one per input feature)",
+            )
         suffix = self._feature_suffix()
         names = []
         for feature, n_cols in zip(input_features, self._output_sizes(), strict=False):
@@ -101,7 +121,7 @@ class BasePreTabTransformer(
 
     def __sklearn_tags__(self):
         """Declare NaN-passthrough and target-requirement estimator tags."""
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
         tags.input_tags.allow_nan = self._allow_nan
         tags.target_tags.required = self._requires_y
         return tags

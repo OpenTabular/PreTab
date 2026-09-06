@@ -3,11 +3,10 @@
 :func:`preprocessor_to_spec` / :func:`preprocessor_from_spec` capture a fitted
 :class:`~pretab.preprocessor.Preprocessor` as a self-describing JSON document --
 schema-versioned, dependency-versioned, and human-inspectable -- that
-reconstructs the estimator bit-for-bit. It is an explicit, auditable alternative
-to :mod:`pickle`: loading a spec only ever imports an allow-listed set of library
-namespaces and never runs estimator ``__init__`` / ``__reduce__`` /
-``__setstate__`` code, so a spec cannot execute arbitrary code the way
-``pickle.load`` can.
+reconstructs supported estimators bit-for-bit in the same environment. Loading
+restricts library imports and bypasses estimator initialization and pickle hooks,
+but imports can execute module code: only load specs from trusted sources.
+Recorded dependency versions do not guarantee cross-version compatibility.
 
 The document has a small declarative envelope (schema/library versions, resolved
 constructor params, per-representation summary, output column order) plus a
@@ -17,6 +16,7 @@ center / bin locations, scalers, nested estimators) for exact reconstruction.
 
 import dataclasses
 import importlib
+from collections import UserList
 from typing import Any, cast
 
 import numpy as np
@@ -25,12 +25,31 @@ from sklearn.utils.validation import check_is_fitted
 
 from .._version import __version__ as _PRETAB_VERSION
 from ..core.parameters import UNSET
+from ..core.policy import RepresentationPolicy
+from ..core.representation import FeatureLineage, RepresentationSpec
 from ..exceptions import PretabError, PretabSerializationError
+from ..placement.base import PlacementResult
+from .registry import TransformerSpec
 
 SCHEMA_VERSION = 1
 
-# Top-level packages that a spec is allowed to import classes/types from.
-_ALLOWED_TOP_LEVEL = frozenset({"pretab", "sklearn", "numpy", "scipy", "builtins"})
+# Top-level packages that a spec is allowed to *import a module from*. This is
+# only the first line of defense (see ``_ALLOWED_DATACLASSES`` and the
+# ``BaseEstimator`` check below for the checks that actually gate what gets
+# called/instantiated). ``builtins`` is deliberately excluded: nothing PreTab
+# ever needs to reconstruct from a spec lives there, and allowing it is what let
+# a crafted spec call ``builtins.open`` with attacker-controlled arguments.
+_ALLOWED_TOP_LEVEL = frozenset({"pretab", "sklearn", "numpy", "scipy"})
+
+# The exact, closed set of dataclasses a spec is allowed to reconstruct via the
+# ``__dataclass__`` tag. Reconstruction calls ``cls(**fields)`` (i.e. runs the
+# dataclass's ``__init__``), so this must be an exact allow-list, not merely
+# "any dataclass importable under an allowed module" -- the latter would still
+# let a spec construct an arbitrary sklearn/numpy/scipy dataclass with
+# attacker-controlled fields.
+_ALLOWED_DATACLASSES = frozenset(
+    {RepresentationPolicy, RepresentationSpec, FeatureLineage, PlacementResult, TransformerSpec}
+)
 
 
 # --- helpers -------------------------------------------------------------
@@ -79,6 +98,11 @@ def _encode(obj):
         return {"__slice__": [obj.start, obj.stop, obj.step]}
     if isinstance(obj, tuple):
         return {"__tuple__": [_encode(v) for v in obj]}
+    if isinstance(obj, UserList):
+        # sklearn 1.6 wraps remainder-column indices in a warning-emitting
+        # UserList. Only its data affects transformation; reading it directly
+        # also avoids mutating the wrapper's warning state during hashing.
+        return _encode(obj.data)
     if isinstance(obj, list):
         return [_encode(v) for v in obj]
     if isinstance(obj, BaseEstimator):
@@ -152,14 +176,40 @@ def _decode_mapping(mapping: dict) -> dict:
 
 
 def _decode_estimator(payload: dict):
+    """Reconstruct a ``BaseEstimator`` from an ``__estimator__`` tag.
+
+    Bypasses ``__init__``/``__reduce__``/``__setstate__`` by design (a plain
+    ``__new__`` plus a ``__dict__`` update), but only for a class that is
+    actually a registered scikit-learn estimator -- anything else (a crafted
+    ``\"class\"`` naming an unrelated callable) is refused before it is ever
+    instantiated.
+    """
     cls = cast(Any, _resolve(payload["class"]))
-    obj = cls.__new__(cls)
+    if not (isinstance(cls, type) and issubclass(cls, BaseEstimator)):
+        raise PretabSerializationError(
+            f"Refusing to reconstruct {payload['class']!r} as an estimator: not a scikit-learn BaseEstimator subclass."
+        )
+    obj = object.__new__(cls)
     obj.__dict__.update(_decode_mapping(payload["state"]))
     return obj
 
 
 def _decode_dataclass(payload: dict):
+    """Reconstruct a dataclass from a ``__dataclass__`` tag.
+
+    Unlike :func:`_decode_estimator`, this calls ``cls(**fields)`` (the
+    dataclass's real ``__init__``), so the allow-list must be an *exact* set of
+    approved classes, not merely "any dataclass reachable under an allowed
+    module" -- refusing anything outside ``_ALLOWED_DATACLASSES`` is what stops
+    a crafted spec from constructing an arbitrary callable with
+    attacker-controlled keyword arguments.
+    """
     cls = cast(Any, _resolve(payload["class"]))
+    if not (isinstance(cls, type) and dataclasses.is_dataclass(cls) and cls in _ALLOWED_DATACLASSES):
+        allowed = sorted(c.__qualname__ for c in _ALLOWED_DATACLASSES)
+        raise PretabSerializationError(
+            f"Refusing to reconstruct disallowed dataclass {payload['class']!r}. Only {allowed} are permitted."
+        )
     fields = {k: _decode(v) for k, v in payload["fields"].items()}
     return cls(**fields)
 

@@ -11,11 +11,12 @@ Four methods operate on several inputs together rather than per column.
 
 `tensorspline`
 : Tensor-product spline. A smooth basis over a small number of inputs, capturing their
-  interaction on a grid.
+interaction on a grid.
 
 `tprs`
 : Thin-plate regression spline. A smooth surface over two or more inputs, from the generalized
-  additive model literature.
+additive model literature. It also accepts a single input, though a univariate spline family
+is usually a more natural fit there.
 
 `rff`
 : Random Fourier features. A scalable approximation to a shift-invariant kernel.
@@ -112,6 +113,8 @@ The thin-plate spline handles the geographic interaction while PLE handles the s
 
 ## Where to go next
 
-- [Splines](../representations/splines.md) for the tensor-product and thin-plate details.
-- [Feature maps](../representations/feature_maps.md) for the kernel approximations.
-- [References](../representations/references.md) for the underlying theory.
+- [Spline expansions](../representations/spline_expansions.md) for the tensor-product and
+  thin-plate details.
+- [Kernel approximation](../representations/kernel_approximation.md) for random Fourier
+  features and Nyström.
+- [Representations overview](../representations/overview.md) for the underlying theory and supporting notes.

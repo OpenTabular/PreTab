@@ -27,35 +27,31 @@ from sklearn.preprocessing import (
     StandardScaler,
 )
 
-from ..transformers.categorical.language_embedding import (
-    LanguageEmbeddingTransformer,
-)
-from ..transformers.categorical.legacy import OneHotFromOrdinalTransformer
-from ..transformers.categorical.ordinal import ContinuousOrdinalTransformer
-from ..transformers.encoders.floats import NoTransformer
-from ..transformers.feature_maps.fourier import FourierFeatureTransformer
-from ..transformers.feature_maps.kernel_approx import (
-    NystroemFeaturesTransformer,
-    RandomFourierFeaturesTransformer,
-)
-from ..transformers.feature_maps.rbf import RBFExpansionTransformer
-from ..transformers.feature_maps.relu import ReLUExpansionTransformer
-from ..transformers.feature_maps.sigmoid import SigmoidExpansionTransformer
-from ..transformers.feature_maps.tanh import TanhExpansionTransformer
-from ..transformers.numerical.binning import NumericBinningTransformer
-from ..transformers.numerical.piecewise import PLETransformer
-from ..transformers.splines.b_spline import BSplineTransformer
-from ..transformers.splines.cubic_regression import CubicRegressionSplineTransformer
-from ..transformers.splines.i_spline import ISplineTransformer
-from ..transformers.splines.m_spline import MSplineTransformer
-from ..transformers.splines.multivariate.tensor_product import (
+from ..embedding.language import LanguageEmbeddingTransformer
+from ..encoding.categorical.one_hot import OneHotFromOrdinalTransformer
+from ..encoding.categorical.ordinal import ContinuousOrdinalTransformer
+from ..encoding.numerical.binning import NumericBinningTransformer
+from ..encoding.numerical.ple import PLETransformer
+from ..expansion.functional.fourier import FourierFeatureTransformer
+from ..expansion.functional.rbf import RBFExpansionTransformer
+from ..expansion.functional.relu import ReLUExpansionTransformer
+from ..expansion.functional.sigmoid import SigmoidExpansionTransformer
+from ..expansion.functional.tanh import TanhExpansionTransformer
+from ..expansion.spline.b_spline import BSplineTransformer
+from ..expansion.spline.cubic_regression import CubicRegressionSplineTransformer
+from ..expansion.spline.i_spline import ISplineTransformer
+from ..expansion.spline.m_spline import MSplineTransformer
+from ..expansion.spline.multivariate.tensor_product import (
     TensorProductSplineTransformer,
 )
-from ..transformers.splines.multivariate.thin_plate import (
+from ..expansion.spline.multivariate.thin_plate import (
     ThinPlateSplineTransformer,
 )
-from ..transformers.splines.natural_cubic import NaturalCubicSplineTransformer
-from ..transformers.splines.p_spline import PSplineTransformer
+from ..expansion.spline.natural_cubic import NaturalCubicSplineTransformer
+from ..expansion.spline.p_spline import PSplineTransformer
+from ..kernel_approximation.nystroem import NystroemFeaturesTransformer
+from ..kernel_approximation.random_fourier import RandomFourierFeaturesTransformer
+from ..preprocessing.floats import NoTransformer
 
 __all__ = [
     "CATEGORICAL_ALIASES",

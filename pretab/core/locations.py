@@ -78,11 +78,18 @@ def resolve_locations(
         Sorted locations whose count lies in ``[min_count, max_count]`` (subject
         to the number of distinct candidates the supplement can provide).
     """
-    locs = np.sort(np.asarray(locations, dtype=float))
+    locations = np.asarray(locations, dtype=float)
+    order = np.argsort(locations, kind="stable")
+    locs = locations[order]
+    imp = np.asarray(importance)[order] if importance is not None else None
+
     if dedupe:
-        locs = np.unique(locs)
+        locs, unique_idx = np.unique(locs, return_index=True)
+        if imp is not None:
+            imp = imp[unique_idx]
+
     if len(locs) > max_count:
-        locs = trim_to_count(locs, max_count, importance)
+        locs = trim_to_count(locs, max_count, imp)
     if len(locs) < min_count and supplement is not None:
         locs = supplement(locs, min_count)
     return locs

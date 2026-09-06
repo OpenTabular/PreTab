@@ -37,7 +37,7 @@ types:
 
 # run tests with coverage
 test:
-    poetry run pytest --cov=pretab tests/
+    poetry run pytest --cov=pretab --cov-branch --cov-fail-under=90 tests/
 
 # run the end-to-end quickstart used as the CI smoke test and reviewer artifact
 quickstart:
@@ -50,7 +50,7 @@ docs:
 
 # run all pre-commit hooks on all files including push-stage hooks (ruff, pyright, prettier)
 check:
-    poetry run pre-commit run --hook-stage push --all-files
+    poetry run pre-commit run --hook-stage pre-push --all-files
 
 # create a conventional commit using commitizen
 commit:
