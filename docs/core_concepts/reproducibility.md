@@ -37,14 +37,17 @@ restored = Preprocessor.from_spec("representation.json")
 ```
 
 ```{important}
-`from_spec` is a safe alternative to pickle. Reconstruction imports only from `pretab`,
-`scikit-learn`, `numpy`, and `scipy`, reconstructs dataclasses only from an exact,
-closed allow-list, and never executes arbitrary estimator code. A spec from an untrusted
-source cannot run code the way an untrusted pickle can.
+Load specs only from trusted sources. Reconstruction restricts imports to `pretab`,
+`scikit-learn`, `numpy`, and `scipy`, reconstructs dataclasses only from an exact, closed
+allow-list, and bypasses estimator initialization and pickle hooks. These restrictions are
+not a sandbox: importing library modules can still execute code. Use the same PreTab and
+dependency versions when restoring; recorded versions are informational, and cross-version
+compatibility is not guaranteed.
 ```
 
-A round-trip reproduces `transform` bit-for-bit, so a spec is a faithful, human-readable
-record of a fitted representation.
+Supported built-in representations reproduce `transform` bit-for-bit in the same environment.
+Third-party representations and pretrained language models are not supported by the JSON
+serializer; unsupported state raises `PretabSerializationError`.
 
 ## Fingerprint
 
@@ -57,6 +60,7 @@ pre.fit(df, y)
 pre.fingerprint_
 ```
 
+Inference reports and advisory lifecycle flags are excluded from the fingerprint.
 The fingerprint is deterministic within a process and across processes, and it survives a
 `to_spec` / `from_spec` round-trip. Two preprocessors with the same fingerprint will produce
 the same output; a change to config, data, seed, or version changes the fingerprint.
@@ -79,12 +83,12 @@ pre.reproducibility_report()
 A fitted representation moves through a small set of explicit states, which prevents
 accidental mutation of something you intend to deploy.
 
-| State | Meaning |
-| --- | --- |
-| `UNFITTED` | Constructed, not yet fit. |
-| `FITTED` | Fit and ready to transform. |
-| `FROZEN` | Locked against parameter changes. |
-| `STALE` | Marked as no longer current, with a reason. |
+| State      | Meaning                                     |
+| ---------- | ------------------------------------------- |
+| `UNFITTED` | Constructed, not yet fit.                   |
+| `FITTED`   | Fit and ready to transform.                 |
+| `FROZEN`   | Locked against parameter changes.           |
+| `STALE`    | Marked as no longer current, with a reason. |
 
 ```python
 pre.freeze()          # lock it
@@ -98,7 +102,7 @@ object and leaves the original untouched, and `mark_stale(reason)` records why a
 should no longer be used.
 
 ```{warning}
-`set_params` on a frozen preprocessor raises `FrozenRepresentationError`. This is deliberate:
+`fit`, `fit_transform`, and `set_params` on a frozen preprocessor raise `FrozenRepresentationError`. This is deliberate:
 a deployed representation should not silently change shape. Use `refit` to produce a new
 object instead of mutating the old one.
 ```

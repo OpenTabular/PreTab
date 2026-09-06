@@ -3,11 +3,10 @@
 :func:`preprocessor_to_spec` / :func:`preprocessor_from_spec` capture a fitted
 :class:`~pretab.preprocessor.Preprocessor` as a self-describing JSON document --
 schema-versioned, dependency-versioned, and human-inspectable -- that
-reconstructs the estimator bit-for-bit. It is an explicit, auditable alternative
-to :mod:`pickle`: loading a spec only ever imports an allow-listed set of library
-namespaces and never runs estimator ``__init__`` / ``__reduce__`` /
-``__setstate__`` code, so a spec cannot execute arbitrary code the way
-``pickle.load`` can.
+reconstructs supported estimators bit-for-bit in the same environment. Loading
+restricts library imports and bypasses estimator initialization and pickle hooks,
+but imports can execute module code: only load specs from trusted sources.
+Recorded dependency versions do not guarantee cross-version compatibility.
 
 The document has a small declarative envelope (schema/library versions, resolved
 constructor params, per-representation summary, output column order) plus a
@@ -17,6 +16,7 @@ center / bin locations, scalers, nested estimators) for exact reconstruction.
 
 import dataclasses
 import importlib
+from collections import UserList
 from typing import Any, cast
 
 import numpy as np
@@ -98,6 +98,11 @@ def _encode(obj):
         return {"__slice__": [obj.start, obj.stop, obj.step]}
     if isinstance(obj, tuple):
         return {"__tuple__": [_encode(v) for v in obj]}
+    if isinstance(obj, UserList):
+        # sklearn 1.6 wraps remainder-column indices in a warning-emitting
+        # UserList. Only its data affects transformation; reading it directly
+        # also avoids mutating the wrapper's warning state during hashing.
+        return _encode(obj.data)
     if isinstance(obj, list):
         return [_encode(v) for v in obj]
     if isinstance(obj, BaseEstimator):
@@ -184,7 +189,7 @@ def _decode_estimator(payload: dict):
         raise PretabSerializationError(
             f"Refusing to reconstruct {payload['class']!r} as an estimator: not a scikit-learn BaseEstimator subclass."
         )
-    obj = cls.__new__(cls)
+    obj = object.__new__(cls)
     obj.__dict__.update(_decode_mapping(payload["state"]))
     return obj
 
