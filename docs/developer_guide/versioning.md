@@ -32,18 +32,18 @@ commits bump the **major** version, in line with standard SemVer.
 
 ## Commit types and their effect
 
-| Commit type | Example                                     | Version bump |
-| ----------- | ------------------------------------------- | ------------ |
-| `feat`      | `feat(splines): add B-spline knots option`  | Minor        |
-| `fix`       | `fix(binning): handle empty bins`           | Patch        |
-| `perf`      | `perf(ple): vectorise bin assignment`       | Patch        |
-| `feat!`     | `feat!: drop Python 3.9 support`            | Major        |
-| `docs`      | `docs: update API reference`                | None         |
-| `test`      | `test: add spline round-trip test`          | None         |
-| `ci`        | `ci: add Python 3.13 to matrix`             | None         |
-| `refactor`  | `refactor: simplify feature detection`      | None         |
-| `style`     | `style: apply ruff formatting`              | None         |
-| `chore`     | `chore: update pre-commit revisions`        | None         |
+| Commit type | Example                                    | Version bump |
+| ----------- | ------------------------------------------ | ------------ |
+| `feat`      | `feat(splines): add B-spline knots option` | Minor        |
+| `fix`       | `fix(binning): handle empty bins`          | Patch        |
+| `perf`      | `perf(ple): vectorise bin assignment`      | Patch        |
+| `feat!`     | `feat!: drop Python 3.9 support`           | Major        |
+| `docs`      | `docs: update API reference`               | None         |
+| `test`      | `test: add spline round-trip test`         | None         |
+| `ci`        | `ci: add Python 3.13 to matrix`            | None         |
+| `refactor`  | `refactor: simplify feature detection`     | None         |
+| `style`     | `style: apply ruff formatting`             | None         |
+| `chore`     | `chore: update pre-commit revisions`       | None         |
 
 Commit messages that do not match any of these types do not trigger a version bump. See
 [CONVENTIONAL_COMMITS.md](https://github.com/OpenTabular/PreTab/blob/main/CONVENTIONAL_COMMITS.md)

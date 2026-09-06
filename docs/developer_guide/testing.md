@@ -8,14 +8,14 @@ are organized and how to run them.
 The suite runs with coverage through a single recipe.
 
 ```bash
-just test     # poetry run pytest --cov=pretab tests/
+just test     # poetry run pytest --cov=pretab --cov-branch --cov-fail-under=90 tests/
 ```
 
 To run a subset while developing, invoke pytest directly.
 
 ```bash
 poetry run pytest tests/expansion/            # one area
-poetry run pytest tests/expansion/spline/test_b_spline.py -k output_shape   # one test
+poetry run pytest tests/expansion/spline/test_spline_expansions.py -k bspline   # one test
 poetry run pytest -k "spline and not tensor"     # by keyword
 ```
 
@@ -24,17 +24,17 @@ poetry run pytest -k "spline and not tensor"     # by keyword
 Tests mirror the structure of the package, so a change in one area maps to an obvious test
 directory.
 
-| Directory | Covers |
-| --- | --- |
-| `tests/core/` | Base classes, adaptive resolution, supervised logic, logging. |
+| Directory                                                                                | Covers                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/core/`                                                                            | Base classes, adaptive resolution, supervised logic, logging.                                                                                               |
 | `tests/expansion/`, `tests/encoding/`, `tests/kernel_approximation/`, `tests/embedding/` | Every representation family, split by kind (splines and functional expansions, numerical/categorical encoders, kernel approximations, language embeddings). |
-| `tests/transformers/` | Cross-family contracts: sklearn compatibility, feature names, output dimensions, parameter aliases, encoder counts. |
-| `tests/placement/` | Knot and edge placement strategies. |
-| `tests/compose/` | Registry, feature detection, config resolution, serialization. |
-| `tests/extension/` | The public extensibility surface and conformance. |
-| `tests/integration/` | End-to-end `Preprocessor` and pipeline behaviour. |
-| `tests/regression/` | Pinned outputs that guard against silent numerical drift. |
-| `tests/doc_snippets/` | Executes the `docs/tutorials/*.md` code fences, so the tutorials cannot silently rot. |
+| `tests/transformers/`                                                                    | Cross-family contracts: sklearn compatibility, feature names, output dimensions, parameter aliases, encoder counts.                                         |
+| `tests/placement/`                                                                       | Knot and edge placement strategies.                                                                                                                         |
+| `tests/compose/`                                                                         | Registry, feature detection, config resolution, serialization.                                                                                              |
+| `tests/extension/`                                                                       | The public extensibility surface and conformance.                                                                                                           |
+| `tests/integration/`                                                                     | End-to-end `Preprocessor` and pipeline behaviour.                                                                                                           |
+| `tests/regression/`                                                                      | Pinned outputs that guard against silent numerical drift.                                                                                                   |
+| `tests/doc_snippets/`                                                                    | Executes the `docs/tutorials/*.md` code fences, so the tutorials cannot silently rot.                                                                       |
 
 ```{note}
 Regression tests pin known-good output. If one fails after a deliberate change to a

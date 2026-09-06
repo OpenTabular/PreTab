@@ -15,6 +15,10 @@ transformers use. A dedicated CI job installs exactly these minimum versions and
 test suite against them, so this floor is verified, not just declared.
 ```
 
+The core dependencies are NumPy >=1.24,<3, pandas >=2,<3, SciPy >=1.10,<2,
+and scikit-learn >=1.6,<2. The scikit-learn minimum matches the validation and
+estimator-tag APIs used by PreTab.
+
 ## From PyPI
 
 ```bash

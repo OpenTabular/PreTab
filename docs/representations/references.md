@@ -7,11 +7,11 @@ representation.
 ## Splines and penalized splines
 
 Eilers, P. H. C., and Marx, B. D. (1996). Flexible smoothing with B-splines and penalties.
-*Statistical Science*, 11(2), 89-121.
+_Statistical Science_, 11(2), 89-121.
 
 Eilers, P. H. C., and Marx, B. D. (2003). Multivariate calibration with temperature
-interaction using two-dimensional penalized signal regression. *Chemometrics and Intelligent
-Laboratory Systems*, 66(2), 159-174.
+interaction using two-dimensional penalized signal regression. _Chemometrics and Intelligent
+Laboratory Systems_, 66(2), 159-174.
 
 These two papers introduce the P-spline (B-spline basis with a difference penalty) and its
 tensor-product extension, which underpin `PSplineTransformer` and
@@ -19,13 +19,13 @@ tensor-product extension, which underpin `PSplineTransformer` and
 
 ## Thin-plate and generalized additive models
 
-Wahba, G. (1990). *Spline Models for Observational Data*. Society for Industrial and Applied
+Wahba, G. (1990). _Spline Models for Observational Data_. Society for Industrial and Applied
 Mathematics.
 
-Wood, S. N. (2003). Thin plate regression splines. *Journal of the Royal Statistical Society:
-Series B*, 65(1), 95-114.
+Wood, S. N. (2003). Thin plate regression splines. _Journal of the Royal Statistical Society:
+Series B_, 65(1), 95-114.
 
-Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R* (2nd ed.). Chapman
+Wood, S. N. (2017). _Generalized Additive Models: An Introduction with R_ (2nd ed.). Chapman
 and Hall/CRC.
 
 Wahba's monograph is the foundation for thin-plate splines; Wood's work gives the low-rank
@@ -34,10 +34,10 @@ thin-plate regression spline and the GAM framing that `ThinPlateSplineTransforme
 ## Kernel approximations
 
 Williams, C. K. I., and Seeger, M. (2001). Using the Nyström method to speed up kernel
-machines. *Advances in Neural Information Processing Systems*, 13.
+machines. _Advances in Neural Information Processing Systems_, 13.
 
-Rahimi, A., and Recht, B. (2007). Random features for large-scale kernel machines. *Advances
-in Neural Information Processing Systems*, 20.
+Rahimi, A., and Recht, B. (2007). Random features for large-scale kernel machines. _Advances
+in Neural Information Processing Systems_, 20.
 
 These introduce the Nyström method and random Fourier features, implemented as
 `NystroemFeaturesTransformer` and `RandomFourierFeaturesTransformer`.
@@ -45,7 +45,7 @@ These introduce the Nyström method and random Fourier features, implemented as
 ## Piecewise-linear encoding
 
 Gorishniy, Y., Rubachev, I., and Babenko, A. (2022). On embeddings for numerical features in
-tabular deep learning. *Advances in Neural Information Processing Systems*, 35.
+tabular deep learning. _Advances in Neural Information Processing Systems_, 35.
 
 This paper motivates piecewise-linear encoding of numerical features for tabular models, the
 basis for `PLETransformer`.

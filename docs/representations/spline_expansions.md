@@ -56,19 +56,19 @@ Constructor highlights: `output_dim`, `degree=3`, `include_bias=False`, `knot_lo
 
 `degree`
 : Sets the minimum usable `output_dim`: PreTab requires `output_dim >= degree + 1` (a cubic,
-  `degree=3`, needs at least 4 columns) and raises a typed error otherwise. Higher degree gives
-  smoother, wider-support basis functions at the same `output_dim`; `degree=1` recovers
-  piecewise-linear segments.
+`degree=3`, needs at least 4 columns) and raises a typed error otherwise. Higher degree gives
+smoother, wider-support basis functions at the same `output_dim`; `degree=1` recovers
+piecewise-linear segments.
 
 `output_dim`
 : The exact per-feature output width (unlike the cubic/natural/tensor families below, no
-  conversion is applied). More columns track finer local detail and increase overfitting risk.
+conversion is applied). More columns track finer local detail and increase overfitting risk.
 
 `include_bias`
 : Defaults to `False`. A B-spline basis over a clamped knot vector already sums to 1 in every
-  row (a partition of unity), so prepending a bias column makes the design exactly
-  rank-deficient. Set `include_bias=True` only if a downstream model specifically needs an
-  explicit intercept column; it adds one extra output column.
+row (a partition of unity), so prepending a bias column makes the design exactly
+rank-deficient. Set `include_bias=True` only if a downstream model specifically needs an
+explicit intercept column; it adds one extra output column.
 
 ```{tip}
 Cubic (`degree=3`) B-splines with quantile knots are a strong default for smooth regression.
@@ -90,21 +90,21 @@ These two share the B-spline machinery but target special shapes.
 
 M-spline
 : A non-negative spline basis (`include_bias=False`). Useful when the components themselves
-  should be non-negative, for example as a density-like basis. Built by rescaling each B-spline
-  basis function so it integrates to one over its support,
+should be non-negative, for example as a density-like basis. Built by rescaling each B-spline
+basis function so it integrates to one over its support,
 
-  $$
-  M_k(x) = \frac{p + 1}{\tau_{k+p+1} - \tau_k}\, B_k(x).
-  $$
+$$
+M_k(x) = \frac{p + 1}{\tau_{k+p+1} - \tau_k}\, B_k(x).
+$$
 
 I-spline
 : The integral of an M-spline, giving a **monotone** basis. A model with non-negative
-  coefficients on an I-spline basis is guaranteed monotone in the input, which is valuable when
-  domain knowledge says a relationship cannot reverse.
+coefficients on an I-spline basis is guaranteed monotone in the input, which is valuable when
+domain knowledge says a relationship cannot reverse.
 
-  $$
-  I_k(x) = \int_{\tau_k}^{x} M_k(t)\, dt.
-  $$
+$$
+I_k(x) = \int_{\tau_k}^{x} M_k(t)\, dt.
+$$
 
 ```python
 import numpy as np
@@ -131,23 +131,23 @@ smoothing penalty through `get_penalty_matrix()`.
 
 Cubic regression spline
 : A cubic basis parameterized at the knots (`cubicspline`), convenient for GAM-style additive
-  models. Requires `output_dim >= 3`. The basis stacks the polynomial terms with one truncated
-  cubic term per interior knot $\kappa_j$,
+models. Requires `output_dim >= 3`. The basis stacks the polynomial terms with one truncated
+cubic term per interior knot $\kappa_j$,
 
-  $$
-  \big(x,\ x^2,\ x^3,\ (x - \kappa_1)_+^3,\ \dots,\ (x - \kappa_K)_+^3\big), \qquad (z)_+ = \max(0, z).
-  $$
+$$
+\big(x,\ x^2,\ x^3,\ (x - \kappa_1)_+^3,\ \dots,\ (x - \kappa_K)_+^3\big), \qquad (z)_+ = \max(0, z).
+$$
 
 Natural cubic spline
 : A cubic spline constrained to be **linear beyond the boundary knots** (`naturalspline`).
-  The linear tails reduce the wild behaviour ordinary cubics show near the edges of the data.
-  Requires `output_dim >= 2`. For knots $\xi_1, \dots, \xi_T$ ($\xi_1$, $\xi_T$ the boundary
-  knots), the basis stacks $x$ with one constrained term per interior knot $\xi_k$,
+The linear tails reduce the wild behaviour ordinary cubics show near the edges of the data.
+Requires `output_dim >= 2`. For knots $\xi_1, \dots, \xi_T$ ($\xi_1$, $\xi_T$ the boundary
+knots), the basis stacks $x$ with one constrained term per interior knot $\xi_k$,
 
-  $$
-  d_k(x) = \frac{(x - \xi_k)_+^3 - (x - \xi_T)_+^3}{\xi_T - \xi_k}, \qquad
-  N_k(x) = d_k(x) - \frac{\xi_T - \xi_k}{\xi_T - \xi_1} d_1(x) - \frac{\xi_k - \xi_1}{\xi_T - \xi_1} d_T(x).
-  $$
+$$
+d_k(x) = \frac{(x - \xi_k)_+^3 - (x - \xi_T)_+^3}{\xi_T - \xi_k}, \qquad
+N_k(x) = d_k(x) - \frac{\xi_T - \xi_k}{\xi_T - \xi_1} d_1(x) - \frac{\xi_k - \xi_1}{\xi_T - \xi_1} d_T(x).
+$$
 
 ```python
 import numpy as np

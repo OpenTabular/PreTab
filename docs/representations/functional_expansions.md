@@ -64,7 +64,7 @@ ReLU
 
 Sigmoid and Tanh
 : Smooth saturating steps. `scale` controls the steepness of the transition: **smaller** values
-  give a sharper, more step-like transition; **larger** values spread it out.
+give a sharper, more step-like transition; **larger** values spread it out.
 
 ```python
 import numpy as np

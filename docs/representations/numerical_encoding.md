@@ -31,15 +31,15 @@ differently from each other despite both accepting the same `output_dim`.
 
 `"ordinal"`
 : A single integer column giving the bin index (output width is always 1, independent of
-  `output_dim`).
+`output_dim`).
 
 `"onehot"`
 : One indicator column per bin (output width equals `output_dim`).
 
 `"soft"`
 : A soft assignment that spreads each value across neighbouring bins, so the boundaries are not
-  hard (output width equals `output_dim`, same shape as `"onehot"` but with fractional
-  membership instead of a single 1).
+hard (output width equals `output_dim`, same shape as `"onehot"` but with fractional
+membership instead of a single 1).
 
 Edge placement follows `placement_strategy`: `"uniform"` for equal-width bins, `"quantile"`
 for equal-frequency bins. See
@@ -147,12 +147,12 @@ the model to search across a set of frequencies rather than commit to one known 
 
 ## Binning versus PLE
 
-| | Numeric binning | PLE |
-| --- | --- | --- |
-| Uses the target | No | Yes (required) |
-| Within-bin resolution | Lost (hard) or blurred (soft) | Preserved (linear) |
-| Edge placement | Uniform or quantile | Target-driven (tree splits) |
-| Best for | Unsupervised, known step structure | Supervised sharp effects |
+|                       | Numeric binning                    | PLE                         |
+| --------------------- | ---------------------------------- | --------------------------- |
+| Uses the target       | No                                 | Yes (required)              |
+| Within-bin resolution | Lost (hard) or blurred (soft)      | Preserved (linear)          |
+| Edge placement        | Uniform or quantile                | Target-driven (tree splits) |
+| Best for              | Unsupervised, known step structure | Supervised sharp effects    |
 
 ## Where to go next
 

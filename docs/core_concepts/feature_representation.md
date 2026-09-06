@@ -1,12 +1,12 @@
 # Preprocessing and representation
 
 PreTab draws a deliberate line between two ideas that are often blurred together:
-*preprocessing* and *representation*. The distinction shapes the whole library.
+_preprocessing_ and _representation_. The distinction shapes the whole library.
 
 ## Preprocessing prepares a column
 
 Preprocessing makes a column safe and comparable for a model, without changing what it
-*means*. Standardizing to zero mean and unit variance, imputing a missing value, casting to
+_means_. Standardizing to zero mean and unit variance, imputing a missing value, casting to
 float, and one-hot encoding a category are all preprocessing: each keeps a one-to-one
 relationship with the original signal.
 
@@ -48,23 +48,23 @@ Every representation family is described with the same small set of terms.
 
 `family`
 : The kind of representation, for example spline, feature map, binning, periodic, or
-  categorical.
+categorical.
 
 `scope`
 : Whether the representation transforms one column at a time (`univariate`) or models several
-  columns jointly (`multivariate`), such as the tensor-product and thin-plate splines.
+columns jointly (`multivariate`), such as the tensor-product and thin-plate splines.
 
 `supervision`
 : Whether placement can (`optional`) or must (`required`) use the target, or never does
-  (`forbidden`).
+(`forbidden`).
 
 `output_dim`
 : The width of the expansion, that is the number of basis functions, centers, or bins per
-  input feature. See [Resolution and placement](resolution_and_placement.md).
+input feature. See [Resolution and placement](resolution_and_placement.md).
 
 `locations`
 : The data-driven positions the basis is anchored at: knots for splines, centers for feature
-  maps, edges for bins.
+maps, edges for bins.
 
 ## The intermediate representation
 

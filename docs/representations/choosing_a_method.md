@@ -9,28 +9,28 @@ The right representation depends on what sits downstream.
 
 Linear and additive models
 : These gain the most from expansion. A linear model on top of a spline or PLE basis can fit
-  smooth nonlinearities while staying interpretable. This is the primary use case for PreTab.
+smooth nonlinearities while staying interpretable. This is the primary use case for PreTab.
 
 Gradient-boosted trees
 : Trees already partition each feature, so raw or lightly-scaled inputs are usually enough.
-  Expansion rarely helps and often adds noise. See
-  [when it does not help](#when-basis-expansion-does-not-help).
+Expansion rarely helps and often adds noise. See
+[when it does not help](#when-basis-expansion-does-not-help).
 
 Neural networks
 : PLE and learned embeddings are effective front-ends, echoing the tabular deep-learning
-  literature. Splines can help shallow networks.
+literature. Splines can help shallow networks.
 
 ## Match the method to the signal
 
-| If the relationship is... | Reach for... |
-| --- | --- |
-| Smooth and curved | B-spline, natural cubic spline, P-spline |
-| Monotone (must not reverse) | I-spline |
-| Sharp, threshold-like | PLE, numeric binning, ReLU expansion |
-| Local bumps around centers | RBF expansion |
-| Periodic (known period) | Periodic encoding, Fourier features |
-| A smooth surface over two inputs | Tensor-product or thin-plate spline |
-| A general kernel over many inputs | Random Fourier features, Nyström |
+| If the relationship is...         | Reach for...                             |
+| --------------------------------- | ---------------------------------------- |
+| Smooth and curved                 | B-spline, natural cubic spline, P-spline |
+| Monotone (must not reverse)       | I-spline                                 |
+| Sharp, threshold-like             | PLE, numeric binning, ReLU expansion     |
+| Local bumps around centers        | RBF expansion                            |
+| Periodic (known period)           | Periodic encoding, Fourier features      |
+| A smooth surface over two inputs  | Tensor-product or thin-plate spline      |
+| A general kernel over many inputs | Random Fourier features, Nyström         |
 
 ```{tip}
 When unsure, start with the `"standard"` preset (min-max scaling, PLE for numericals, integer
@@ -62,17 +62,18 @@ and pretending otherwise would be dishonest.
 
 Tree ensembles already handle nonlinearity
 : Gradient-boosted trees and random forests split each feature into regions on their own.
-  Feeding them a spline or binning basis usually leaves accuracy unchanged while multiplying
-  the column count. Prefer raw or scaled inputs for these models.
+Feeding them a spline or binning basis usually leaves accuracy unchanged while multiplying
+the column count. Prefer raw or scaled inputs for these models.
 
 Truly linear relationships
 : If a feature enters the target linearly, scaling is enough. A spline will fit the same line
-  with extra parameters and a little more variance.
+with extra parameters and a little more variance.
 
 Very small samples
 : A wide expansion on a few hundred rows overfits. Keep `output_dim` small, or skip expansion
-  and rely on a scaled input.
+and rely on a scaled input.
 
+Extrapolation beyond the fitted range
 Extrapolation beyond the fitted range
 : Bases are fitted on the training range, and each spline family has its own default
   transform-time behavior for values beyond it: B/M/I-spline, P-spline, and tensor-product
@@ -86,7 +87,7 @@ Extrapolation beyond the fitted range
 
 Pure noise features
 : Expanding a feature that carries no signal only gives the model more ways to fit noise. Drop
-  the feature instead.
+the feature instead.
 
 ```{warning}
 Basis expansion changes the geometry of your features, not the information in them. If a

@@ -12,11 +12,11 @@ For the SemVer rules and commit conventions that decide the next version, see
 
 ## Overview
 
-| Stage             | Trigger                         | Workflow                     | Target   |
-| ----------------- | ------------------------------- | ---------------------------- | -------- |
-| Build check       | `workflow_dispatch` (manual)    | `build-check.yml`            | Artifact |
-| Release candidate | Tag `vX.Y.ZrcN`                 | `publish-testpypi.yml`       | TestPyPI |
-| Stable release    | Tag `vX.Y.Z`                    | `publish-pypi.yml`           | PyPI     |
+| Stage             | Trigger                      | Workflow               | Target   |
+| ----------------- | ---------------------------- | ---------------------- | -------- |
+| Build check       | `workflow_dispatch` (manual) | `build-check.yml`      | Artifact |
+| Release candidate | Tag `vX.Y.ZrcN`              | `publish-testpypi.yml` | TestPyPI |
+| Stable release    | Tag `vX.Y.Z`                 | `publish-pypi.yml`     | PyPI     |
 
 ## Prerequisites
 
@@ -103,6 +103,11 @@ git push origin vX.Y.Z
 
 The `publish-pypi.yml` workflow builds the package, verifies the tag matches the project
 version, publishes to PyPI, and creates the GitHub Release.
+
+Both publishing workflows first run the reusable CI and documentation workflows on the
+tagged revision. Publishing waits for lint, types, the test matrix, minimum dependencies,
+optional dependencies, coverage, and the strict documentation build to pass. The installed
+wheel also runs the quickstart with Python's isolated mode before upload.
 
 ### 7. Confirm
 

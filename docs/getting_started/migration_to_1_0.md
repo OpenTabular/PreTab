@@ -1,12 +1,12 @@
 # Migrating to 1.0
 
-PreTab 1.0 is the first stable release. Because the previously published API (`0.0.2`) was
+PreTab 1.0 is the first stable release. Because the previously published API (`0.0.3`) was
 never declared stable, 1.0 takes a one-time, deliberate cleanup: intention-revealing class
 names, non-overlapping parameters, and a smaller, sharper scope. This page maps the old
 surface to the new one so you can upgrade in a single pass.
 
 ```{important}
-1.0 contains breaking changes relative to `0.0.2`. There are no compatibility shims. Update
+1.0 contains breaking changes relative to `0.0.3`. There are no compatibility shims. Update
 the names and parameters below, then re-fit. Pin `pretab<1` if you need the old behaviour
 while you migrate.
 ```
@@ -15,19 +15,19 @@ while you migrate.
 
 The classes gained names that say what they compute.
 
-| Old name (`0.0.2`) | New name (`1.0`) | Notes |
-| --- | --- | --- |
-| `CustomBinTransformer` | `NumericBinningTransformer` | Numeric-only, now stateful (learns edges in `fit`). |
-| `CyclicalTimeTransformer` | `PeriodicEncodingTransformer` | Sine and cosine harmonics for cyclic values. |
-| `CubicSplineTransformer` | `CubicRegressionSplineTransformer` | Disambiguated from the generic cubic B-spline. |
+| Old name (`0.0.3`)        | New name (`1.0`)                   | Notes                                               |
+| ------------------------- | ---------------------------------- | --------------------------------------------------- |
+| `CustomBinTransformer`    | `NumericBinningTransformer`        | Numeric-only, now stateful (learns edges in `fit`). |
+| `CyclicalTimeTransformer` | `PeriodicEncodingTransformer`      | Sine and cosine harmonics for cyclic values.        |
+| `CubicSplineTransformer`  | `CubicRegressionSplineTransformer` | Disambiguated from the generic cubic B-spline.      |
 
 ## Removed transformers
 
 Generic time-series utilities are out of scope for a representation framework.
 
-| Removed | Replacement |
-| --- | --- |
-| `LagFeatureTransformer` | Use a dedicated time-series library. |
+| Removed                   | Replacement                          |
+| ------------------------- | ------------------------------------ |
+| `LagFeatureTransformer`   | Use a dedicated time-series library. |
 | `RollingStatsTransformer` | Use a dedicated time-series library. |
 
 ```{note}
@@ -37,8 +37,8 @@ Cyclic time structure is still first-class through `PeriodicEncodingTransformer`
 
 ## Deprecated
 
-| Symbol | Status | Do this instead |
-| --- | --- | --- |
+| Symbol                         | Status                                   | Do this instead                                                                     |
+| ------------------------------ | ---------------------------------------- | ----------------------------------------------------------------------------------- |
 | `OneHotFromOrdinalTransformer` | Deprecated, emits a `DeprecationWarning` | Use the `"one-hot"` categorical method, which wraps scikit-learn's `OneHotEncoder`. |
 
 ## Parameter changes on `Preprocessor`
@@ -48,16 +48,16 @@ Cyclic time structure is still first-class through `PeriodicEncodingTransformer`
 The overlapping `selector` / `strategy` / `use_target` arguments are gone. Placement is
 controlled by exactly two parameters that validate strictly against each other.
 
-| Old | New |
-| --- | --- |
+| Old                                                          | New                                                |
+| ------------------------------------------------------------ | -------------------------------------------------- |
 | `use_target=True/False`, plus ad-hoc `selector` / `strategy` | `target_aware: bool` and `placement_strategy: str` |
 
 The valid combinations are fixed:
 
 | `target_aware` | Allowed `placement_strategy` |
-| --- | --- |
-| `False` | `"uniform"`, `"quantile"` |
-| `True` | `"cart"`, `"lightgbm"` |
+| -------------- | ---------------------------- |
+| `False`        | `"uniform"`, `"quantile"`    |
+| `True`         | `"cart"`, `"lightgbm"`       |
 
 ```{warning}
 Mixing the two rows, for example `target_aware=True` with `placement_strategy="quantile"`,
@@ -73,8 +73,8 @@ model.
 
 The single `handle_missing` flag was replaced by three explicit parameters.
 
-| Old | New |
-| --- | --- |
+| Old                  | New                                                                                                      |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
 | `handle_missing=...` | `numerical_imputation="median"`, `categorical_imputation="most_frequent"`, `add_missing_indicator=False` |
 
 Set an imputation strategy to `None` to disable it for that kind. See
@@ -82,8 +82,8 @@ Set an imputation strategy to `None` to disable it for that kind. See
 
 ## Renamed optional extra
 
-| Old install | New install |
-| --- | --- |
+| Old install                   | New install                      |
+| ----------------------------- | -------------------------------- |
 | `pip install "pretab[knots]"` | `pip install "pretab[lightgbm]"` |
 
 The rename matches `placement_strategy="lightgbm"`. The `embeddings` and `all` extras are
@@ -94,13 +94,13 @@ unchanged. See [Installation](installation.md).
 The thin-plate spline moved to landmark-based terminology and is sized by rank, not by a
 fixed `output_dim`.
 
-| Old | New |
-| --- | --- |
+| Old                                          | New                                                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `ThinPlateSplineTransformer(output_dim=...)` | `ThinPlateSplineTransformer(n_components=..., landmark_strategy="kmeans", rank_strategy="eigen")` |
 
 ## What is new in 1.0
 
-Upgrading also unlocks capabilities that did not exist in `0.0.2`.
+Upgrading also unlocks capabilities that did not exist in `0.0.3`.
 
 - **New representations**: `FourierFeatureTransformer`, `RandomFourierFeaturesTransformer`,
   and `NystroemFeaturesTransformer`.

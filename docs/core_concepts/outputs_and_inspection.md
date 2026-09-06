@@ -95,7 +95,7 @@ Two parameters control the physical layout of the stacked output.
 
 `output_format`
 : One of `"dense"`, `"sparse"`, or `"auto"`. `"auto"` picks sparse when it saves memory (for
-  example wide one-hot blocks) and dense otherwise. Default `"dense"`.
+example wide one-hot blocks) and dense otherwise. Default `"dense"`.
 
 `dtype`
 : The floating-point precision of the output, for example `numpy.float32` to halve memory.
@@ -332,12 +332,12 @@ model fit on top of the expansion.
 Expansions can multiply columns quickly, especially wide splines or high-cardinality one-hot.
 The output budget lets you cap the blast radius and estimate cost before committing.
 
-| Parameter | Effect |
-| --- | --- |
-| `max_output_features` | Cap on total output columns. |
+| Parameter                | Effect                                         |
+| ------------------------ | ---------------------------------------------- |
+| `max_output_features`    | Cap on total output columns.                   |
 | `max_features_per_input` | Cap on columns produced from any single input. |
-| `max_dense_memory` | Cap on dense output memory. |
-| `overflow_policy` | What to do on overflow, default `"error"`. |
+| `max_dense_memory`       | Cap on dense output memory.                    |
+| `overflow_policy`        | What to do on overflow, default `"error"`.     |
 
 ```python
 pre = Preprocessor(max_output_features=500, overflow_policy="error")

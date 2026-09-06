@@ -11,16 +11,16 @@ Every method declares how it uses `y` through three levels.
 
 `forbidden`
 : The method never uses the target. The scalers, one-hot, ordinal encoding, the Fourier map,
-  and the P-spline are all unsupervised.
+and the P-spline are all unsupervised.
 
 `optional`
 : The method uses the target only when `target_aware=True`. The feature maps (RBF, ReLU,
-  sigmoid, tanh) and the freely-placed knot splines (B, M, I, cubic, natural) are in this
-  group.
+sigmoid, tanh) and the freely-placed knot splines (B, M, I, cubic, natural) are in this
+group.
 
 `required`
 : The method always places against the target. Piecewise-linear encoding (PLE) is the primary
-  example and needs `y` at every fit.
+example and needs `y` at every fit.
 
 ```python
 from pretab.transformers import PLETransformer

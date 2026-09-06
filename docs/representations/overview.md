@@ -59,16 +59,16 @@ Every family is described with the same terms, introduced in
 
 `scope`
 : `univariate` methods transform one column at a time. `multivariate` methods (tensor-product
-  spline, thin-plate spline, random Fourier features, Nyström) model several columns jointly
-  and are used standalone, not per column through `Preprocessor`.
+spline, thin-plate spline, random Fourier features, Nyström) model several columns jointly
+and are used standalone, not per column through `Preprocessor`.
 
 `supervision`
 : `forbidden`, `optional`, or `required` target usage. See
-  [Target awareness](../core_concepts/target_awareness.md).
+[Target awareness](../core_concepts/target_awareness.md).
 
 `output_dim`
 : The width of the expansion. See
-  [Resolution and placement](../core_concepts/resolution_and_placement.md).
+[Resolution and placement](../core_concepts/resolution_and_placement.md).
 
 `placement`
 : Where the knots, centers, or edges go, chosen by `target_aware` and `placement_strategy`.

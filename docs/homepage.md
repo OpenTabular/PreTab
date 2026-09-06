@@ -30,7 +30,7 @@ semantic columns.
 
 :::{grid-item-card} 🔧 Composable pipelines
 Fully compatible with `sklearn.pipeline.Pipeline` and `sklearn.compose.ColumnTransformer`;
-accepts any sklearn-native transformer and its hyperparameters.
+compose standalone representations with scikit-learn transformers and estimators.
 :::
 
 :::{grid-item-card} 🧠 Smart defaults
@@ -87,8 +87,8 @@ pre = Preprocessor(feature_preprocessing={
 })
 X = pre.fit_transform(df, y)
 
-{k: v.shape for k, v in X.items()}
-# {'num_age': (100, 7), 'num_income': (100, 7), 'cat_city': (100, 3)}
+X.shape
+# (100, 17)
 ```
 
 ## Get started

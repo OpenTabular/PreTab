@@ -71,7 +71,7 @@ The four class attributes are the declarative contract.
 
 `supervision`
 : `"unsupervised"`, `"optional"` (uses `y` only when `target_aware=True`), or `"supervised"`
-  (always needs `y`).
+(always needs `y`).
 
 ```{tip}
 Implement `_output_sizes` to return the number of output columns each input contributes. The

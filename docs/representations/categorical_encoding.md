@@ -64,10 +64,10 @@ cap it, or prefer integer encoding or [embeddings](embeddings.md) for high-cardi
 
 ## Choosing a categorical method
 
-| If the column is... | Reach for... |
-| --- | --- |
-| Low cardinality, unordered | One-hot |
-| Fed to a tree or embedding layer | Integer |
+| If the column is...              | Reach for...                        |
+| -------------------------------- | ----------------------------------- |
+| Low cardinality, unordered       | One-hot                             |
+| Fed to a tree or embedding layer | Integer                             |
 | High-cardinality meaningful text | [Language embedding](embeddings.md) |
 
 ## Where to go next

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./docs/logo/pretab-logo.png" width="900" />
+  <img src="https://raw.githubusercontent.com/OpenTabular/PreTab/main/docs/logo/pretab-logo.png" width="900" />
 
 [![PyPI](https://img.shields.io/pypi/v/pretab)](https://pypi.org/project/pretab)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/pretab)
@@ -42,10 +42,10 @@ public, discoverable protocol.
   kernel approximations turn raw numerical columns into expressive representations.
 - **Categoricals done right.** Ordinal and one-hot encoding and pretrained language
   embeddings cover both low- and high-cardinality columns.
-- **Self-describing and reproducible.** Every fit produces per-column feature lineage and
-  serializes to a portable spec with a stable fingerprint, so you always know what a fitted
-  preprocessor does and can reproduce it exactly.
-- **Leakage-safe by default.** Supervised representations declare their target usage and
+- **Self-describing and reproducible.** Fitted preprocessors expose per-column feature
+  lineage. Supported built-in state serializes to a versioned spec with a stable fingerprint
+  for reproduction in the same environment.
+- **Explicit target usage.** Supervised representations declare their target usage and
   warn when fit outside a controlled context, with a cross-fitting wrapper for out-of-fold
   training features.
 - **Composable and extensible.** Every strategy is a standalone transformer you can import,
@@ -67,6 +67,7 @@ df = pd.DataFrame({
     "age": np.random.randint(18, 65, size=100),
     "income": np.random.normal(60_000, 15_000, size=100).astype(int),
     "city": np.random.choice(["Berlin", "Munich", "Hamburg"], size=100),
+    "experience": np.random.randint(0, 40, size=100),
 })
 y = np.random.randn(100)
 
@@ -76,7 +77,7 @@ preprocessor = Preprocessor(numerical_method="ple", categorical_method="int")
 X = preprocessor.fit_transform(df, y)   # single stacked array, one row per sample
 
 print(X.shape)
-# (100, 15)
+# (100, 22)
 ```
 
 > **Note:** PreTab accepts a `pandas.DataFrame` or a `numpy.ndarray` and infers numerical
@@ -95,48 +96,48 @@ import); advanced users can also reach them through the namespace shown per tabl
 
 ### Spline expansions
 
-| Transformer                        | Basis                                 | Best for                               |
-| ----------------------------------- | -------------------------------------- | ---------------------------------------- |
-| `BSplineTransformer`                | B-spline basis                        | General-purpose smooth nonlinearity    |
-| `MSplineTransformer`                | Non-negative B-spline basis           | Density-like, non-negative bases       |
-| `ISplineTransformer`                | Monotone integrated spline            | Effects that must not reverse          |
-| `CubicRegressionSplineTransformer`  | Cubic regression spline               | GAM-style additive smooth terms        |
-| `NaturalCubicSplineTransformer`     | Natural cubic spline                  | Smooth effects with linear tails       |
-| `PSplineTransformer`                | Penalized B-spline                    | Smoothness via a difference penalty    |
-| `TensorProductSplineTransformer`    | Tensor-product spline (multivariate)  | Smooth interactions across 2+ features |
-| `ThinPlateSplineTransformer`        | Thin-plate spline (multivariate)      | Smooth surfaces across 2+ features     |
+| Transformer                        | Basis                                | Best for                               |
+| ---------------------------------- | ------------------------------------ | -------------------------------------- |
+| `BSplineTransformer`               | B-spline basis                       | General-purpose smooth nonlinearity    |
+| `MSplineTransformer`               | Non-negative B-spline basis          | Density-like, non-negative bases       |
+| `ISplineTransformer`               | Monotone integrated spline           | Effects that must not reverse          |
+| `CubicRegressionSplineTransformer` | Cubic regression spline              | GAM-style additive smooth terms        |
+| `NaturalCubicSplineTransformer`    | Natural cubic spline                 | Smooth effects with linear tails       |
+| `PSplineTransformer`               | Penalized B-spline                   | Smoothness via a difference penalty    |
+| `TensorProductSplineTransformer`   | Tensor-product spline (multivariate) | Smooth interactions across 2+ features |
+| `ThinPlateSplineTransformer`       | Thin-plate spline (multivariate)     | Smooth surfaces across 2+ features     |
 
 ### Functional expansions
 
-| Transformer                        | Basis                                   | Best for                              |
-| ------------------------------------ | ------------------------------------------ | ---------------------------------------- |
-| `RBFExpansionTransformer`            | Radial basis functions                  | Localized, kernel-like features       |
-| `ReLUExpansionTransformer`           | ReLU basis                              | Piecewise-linear neural features      |
-| `SigmoidExpansionTransformer`        | Sigmoid basis                           | Smooth saturating features            |
-| `TanhExpansionTransformer`           | Tanh basis                              | Zero-centered saturating features     |
-| `FourierFeatureTransformer`          | Sine/cosine basis                       | Periodic or cyclic numerical effects  |
+| Transformer                   | Basis                  | Best for                             |
+| ----------------------------- | ---------------------- | ------------------------------------ |
+| `RBFExpansionTransformer`     | Radial basis functions | Localized, kernel-like features      |
+| `ReLUExpansionTransformer`    | ReLU basis             | Piecewise-linear neural features     |
+| `SigmoidExpansionTransformer` | Sigmoid basis          | Smooth saturating features           |
+| `TanhExpansionTransformer`    | Tanh basis             | Zero-centered saturating features    |
+| `FourierFeatureTransformer`   | Sine/cosine basis      | Periodic or cyclic numerical effects |
 
 ### Kernel approximation
 
-| Transformer                        | Basis                                   | Best for                              |
-| ------------------------------------ | ------------------------------------------ | ---------------------------------------- |
-| `RandomFourierFeaturesTransformer`   | Random Fourier features (multivariate)  | Scalable RBF-kernel approximation     |
-| `NystroemFeaturesTransformer`        | Nystroem kernel map (multivariate)      | Landmark-based kernel approximation   |
+| Transformer                        | Basis                                  | Best for                            |
+| ---------------------------------- | -------------------------------------- | ----------------------------------- |
+| `RandomFourierFeaturesTransformer` | Random Fourier features (multivariate) | Scalable RBF-kernel approximation   |
+| `NystroemFeaturesTransformer`      | Nystroem kernel map (multivariate)     | Landmark-based kernel approximation |
 
 ### Numerical encoding
 
-| Transformer                    | Method                                  | Best for                              |
-| ------------------------------- | ------------------------------------------ | ---------------------------------------- |
-| `PLETransformer`                | Piecewise-linear encoding (supervised)  | Strong numerical encoding for models  |
-| `NumericBinningTransformer`     | Uniform/quantile binning, tree-driven   | Discretizing numerical columns        |
-| `PeriodicEncodingTransformer`   | Sine/cosine cyclic encoding             | Values that wrap around a known period |
+| Transformer                   | Method                                 | Best for                               |
+| ----------------------------- | -------------------------------------- | -------------------------------------- |
+| `PLETransformer`              | Piecewise-linear encoding (supervised) | Strong numerical encoding for models   |
+| `NumericBinningTransformer`   | Uniform/quantile binning, tree-driven  | Discretizing numerical columns         |
+| `PeriodicEncodingTransformer` | Sine/cosine cyclic encoding            | Values that wrap around a known period |
 
 ### Categorical encoding and embeddings
 
-| Transformer                    | Method                                  | Best for                              |
-| ------------------------------- | ------------------------------------------ | ---------------------------------------- |
-| `ContinuousOrdinalTransformer`  | Integer (ordinal) encoding              | Compact codes for categoricals        |
-| `LanguageEmbeddingTransformer`  | Pretrained language embeddings          | High-cardinality, semantic columns    |
+| Transformer                    | Method                         | Best for                           |
+| ------------------------------ | ------------------------------ | ---------------------------------- |
+| `ContinuousOrdinalTransformer` | Integer (ordinal) encoding     | Compact codes for categoricals     |
+| `LanguageEmbeddingTransformer` | Pretrained language embeddings | High-cardinality, semantic columns |
 
 > **Warning:** `OneHotFromOrdinalTransformer` is deprecated. Use
 > `categorical_method="one-hot"` (backed by `sklearn.preprocessing.OneHotEncoder`) instead.
@@ -224,7 +225,7 @@ feature     kind         pipeline                        dim   cats
 age         numerical    imputer -> minmax -> ple          7      -
 income      numerical    imputer -> minmax -> rbf          7      -
 experience  numerical    imputer -> minmax -> quantile     1      -
-city        categorical  imputer -> onehot -> to_float     4      4
+city        categorical  imputer -> onehot -> to_float     3      3
 ```
 
 > **Note:** `transform` returns a single stacked array by default, so a `Preprocessor` drops
@@ -337,6 +338,7 @@ per-column pipeline, and `get_feature_lineage` maps every output column back to 
 feature, representation family, and component.
 
 ```python
+preprocessor.fit(df, y)
 preprocessor.get_feature_info(verbose=True)      # resolved strategies, widths, categories
 lineage = preprocessor.get_feature_lineage()     # one record per output column
 ```
@@ -351,7 +353,9 @@ cross-fitting wrapper that produces out-of-fold training features.
 from pretab import CrossFittedTransformer
 from pretab.transformers import PLETransformer
 
-cf = CrossFittedTransformer(PLETransformer(), n_folds=5)
+x_train = df[["age"]].to_numpy()
+y_train = y.ravel()
+cf = CrossFittedTransformer(PLETransformer(), n_folds=5, random_state=0)
 X_train_features = cf.fit_transform(x_train, y_train)   # out-of-fold, leakage-free
 ```
 
@@ -362,9 +366,10 @@ X_train_features = cf.fit_transform(x_train, y_train)   # out-of-fold, leakage-f
 
 ### Serialization and reproducibility
 
-A fitted preprocessor serializes to a portable, versioned JSON spec, a safer alternative to
-`pickle` that never executes arbitrary code on load, and reports a stable fingerprint for
-tracking exactly what was fitted.
+A supported fitted preprocessor serializes to a versioned JSON spec and reports a stable
+fingerprint for tracking what was fitted. Load specs only from trusted sources and restore
+them with the same library versions; see the
+[serialization contract](https://pretab.readthedocs.io/en/latest/core_concepts/reproducibility.html).
 
 ```python
 preprocessor.to_spec("representation.json")

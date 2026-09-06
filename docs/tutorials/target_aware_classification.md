@@ -129,9 +129,9 @@ from sklearn.model_selection import cross_val_score
 from pretab.transformers import RBFExpansionTransformer
 
 features = ColumnTransformer([
-    ("x1", RBFExpansionTransformer(output_dim=10, target_aware=True), ["x1"]),
-    ("x2", RBFExpansionTransformer(output_dim=10, target_aware=True), ["x2"]),
-    ("hours", RBFExpansionTransformer(output_dim=10, target_aware=True), ["hours"]),
+    ("x1", RBFExpansionTransformer(output_dim=10, target_aware=True, task="classification"), ["x1"]),
+    ("x2", RBFExpansionTransformer(output_dim=10, target_aware=True, task="classification"), ["x2"]),
+    ("hours", RBFExpansionTransformer(output_dim=10, target_aware=True, task="classification"), ["hours"]),
     ("plan", OneHotEncoder(handle_unknown="ignore"), ["plan"]),
 ])
 

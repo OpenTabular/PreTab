@@ -17,7 +17,7 @@ Three parameters on `Preprocessor` control the common case.
 
 `add_missing_indicator`
 : When `True`, adds a binary indicator column marking where a value was missing. Default
-  `False`.
+`False`.
 
 ```python
 from pretab import Preprocessor
@@ -62,13 +62,13 @@ This preserves alignment with your target and any parallel arrays.
 For finer control, `missing_policy` selects one of five behaviours for the whole
 preprocessor.
 
-| Policy | Behaviour |
-| --- | --- |
-| `"error"` | Reject any missing value at `fit` and `transform`. |
-| `"propagate"` | Pass missing values through to the transformer unchanged. |
-| `"impute"` | Fill using the imputation parameters above. |
-| `"impute_with_indicator"` | Impute and add a missing indicator column. |
-| `"separate_state"` | Impute the basis, and add a dedicated `__missing` column that does not activate the ordinary basis. |
+| Policy                    | Behaviour                                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| `"error"`                 | Reject any missing value at `fit` and `transform`.                                                  |
+| `"propagate"`             | Pass missing values through to the transformer unchanged.                                           |
+| `"impute"`                | Fill using the imputation parameters above.                                                         |
+| `"impute_with_indicator"` | Impute and add a missing indicator column.                                                          |
+| `"separate_state"`        | Impute the basis, and add a dedicated `__missing` column that does not activate the ordinary basis. |
 
 ```python
 pre = Preprocessor(missing_policy="separate_state")
