@@ -128,4 +128,4 @@ year), the direct [periodic encoder](numerical_encoding.md#periodic-encoding) is
 - [Spline expansions](spline_expansions.md) for smooth statistical bases.
 - [Kernel approximation](kernel_approximation.md) for the multivariate RFF and Nyström maps.
 - [Numerical encoding](numerical_encoding.md) for binning, PLE, and periodic encoding.
-- [References](references.md) for the underlying literature.
+- [Representations overview](overview.md) for the literature and supporting utilities.

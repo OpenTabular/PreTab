@@ -5,11 +5,11 @@ covers the common case, and a single `missing_policy` gives finer control when y
 
 ## Imputation parameters
 
-| Parameter               | Meaning                                                             | Default             |
-| ------------------------ | ---------------------------------------------------------------------- | -------------------- |
-| `numerical_imputation`   | Strategy for numerical columns. `None` disables it.                    | `"median"`           |
-| `categorical_imputation` | Strategy for categorical columns. `None` disables it.                  | `"most_frequent"`    |
-| `add_missing_indicator`  | Adds a binary indicator column marking where a value was missing.      | `False`              |
+| Parameter                | Meaning                                                           | Default           |
+| ------------------------ | ----------------------------------------------------------------- | ----------------- |
+| `numerical_imputation`   | Strategy for numerical columns. `None` disables it.               | `"median"`        |
+| `categorical_imputation` | Strategy for categorical columns. `None` disables it.             | `"most_frequent"` |
+| `add_missing_indicator`  | Adds a binary indicator column marking where a value was missing. | `False`           |
 
 ```python
 from pretab import Preprocessor

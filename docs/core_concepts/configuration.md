@@ -133,8 +133,8 @@ standard_classification.get_resolved_config()["numerical_method"]    # "ple"
 The regression/classification split follows Kumar et al. (2026),
 ["From Uniform to Learned Knots: A Study of Spline-Based Numerical Encodings for Tabular Deep
 Learning"](https://openreview.net/pdf?id=str7wQt9Qc), *Transactions on Machine Learning
-Research*. See the [representation references](../representations/references.md) for the full
-citation.
+Research*. See the [representations overview](../representations/overview.md) for the full
+citation list.
 ```
 
 ```python

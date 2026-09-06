@@ -370,6 +370,39 @@ X_train_features = cf.fit_transform(x_train, y_train)   # out-of-fold, leakage-f
 > from the training features themselves; inside a `Pipeline`, cross-validation already
 > keeps each fold's fit confined to its training data.
 
+### Choosing a representation with cross-validation
+
+`RepresentationSearchCV` cross-validates a downstream estimator over a set of candidate
+`numerical_method` values and refits the best one on all the data, keeping every candidate's
+scoring honest by fitting a fresh `Preprocessor` per fold.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import Ridge
+
+from pretab import RepresentationSearchCV
+
+rng = np.random.default_rng(0)
+X = pd.DataFrame({"x": rng.uniform(-3, 3, size=300)})
+y = np.sin(X["x"]) + rng.normal(0, 0.1, size=300)
+
+search = RepresentationSearchCV(
+    estimator=Ridge(),
+    methods=["minmax", "ple", "bspline", "rbf"],
+    cv=5,
+    random_state=0,
+)
+search.fit(X, y)
+search.best_method_
+# 'bspline'
+```
+
+> **Note:** This searches only the single `numerical_method` axis with one global method for
+> every numerical column, not a per-column `feature_preprocessing` search. See
+> [Target awareness](https://pretab.readthedocs.io/en/latest/core_concepts/target_awareness.html#searching-over-representations)
+> for the full explanation.
+
 ### Serialization and reproducibility
 
 A supported fitted preprocessor serializes to a versioned JSON spec and reports a stable

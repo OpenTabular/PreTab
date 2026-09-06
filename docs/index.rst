@@ -39,8 +39,6 @@
    representations/numerical_encoding
    representations/categorical_encoding
    representations/embeddings
-   representations/preprocessing_utilities
-   representations/references
 
 .. toctree::
    :caption: Tutorials

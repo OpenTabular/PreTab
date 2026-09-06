@@ -6,23 +6,14 @@ source of truth, and these tables mirror it.
 
 ## Reading the columns
 
-`Key`
-: The string you pass to `numerical_method`, `categorical_method`, or per-feature config.
-
-`Scope`
-: `univariate` (one column) or `multivariate` (several columns jointly).
-
-`Target`
-: `forbidden`, `optional` (used when `target_aware=True`), or `required`.
-
-`Adaptive`
-: Supports data-driven width selection between `min_output_dim` and `max_output_dim`.
-
-`Penalty`
-: Exposes `get_penalty_matrix()` for smoothing penalties.
-
-`Selectable`
-: Can be chosen through `Preprocessor` as a per-column method.
+| Column       | Meaning                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------- |
+| `Key`        | The string passed to `numerical_method`, `categorical_method`, or a per-feature config. |
+| `Scope`      | `univariate` for one column or `multivariate` for several columns modeled jointly.      |
+| `Target`     | `forbidden`, `optional` (used when `target_aware=True`), or `required`.                 |
+| `Adaptive`   | Supports data-driven width selection between `min_output_dim` and `max_output_dim`.     |
+| `Penalty`    | Exposes `get_penalty_matrix()` for smoothing penalties.                                 |
+| `Selectable` | Can be chosen through `Preprocessor` as a per-column method.                            |
 
 ## Numerical: scalers and simple transforms
 

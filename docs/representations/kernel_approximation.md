@@ -106,4 +106,4 @@ with per-column methods through a `ColumnTransformer`.
 - [Functional expansions](functional_expansions.md) for the per-column basis functions.
 - [Spline expansions](spline_expansions.md) for the multivariate tensor-product and thin-plate
   splines, another way to model several inputs jointly.
-- [References](references.md) for the kernel-approximation literature.
+- [Representations overview](overview.md) for the supporting notes and literature.

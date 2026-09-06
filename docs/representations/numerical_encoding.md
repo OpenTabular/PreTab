@@ -160,4 +160,4 @@ the model to search across a set of frequencies rather than commit to one known 
 - [Spline expansions](spline_expansions.md) for smooth alternatives to binning.
 - [Functional expansions](functional_expansions.md) for Fourier features, the deterministic
   alternative to periodic encoding.
-- [References](references.md) for the PLE source.
+- [Representations overview](overview.md) for the literature and supporting notes.

@@ -9,11 +9,11 @@ explicit and gives you leakage-safe tools. This page explains the contract.
 
 Every method declares how it uses `y` through three levels.
 
-| Level        | Meaning                                                        | Numerical methods                                                                                   | Categorical methods |
-| ------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------- |
-| `forbidden`  | Never uses the target                                           | The scalers (`minmax`, `standardization`, `robust`, `quantile`, `box-cox`, `yeo-johnson`, `polynomial`), `custombin`, `fourier`, `pspline` | `int`, `one-hot`, `onehot_from_ordinal`, `pretrained` |
-| `optional`   | Uses the target only when `target_aware=True`                   | The feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) and the freely-placed knot splines (`bspline`, `mspline`, `ispline`, `cubicspline`, `naturalspline`) | -                     |
-| `required`   | Always places against the target                                 | `ple` (piecewise-linear encoding)                                                                        | -                     |
+| Level       | Meaning                                       | Numerical methods                                                                                                                                        | Categorical methods                                   |
+| ----------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `forbidden` | Never uses the target                         | The scalers (`minmax`, `standardization`, `robust`, `quantile`, `box-cox`, `yeo-johnson`, `polynomial`), `custombin`, `fourier`, `pspline`               | `int`, `one-hot`, `onehot_from_ordinal`, `pretrained` |
+| `optional`  | Uses the target only when `target_aware=True` | The feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) and the freely-placed knot splines (`bspline`, `mspline`, `ispline`, `cubicspline`, `naturalspline`) | -                                                     |
+| `required`  | Always places against the target              | `ple` (piecewise-linear encoding)                                                                                                                        | -                                                     |
 
 ```python
 from pretab.transformers import PLETransformer
@@ -64,10 +64,10 @@ The safe patterns are:
 ## Cross-fitted features
 
 Even inside a `Pipeline`, fitting a supervised transformer once on the full training set and
-then using it to build the *training* features for the same rows introduces a subtle leak:
+then using it to build the _training_ features for the same rows introduces a subtle leak:
 each row's PLE bins were placed using its own target value. `CrossFittedTransformer` fixes
 this for the training features specifically. It splits the training data into folds, fits a
-fresh copy of the transformer on all folds *except* one, and uses that copy to transform the
+fresh copy of the transformer on all folds _except_ one, and uses that copy to transform the
 held-out fold, so every training row is transformed by a model that never saw its own target.
 `transform` on genuinely new data (a validation or test set) instead uses one model fit on all
 the training data, since there is no leakage risk there.

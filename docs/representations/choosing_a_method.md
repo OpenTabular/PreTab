@@ -7,18 +7,11 @@ representations do not help. If you read only one page in this section, read thi
 
 The right representation depends on what sits downstream.
 
-Linear and additive models
-: These gain the most from expansion. A linear model on top of a spline or PLE basis can fit
-smooth nonlinearities while staying interpretable. This is the primary use case for PreTab.
-
-Gradient-boosted trees
-: Trees already partition each feature, so raw or lightly-scaled inputs are usually enough.
-Expansion rarely helps and often adds noise. See
-[when it does not help](#when-basis-expansion-does-not-help).
-
-Neural networks
-: PLE and learned embeddings are effective front-ends, echoing the tabular deep-learning
-literature. Splines can help shallow networks.
+| Downstream model           | What works best              | Why                                                                                                                                                         |
+| -------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linear and additive models | Spline or PLE expansion      | A linear model on top of a smooth basis can fit nonlinearities while staying interpretable. This is the primary use case for PreTab.                        |
+| Gradient-boosted trees     | Raw or lightly scaled inputs | Trees already partition each feature, so expansion usually adds noise rather than signal. See [when it does not help](#when-basis-expansion-does-not-help). |
+| Neural networks            | PLE or learned embeddings    | These are effective front-ends in tabular deep learning, and shallow networks can also benefit from spline features.                                        |
 
 ## Match the method to the signal
 
@@ -61,33 +54,25 @@ validation improves. Turn on `adaptive=True` to let the data choose a width betw
 Expansion is a tool, not a default. There are clear cases where it adds cost without value,
 and pretending otherwise would be dishonest.
 
-Tree ensembles already handle nonlinearity
-: Gradient-boosted trees and random forests split each feature into regions on their own.
-Feeding them a spline or binning basis usually leaves accuracy unchanged while multiplying
-the column count. Prefer raw or scaled inputs for these models.
-
-Truly linear relationships
-: If a feature enters the target linearly, scaling is enough. A spline will fit the same line
-with extra parameters and a little more variance.
-
-Very small samples
-: A wide expansion on a few hundred rows overfits. Keep `output_dim` small, or skip expansion
-and rely on a scaled input.
-
-Extrapolation beyond the fitted range
-: Bases are fitted on the training range, and each spline family has its own default
-transform-time behavior for values beyond it: B/M/I-spline, P-spline, and tensor-product
-clip to the fitted range, while natural-cubic and cubic-regression extrapolate smoothly
-(their basis is defined for any input). If your test data lies well beyond training, an
-extrapolated value carries no real signal. Pass
-`policy=RepresentationPolicy(out_of_range="clip")` (or `"warn"` / `"error"`) directly to any
-of these spline transformers to override their default for that instance. This is
-standalone-transformer-only: it is not yet threaded through `Preprocessor`. See the
-edge-case behaviour below.
-
-Pure noise features
-: Expanding a feature that carries no signal only gives the model more ways to fit noise. Drop
-the feature instead.
+- **Tree ensembles already handle nonlinearity**: gradient-boosted trees and random forests split
+  each feature into regions on their own. Feeding them a spline or binning basis usually leaves
+  accuracy unchanged while multiplying the column count. Prefer raw or scaled inputs for these
+  models.
+- **Truly linear relationships**: if a feature enters the target linearly, scaling is enough. A
+  spline will fit the same line with extra parameters and a little more variance.
+- **Very small samples**: a wide expansion on a few hundred rows overfits. Keep `output_dim`
+  small, or skip expansion and rely on a scaled input.
+- **Extrapolation beyond the fitted range**: bases are fitted on the training range, and each
+  spline family has its own default transform-time behavior for values beyond it: B/M/I-spline,
+  P-spline, and tensor-product clip to the fitted range, while natural-cubic and
+  cubic-regression extrapolate smoothly because their basis is defined for any input. If your
+  test data lies well beyond training, an extrapolated value carries no real signal. Pass
+  `policy=RepresentationPolicy(out_of_range="clip")` (or `"warn"` / `"error"`) directly to any
+  of these spline transformers to override their default for that instance. This is
+  standalone-transformer-only: it is not yet threaded through `Preprocessor`. See the
+  edge-case behaviour below.
+- **Pure noise features**: expanding a feature that carries no signal only gives the model more
+  ways to fit noise. Drop the feature instead.
 
 ```{warning}
 Basis expansion changes the geometry of your features, not the information in them. If a

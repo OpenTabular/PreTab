@@ -289,4 +289,4 @@ want to model jointly.
 - [Functional expansions](functional_expansions.md) for non-spline bases.
 - [Multivariate features tutorial](../tutorials/multivariate_features.md) for a worked joint
   model.
-- [References](references.md) for the primary spline literature.
+- [Representations overview](overview.md) for the primary spline literature and supporting notes.

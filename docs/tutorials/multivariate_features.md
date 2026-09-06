@@ -117,4 +117,4 @@ The thin-plate spline handles the geographic interaction while PLE handles the s
   thin-plate details.
 - [Kernel approximation](../representations/kernel_approximation.md) for random Fourier
   features and Nyström.
-- [References](../representations/references.md) for the underlying theory.
+- [Representations overview](../representations/overview.md) for the underlying theory and supporting notes.
