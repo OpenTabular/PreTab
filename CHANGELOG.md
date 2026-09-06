@@ -18,7 +18,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 - raise scikit-learn minimum and use scipy trapezoid
 - validate cross-fitting task name
 - reuse identical CV folds across search candidates
-- correct serialization safety claims and bypass __new__ hooks
+- correct serialization safety claims and bypass **new** hooks
 - reject fit on a frozen preprocessor
 - clip P-spline and tensor-product out-of-range transforms via policy
 - document periodic transform wrap-around and correct binning docstring
@@ -80,7 +80,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 ### Perf
 
 - **splines**: drop retained training design matrices (issue #19)
-- **preprocessor**: slice dict blocks from output_indices_ instead of re-transforming (issue #20)
+- **preprocessor**: slice dict blocks from output*indices* instead of re-transforming (issue #20)
 
 ## v1.0.0rc1 (2026-08-15)
 
@@ -108,7 +108,7 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 - **pipeline**: make cubic and natural splines target-aware
 - **pipeline**: use selector and adaptive setting to splines
 - **pipeline**: accept preprocessing method name variations
-- **preprocessor**: expose total_output_dim_, output_dims_ attribute
+- **preprocessor**: expose total*output_dim*, output*dims* attribute
 - **preprocessor**: add random_state, handle_missing parameters
 - **sklearn-compat**: enforce n_features consistency, fix mixin order/tags
 - **exceptions**: route all raises through typed exceptions
@@ -116,10 +116,10 @@ Going forward, this file is updated automatically by `cz bump` on each release.
 - **adaptive**: unify adaptive/fixed output size across expansion families via AdaptiveResolutionMixin
 - **preprocessor**: rename constructor params to the canonical vocabulary and add adaptive parameter
 - **pipeline**: thread output_dim through registry and Preprocessor
-- **ple,binning**: rename count knob to output_dim and set total_output_dim_
+- **ple,binning**: rename count knob to output*dim and set total_output_dim*
 - **feature_maps**: rename count knob to output_dim
-- **splines**: invert output_dim to knots per family and expose n_knots_
-- **core**: make output_dim the canonical width param and add total_output_dim_
+- **splines**: invert output*dim to knots per family and expose n_knots*
+- **core**: make output*dim the canonical width param and add total_output_dim*
 - add include_bias and feature_index parity to thin-plate spline
 - add strategy/selector/task/include_bias parity to knot splines
 - add selector-aware spanning-knot placement to spline mixin

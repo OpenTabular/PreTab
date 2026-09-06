@@ -75,14 +75,14 @@ and rely on a scaled input.
 
 Extrapolation beyond the fitted range
 : Bases are fitted on the training range, and each spline family has its own default
-  transform-time behavior for values beyond it: B/M/I-spline, P-spline, and tensor-product
-  clip to the fitted range, while natural-cubic and cubic-regression extrapolate smoothly
-  (their basis is defined for any input). If your test data lies well beyond training, an
-  extrapolated value carries no real signal. Pass
-  `policy=RepresentationPolicy(out_of_range="clip")` (or `"warn"` / `"error"`) directly to any
-  of these spline transformers to override their default for that instance. This is
-  standalone-transformer-only: it is not yet threaded through `Preprocessor`. See the
-  edge-case behaviour below.
+transform-time behavior for values beyond it: B/M/I-spline, P-spline, and tensor-product
+clip to the fitted range, while natural-cubic and cubic-regression extrapolate smoothly
+(their basis is defined for any input). If your test data lies well beyond training, an
+extrapolated value carries no real signal. Pass
+`policy=RepresentationPolicy(out_of_range="clip")` (or `"warn"` / `"error"`) directly to any
+of these spline transformers to override their default for that instance. This is
+standalone-transformer-only: it is not yet threaded through `Preprocessor`. See the
+edge-case behaviour below.
 
 Pure noise features
 : Expanding a feature that carries no signal only gives the model more ways to fit noise. Drop

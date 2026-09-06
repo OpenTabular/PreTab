@@ -110,4 +110,3 @@ Preprocessing utilities
    ToFloatTransformer
 
 Canonical import: ``pretab.preprocessing``.
-

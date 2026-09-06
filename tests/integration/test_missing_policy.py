@@ -228,7 +228,7 @@ def test_add_missing_indicator_with_imputation_none_still_propagates_nan(frame_w
         add_missing_indicator=True,
     ).fit(frame_with_nan, y)
 
-    out = p.transform(frame_with_nan, return_array=True)
+    out = np.asarray(p.transform(frame_with_nan, return_array=True))
     assert np.isnan(out).any()
 
 
@@ -258,4 +258,7 @@ def test_add_missing_indicator_no_longer_requires_imputation_enabled(frame_with_
         categorical_imputation=None,
         add_missing_indicator=True,
     ).fit(frame_with_nan, y)
+    out = np.asarray(p.transform(frame_with_nan, return_array=True))
+    assert out.size > 0
+    assert np.isnan(out).any()
     assert p.total_output_dim_ > 0

@@ -90,7 +90,6 @@ width before committing, especially with several expanded columns at once.
 
 ## Output format and dtype
 
-
 Two parameters control the physical layout of the stacked output.
 
 `output_format`
@@ -149,132 +148,132 @@ y = [0.1, 0.9, 0.3]
 
 ### Parameter impact at a glance
 
-| Parameter | Values | Controls | Set at |
-| --- | --- | --- | --- |
-| `output_structure` | `"matrix"` (default), `"blocks"` | Whether `transform()` returns one stacked array or a dict of per-feature blocks, when `return_array` is not passed. | Constructor |
-| `return_array` | `True`, `False`, `None` (default) | Overrides `output_structure` for a single call. `None` resolves from `output_structure`. | Per call |
-| `output_format` | `"dense"` (default), `"sparse"`, `"auto"` | Whether the array (or each block) is a NumPy array or a SciPy CSR matrix. `"auto"` picks sparse only when it saves memory. | Constructor |
-| `dtype` | e.g. `numpy.float32`, `None` (default) | Floating-point precision of the output; also what `estimate_memory()` assumes. | Constructor |
-| `set_output(transform=...)` | `"default"`, `"pandas"`, `"polars"` | Wraps the array in a DataFrame. **Takes priority over `output_structure` and `return_array` entirely**: once set, `transform()` always returns a DataFrame, never a dict or a bare array. | Method call, before `transform` |
+| Parameter                   | Values                                    | Controls                                                                                                                                                                                  | Set at                          |
+| --------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `output_structure`          | `"matrix"` (default), `"blocks"`          | Whether `transform()` returns one stacked array or a dict of per-feature blocks, when `return_array` is not passed.                                                                       | Constructor                     |
+| `return_array`              | `True`, `False`, `None` (default)         | Overrides `output_structure` for a single call. `None` resolves from `output_structure`.                                                                                                  | Per call                        |
+| `output_format`             | `"dense"` (default), `"sparse"`, `"auto"` | Whether the array (or each block) is a NumPy array or a SciPy CSR matrix. `"auto"` picks sparse only when it saves memory.                                                                | Constructor                     |
+| `dtype`                     | e.g. `numpy.float32`, `None` (default)    | Floating-point precision of the output; also what `estimate_memory()` assumes.                                                                                                            | Constructor                     |
+| `set_output(transform=...)` | `"default"`, `"pandas"`, `"polars"`       | Wraps the array in a DataFrame. **Takes priority over `output_structure` and `return_array` entirely**: once set, `transform()` always returns a DataFrame, never a dict or a bare array. | Method call, before `transform` |
 
 ### Which setting should I use?
 
 Feeding a plain scikit-learn estimator or building a `Pipeline`
 : Use the default (`output_structure="matrix"`, no `return_array` override). `Preprocessor()`
-  composes directly: `Pipeline([("pretab", Preprocessor(...)), ("model", Ridge())])` just
-  works, since `transform(X)` already returns a single array.
+composes directly: `Pipeline([("pretab", Preprocessor(...)), ("model", Ridge())])` just
+works, since `transform(X)` already returns a single array.
 
-  ```python
-  pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot").fit(df, y)
-  out = pre.transform(df)
-  type(out), out.shape
-  ```
+```python
+pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot").fit(df, y)
+out = pre.transform(df)
+type(out), out.shape
+```
 
-  ```text
-  (<class 'numpy.ndarray'>, (3, 3))
-  ```
+```text
+(<class 'numpy.ndarray'>, (3, 3))
+```
 
-  ```text
-  array([[0.        , 1.        , 0.        ],
-         [0.39473684, 0.        , 1.        ],
-         [1.        , 1.        , 0.        ]])
-  ```
+```text
+array([[0.        , 1.        , 0.        ],
+       [0.39473684, 0.        , 1.        ],
+       [1.        , 1.        , 0.        ]])
+```
 
-  Column order matches `get_feature_names_out()`: the scaled `age`, then the one-hot `city_A`
-  / `city_B` columns.
+Column order matches `get_feature_names_out()`: the scaled `age`, then the one-hot `city_A`
+/ `city_B` columns.
 
 Inspecting per-feature blocks, or feeding different blocks to different model heads
 : Set `output_structure="blocks"` on the constructor (so it stays the estimator's default
-  everywhere it's reused), or pass `return_array=False` for a one-off call without changing
-  the estimator's configuration.
+everywhere it's reused), or pass `return_array=False` for a one-off call without changing
+the estimator's configuration.
 
-  ```python
-  pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
-                      output_structure="blocks").fit(df, y)
-  out = pre.transform(df)
-  out
-  ```
+```python
+pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
+                    output_structure="blocks").fit(df, y)
+out = pre.transform(df)
+out
+```
 
-  ```text
-  {'num_age': array([[0.        ],
-                      [0.39473684],
-                      [1.        ]]),
-   'cat_city': array([[1., 0.],
-                       [0., 1.],
-                       [1., 0.]])}
-  ```
+```text
+{'num_age': array([[0.        ],
+                    [0.39473684],
+                    [1.        ]]),
+ 'cat_city': array([[1., 0.],
+                     [0., 1.],
+                     [1., 0.]])}
+```
 
-  The same estimator still returns an array for a single call if you ask for one:
+The same estimator still returns an array for a single call if you ask for one:
 
-  ```python
-  pre.transform(df, return_array=True)   # ndarray, shape (3, 3); this call only
-  ```
+```python
+pre.transform(df, return_array=True)   # ndarray, shape (3, 3); this call only
+```
 
 Passing external `embeddings`
 : **Embeddings require dict output.** They are separate named blocks, so they cannot be
-  stacked into a single matrix. Use `output_structure="blocks"` (or `return_array=False`) on
-  every `transform` call that passes `embeddings`; the default `"matrix"` raises
-  `IncompatibleParamsError` the moment `embeddings` is supplied.
+stacked into a single matrix. Use `output_structure="blocks"` (or `return_array=False`) on
+every `transform` call that passes `embeddings`; the default `"matrix"` raises
+`IncompatibleParamsError` the moment `embeddings` is supplied.
 
-  ```python
-  emb = np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
-  pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
-                      output_structure="blocks").fit(df, y, embeddings=emb)
-  out = pre.transform(df, embeddings=emb)
-  sorted(out.keys()), out["embedding_1"].shape
-  ```
+```python
+emb = np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
+pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
+                    output_structure="blocks").fit(df, y, embeddings=emb)
+out = pre.transform(df, embeddings=emb)
+sorted(out.keys()), out["embedding_1"].shape
+```
 
-  ```text
-  (['cat_city', 'embedding_1', 'num_age'], (3, 2))
-  ```
+```text
+(['cat_city', 'embedding_1', 'num_age'], (3, 2))
+```
 
 Large, mostly one-hot-encoded categorical data
 : Set `output_format="sparse"` (or `"auto"` to let PreTab decide per fit). This applies
-  independently of `output_structure`: a sparse `"matrix"` is a single stacked
-  `scipy.sparse.csr_matrix`, and a sparse `"blocks"` dict holds a CSR matrix per feature.
+independently of `output_structure`: a sparse `"matrix"` is a single stacked
+`scipy.sparse.csr_matrix`, and a sparse `"blocks"` dict holds a CSR matrix per feature.
 
-  ```python
-  pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
-                      output_format="sparse").fit(df, y)
-  pre.transform(df)
-  ```
+```python
+pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
+                    output_format="sparse").fit(df, y)
+pre.transform(df)
+```
 
-  ```text
-  <Compressed Sparse Row sparse matrix of dtype 'float64'
-          with 5 stored elements and shape (3, 3)>
-  ```
+```text
+<Compressed Sparse Row sparse matrix of dtype 'float64'
+        with 5 stored elements and shape (3, 3)>
+```
 
 Halving memory on a large dataset
 : Set `dtype=numpy.float32`. `estimate_memory()` and the `max_dense_memory` budget both
-  reflect the configured `dtype`, not a hardcoded `float64` assumption, so budgets sized for
-  the real, cast output are honored correctly.
+reflect the configured `dtype`, not a hardcoded `float64` assumption, so budgets sized for
+the real, cast output are honored correctly.
 
-  ```python
-  pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
-                      dtype=np.float32).fit(df, y)
-  pre.transform(df).dtype
-  ```
+```python
+pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
+                    dtype=np.float32).fit(df, y)
+pre.transform(df).dtype
+```
 
-  ```text
-  dtype('float32')
-  ```
+```text
+dtype('float32')
+```
 
 Feeding a library that expects a DataFrame, or wanting column names attached to the output
 : Call `pre.set_output(transform="pandas")` (or `"polars"`). This overrides everything else:
-  `transform()` always returns a DataFrame from that point on, regardless of `output_structure`
-  or any `return_array` passed to an individual call.
+`transform()` always returns a DataFrame from that point on, regardless of `output_structure`
+or any `return_array` passed to an individual call.
 
-  ```python
-  pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot").fit(df, y)
-  pre.set_output(transform="pandas").transform(df)
-  ```
+```python
+pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot").fit(df, y)
+pre.set_output(transform="pandas").transform(df)
+```
 
-  ```text
-      num_age  cat_city_A  cat_city_B
-  0  0.000000         1.0         0.0
-  1  0.394737         0.0         1.0
-  2  1.000000         1.0         0.0
-  ```
+```text
+    num_age  cat_city_A  cat_city_B
+0  0.000000         1.0         0.0
+1  0.394737         0.0         1.0
+2  1.000000         1.0         0.0
+```
 
 ```{warning}
 `set_output` always wins. If a downstream step unexpectedly receives a DataFrame instead of
