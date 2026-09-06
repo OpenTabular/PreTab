@@ -9,7 +9,6 @@
    getting_started/overview
    getting_started/installation
    getting_started/quickstart
-   getting_started/choosing_an_interface
    getting_started/migration_to_1_0
 
 .. toctree::

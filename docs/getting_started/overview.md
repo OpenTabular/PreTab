@@ -34,7 +34,8 @@ X = pre.fit_transform(df, y)
 
 ## Two ways to use it
 
-PreTab exposes the same capabilities through two surfaces.
+PreTab exposes the same capabilities through two surfaces. They share the same underlying
+code, so the choice is about ergonomics, not capability.
 
 ::::{grid} 1 1 2 2
 :gutter: 3
@@ -52,7 +53,61 @@ Every strategy is also a plain scikit-learn transformer you can import and compo
 
 ::::
 
-The [Choosing an interface](choosing_an_interface.md) page explains which to pick.
+**Reach for the `Preprocessor` when** you start from a `DataFrame` and want automatic
+feature-type detection, want to configure many columns from one place (global
+`numerical_method` / `categorical_method` defaults or a per-column `feature_preprocessing`
+map), or want the framework services that live at this level: feature lineage,
+output-format control, missing-value policy, output budgets, serialization, and a
+reproducibility fingerprint.
+
+```python
+from pretab import Preprocessor
+
+pre = Preprocessor(feature_preprocessing={
+    "age": "naturalspline",
+    "income": "ple",
+    "city": "one-hot",
+})
+X = pre.fit_transform(df, y)   # one stacked array, or output_structure="blocks" for a dict
+```
+
+**Reach for standalone transformers** when you want a single estimator object that composes
+cleanly inside one `Pipeline`, rely on scikit-learn model selection (`cross_val_score`,
+`GridSearchCV`, `step__param` hyperparameter addressing), or need fine control over one
+column's transformer and its parameters.
+
+```python
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import Ridge
+
+from pretab.transformers import NaturalCubicSplineTransformer, PLETransformer
+
+features = ColumnTransformer([
+    ("age", NaturalCubicSplineTransformer(output_dim=10), ["age"]),
+    ("income", PLETransformer(output_dim=12), ["income"]),
+])
+model = Pipeline([("features", features), ("ridge", Ridge())])
+```
+
+```{note}
+The `Preprocessor` returns a single stacked array by default, so it drops directly into a
+plain `Pipeline`/`ColumnTransformer` like any other scikit-learn transformer, and composes the
+same way as the standalone transformers above. Pass `output_structure="blocks"` (or
+`return_array=False` for a single call) when you want the dict-of-feature-blocks form
+instead, for inspection or per-block downstream heads.
+```
+
+The choice is not exclusive: a `Preprocessor` can live inside a larger `Pipeline`, and
+standalone transformers can preprocess columns you then hand to a `Preprocessor`. Pick the
+surface that keeps the intent of your code clearest.
+
+```{note}
+The tensor-product spline, thin-plate spline, random Fourier features, and Nyström map model
+several columns jointly. They are standalone-only and are not selectable per column through
+`Preprocessor(numerical_method=...)`. See
+[Multivariate features](../tutorials/multivariate_features.md).
+```
 
 ## How this compares to scikit-learn's preprocessing transformers
 

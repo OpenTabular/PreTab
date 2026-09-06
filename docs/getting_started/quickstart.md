@@ -177,6 +177,6 @@ positive semi-definite. Calling it emits a `ConfigWarning` to make this explicit
 
 - See PreTab lift a linear model, baseline versus PreTab, in the
   [non-linear regression tutorial](../tutorials/nonlinear_regression.md).
-- Decide between the two surfaces in [Choosing an interface](choosing_an_interface.md).
+- Decide between the two surfaces in [Overview](overview.md#two-ways-to-use-it).
 - Browse every method in [Representations](../representations/overview.md).
 - Learn the shared ideas in [Core concepts](../core_concepts/feature_representation.md).
