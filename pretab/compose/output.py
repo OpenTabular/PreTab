@@ -114,7 +114,7 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
     return fmt, report
 
 
-def to_dataframe_output(array, columns, container):
+def to_dataframe_output(array, columns, container, *, index=None):
     """Wrap a dense stacked array in a pandas or polars DataFrame.
 
     Parameters
@@ -126,6 +126,11 @@ def to_dataframe_output(array, columns, container):
         One name per output column (from ``get_feature_names_out``).
     container : {"pandas", "polars"}
         Target dataframe library.
+    index : pandas.Index, optional
+        Row labels for the pandas container, normally the input's index so the
+        output stays aligned with it (as scikit-learn's own transformers do).
+        ``None`` gives a default ``RangeIndex``. Ignored for polars, which has no
+        index.
 
     Raises
     ------
@@ -138,7 +143,7 @@ def to_dataframe_output(array, columns, container):
     if container == "pandas":
         import pandas as pd
 
-        return pd.DataFrame(array, columns=pd.Index(columns))
+        return pd.DataFrame(array, index=index, columns=pd.Index(columns))
     try:
         import polars as pl  # type: ignore
     except ImportError as exc:  # pragma: no cover - exercised only without polars
