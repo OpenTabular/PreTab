@@ -12,6 +12,7 @@ or polars DataFrame for :meth:`~pretab.Preprocessor.set_output`.
 """
 
 import numpy as np
+import pandas as pd
 from scipy import sparse as sp
 
 from ..exceptions import IncompatibleParamsError, OptionalDependencyError, PretabDataError
@@ -84,7 +85,14 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
         ``memory_saved_bytes``.
     """
     size = int(np.prod(array.shape, dtype=np.int64))
-    nonzero = int(array.count_nonzero()) if sp.issparse(array) else int(np.count_nonzero(array))
+    if sp.issparse(array):
+        nonzero = int(array.count_nonzero())
+    elif array.dtype.kind == "O":
+        # pd.NA has no boolean value; count it like NaN without modifying the
+        # raw output or the truthiness of any other object value.
+        nonzero = sum(value is pd.NA or bool(value) for value in array.flat)
+    else:
+        nonzero = int(np.count_nonzero(array))
     density = float(nonzero) / size if size else 0.0
     dense_bytes = size * int(array.dtype.itemsize)
 

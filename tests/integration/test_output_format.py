@@ -166,6 +166,26 @@ def test_output_report_shape_and_keys(frame, y):
     assert 0.0 <= report["density"] <= 1.0
 
 
+@pytest.mark.parametrize("return_array", [True, False])
+def test_object_output_density_keeps_raw_missing_markers(return_array):
+    frame = pd.DataFrame({"c": ["a", pd.NA, None, np.nan, 0, False, ""]}, dtype=object)
+    original = frame.copy(deep=True)
+    fitted = Preprocessor(categorical_method="none", missing_policy="propagate", output_format="dense").fit(frame)
+
+    transformed = fitted.transform(frame, return_array=return_array)
+    result = transformed if return_array else transformed["cat_c"]
+
+    assert fitted.output_report_["density"] == pytest.approx(3 / 7)
+    assert result[0, 0] == "a"
+    assert result[1, 0] is pd.NA
+    assert result[2, 0] is None
+    assert np.isnan(result[3, 0])
+    assert result[4, 0] == 0
+    assert result[5, 0] is False
+    assert result[6, 0] == ""
+    pd.testing.assert_frame_equal(frame, original)
+
+
 # --- set_output ----------------------------------------------------------------
 
 
