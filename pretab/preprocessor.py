@@ -631,7 +631,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             "matrix"``); a dict of per-feature blocks when ``output_structure="blocks"``
             (or ``return_array=False``); a SciPy CSR matrix (or CSR blocks) when
             ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
-            when configured via :meth:`set_output`.
+            when configured via :meth:`set_output` (a pandas DataFrame keeps the index
+            of ``X``).
         """
 
         check_is_fitted(self)
@@ -656,7 +657,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         fmt, self.output_report_ = compute_output_report(transformed_X, self.output_format)
 
         if container in ("pandas", "polars"):
-            return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
+            # Pass X's index explicitly: sklearn's set_output wrapper keeps the index of
+            # a returned DataFrame instead of restoring the input's.
+            return to_dataframe_output(transformed_X, self.get_feature_names_out(), container, index=X.index)
 
         slices = None if resolved_return_array else get_output_slices(self.column_transformer_)
         return format_output(
