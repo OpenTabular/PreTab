@@ -17,7 +17,7 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
 from ..preprocessing.floats import ToFloatTransformer
-from ..preprocessing.missing import MissingStateIndicator
+from ..preprocessing.missing import MissingStateIndicator, _CategoricalMissingNormalizer
 from .config import PreprocessorConfig
 from .registry import (
     CATEGORICAL_ALIASES,
@@ -194,6 +194,8 @@ def get_categorical_transformer_steps(
 
     if add_imputer:
         imputer_kwargs = imputer_kwargs or {}
+        if "missing_values" not in imputer_kwargs:
+            steps.append(("normalize_missing", _CategoricalMissingNormalizer()))
         steps.append(
             ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
         )
@@ -216,6 +218,17 @@ def get_categorical_transformer_steps(
         # Default to ignoring unseen categories so transform never crashes on
         # categories absent at fit time; callers can override via kwargs.
         onehot_kwargs = {"handle_unknown": "ignore", **kwargs}
+        categories = onehot_kwargs.get("categories", "auto")
+        drop = onehot_kwargs.get("drop")
+        if (
+            not add_imputer
+            and isinstance(categories, str)
+            and categories == "auto"
+            and (drop is None or isinstance(drop, str))
+        ):
+            # Explicit categories and dropped values keep sklearn's marker and
+            # numeric validation contracts; normalize only automatic encoding.
+            steps.append(("normalize_missing", _CategoricalMissingNormalizer()))
         steps.append(("onehot", cls(**onehot_kwargs)))
         steps.append(("to_float", ToFloatTransformer()))
     elif method == "pretrained":

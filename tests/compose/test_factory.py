@@ -1,8 +1,10 @@
 """Unit tests for :mod:`pretab.compose.factory`."""
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
 from pretab.compose.factory import (
     _placement_kwargs,
@@ -75,7 +77,9 @@ def test_unknown_numerical_method_raises():
 # categorical step assembly
 # --------------------------------------------------------------------------- #
 def test_one_hot_appends_to_float():
-    assert _names(get_categorical_transformer_steps("one-hot", add_imputer=False)) == ["onehot", "to_float"]
+    pipe = Pipeline(get_categorical_transformer_steps("one-hot", add_imputer=False))
+    transformed = pipe.fit_transform(np.array([["a"], ["b"]]))
+    assert transformed.dtype == np.float64
 
 
 def test_int_uses_continuous_ordinal():
@@ -85,6 +89,38 @@ def test_int_uses_continuous_ordinal():
 def test_unknown_categorical_method_raises():
     with pytest.raises(InvalidParamError):
         get_categorical_transformer_steps("does-not-exist", add_imputer=False)
+
+
+def test_explicit_numerical_missing_value_override_is_preserved():
+    options = {"missing_values": -1}
+    pipe = Pipeline(get_numerical_transformer_steps("none", imputer_kwargs=options))
+    result = pipe.fit_transform(np.array([[1.0], [-1.0], [3.0]]))
+
+    np.testing.assert_array_equal(result.ravel(), [1.0, 2.0, 3.0])
+    assert options == {"missing_values": -1}
+
+
+def test_explicit_categorical_missing_value_override_is_preserved():
+    options = {"missing_values": "missing"}
+    pipe = Pipeline(get_categorical_transformer_steps("int", imputer_kwargs=options))
+    result = pipe.fit_transform(np.array([["a"], ["missing"], ["b"]], dtype=object))
+
+    np.testing.assert_array_equal(result.ravel(), [1, 1, 2])
+    assert options == {"missing_values": "missing"}
+
+
+@pytest.mark.parametrize("missing_values", [None, np.nan, pd.NA], ids=["None", "NaN", "pd.NA"])
+def test_explicit_imputer_missing_marker_is_authoritative(missing_values):
+    options = {"missing_values": missing_values}
+    pipe = Pipeline(get_categorical_transformer_steps("none", imputer_kwargs=options))
+
+    result = pipe.fit_transform(np.array([["a"], [None], ["b"], ["a"]], dtype=object))
+
+    if missing_values is np.nan:
+        assert result[1, 0] is None
+    else:
+        assert result[1, 0] == "a"
+    assert options["missing_values"] is missing_values
 
 
 # --------------------------------------------------------------------------- #
