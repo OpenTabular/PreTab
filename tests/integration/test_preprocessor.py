@@ -595,3 +595,15 @@ def test_positional_input_of_the_wrong_width_is_rejected(mixed_named_frame):
     array_fit = Preprocessor(numerical_method="minmax").fit(numeric.to_numpy(), y)
     with pytest.raises(PretabDataError, match="X has 1 features"):
         array_fit.transform(X[["age"]])
+
+
+@pytest.mark.parametrize("method", ["bspline", "mspline", "ispline", "pspline", "naturalspline", "rbf"])
+def test_unsupervised_numerical_method_accepts_a_multi_output_target(method):
+    """The B/M/I splines flattened y even when target_aware=False, so a 2-D target
+    raised an IndexError in fit while the other methods ignored it."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+    options = {"numerical_method": method, "target_aware": False, "placement_strategy": "uniform"}
+    reference = Preprocessor(**options).fit(frame).transform(frame)
+    np.testing.assert_array_equal(Preprocessor(**options).fit(frame, Y).transform(frame), reference)

@@ -338,3 +338,49 @@ def test_invalid_knot_locations_raise_a_typed_error(knots):
 
     with pytest.raises(InvalidParamError, match="knot_locations"):
         BSplineTransformer(knot_locations=knots).fit(np.linspace(0, 10, 50).reshape(-1, 1))
+
+
+# --- y is only read by the target-aware selector -------------------------------------
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"placement_strategy": "uniform"},
+        {"target_aware": True, "placement_strategy": "cart", "knot_locations": [-1.0, 0.0, 1.0]},
+    ],
+)
+def test_unsupervised_bmi_spline_ignores_a_multi_output_target(cls, params):
+    """The target was flattened and masked even when no selector used it, so a 2-D y
+    of n rows (2n values) raised an IndexError in fit."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(200, 2))
+    X[3, 0] = np.nan
+    Y = np.column_stack([np.sin(X[:, 0]), np.cos(X[:, 1])])
+    reference = cls(**params).fit(X)
+    fitted = cls(**params).fit(X, Y)
+    for knots, expected in zip(fitted.knots_, reference.knots_, strict=True):
+        np.testing.assert_array_equal(knots, expected)
+    np.testing.assert_array_equal(fitted.transform(X), reference.transform(X))
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+def test_bmi_spline_fits_in_a_multi_output_pipeline(cls):
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(200, 1))
+    Y = np.column_stack([np.sin(X[:, 0]), np.cos(X[:, 0])])
+    assert make_pipeline(cls(), Ridge()).fit(X, Y).predict(X).shape == (200, 2)
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+def test_target_aware_bmi_spline_accepts_a_column_vector_target(cls):
+    X, y = _step_data()
+    X[::50, 0] = np.nan
+    flat = cls(output_dim=6, target_aware=True, placement_strategy="cart").fit(X, y)
+    column = cls(output_dim=6, target_aware=True, placement_strategy="cart").fit(X, y.reshape(-1, 1))
+    np.testing.assert_array_equal(column.knots_[0], flat.knots_[0])

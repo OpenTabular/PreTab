@@ -74,7 +74,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
     target_aware : bool, default=False
         If True, knots are placed by a target-aware selector built from
         ``placement_strategy`` (requires ``y`` during fit). If False, knots are
-        placed by the unsupervised ``placement_strategy`` spacing.
+        placed by the unsupervised ``placement_strategy`` spacing and ``y`` is
+        ignored (as it is with explicit ``knot_locations``).
 
     placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, default="quantile"
         When ``target_aware=True``, the selector: ``"cart"`` or ``"lightgbm"``.
@@ -311,8 +312,6 @@ class BaseSplineTransformer(BasePreTabTransformer):
 
         X = self._validate(X, reset=True)
 
-        y_arr = None if y is None else np.asarray(y).ravel()
-
         # Knot placement priority: explicit knot_locations win, then a target-aware
         # selector built from placement_strategy, then the automatic (unsupervised)
         # spacing named by placement_strategy.
@@ -327,6 +326,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
         else:
             selector = None
             strategy = self.placement_strategy if not self.target_aware else "quantile"
+        # Only the target-aware selector reads y; the unsupervised and explicit-knot
+        # paths ignore it, so any target shape (e.g. multi-output) can pass through
+        # a Pipeline. For the selector, y is sliced by rows like X, not flattened.
+        y_arr = None if y is None or selector is None else np.asarray(y)
 
         self.knots_ = []
         for i in range(X.shape[1]):
