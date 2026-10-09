@@ -47,7 +47,9 @@ class RepresentationSearchCV(BaseEstimator):
         Scoring passed to :func:`sklearn.metrics.check_scoring`; ``None`` uses the
         estimator's ``score`` method.
     preprocessor_params : dict or None, default=None
-        Extra keyword arguments forwarded to every :class:`Preprocessor`.
+        Extra keyword arguments forwarded to every :class:`Preprocessor`. When
+        ``estimator`` is a classifier, ``task`` defaults to ``"classification"`` so
+        target-aware placement treats ``y`` as class labels.
     random_state : int or None, default=None
         Seed forwarded to each :class:`Preprocessor`.
 
@@ -74,9 +76,15 @@ class RepresentationSearchCV(BaseEstimator):
         self.random_state = random_state
 
     def _make_preprocessor(self, method):
-        """Build a Preprocessor for ``method`` with the shared parameters."""
+        """Build a Preprocessor for ``method`` with the shared parameters.
+
+        Target-aware placement follows the downstream estimator: a classifier makes
+        it ``task="classification"`` unless ``preprocessor_params`` sets ``task``.
+        """
         params = dict(self.preprocessor_params or {})
         params.setdefault("random_state", self.random_state)
+        if is_classifier(self.estimator):
+            params.setdefault("task", "classification")
         return Preprocessor(numerical_method=method, **params)
 
     def fit(self, X, y=None):
