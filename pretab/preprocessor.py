@@ -604,6 +604,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
+        # The Preprocessor wraps its own output (set_output / output_format), so the
+        # internal steps always produce plain arrays. Otherwise a global
+        # ``sklearn.set_config(transform_output="pandas")`` reaches them: the sparse
+        # OneHotEncoder refuses pandas output, and mixed float / bool indicator
+        # blocks are stacked into an object-dtype frame.
+        self.column_transformer_.set_output(transform="default")
         # ColumnTransformer.fit runs fit_transform internally; keep the training
         # output to resolve output_format="auto" once, from the training density.
         training_output = self.column_transformer_.fit_transform(self._column_transformer_input(X), y)
