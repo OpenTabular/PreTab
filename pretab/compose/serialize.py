@@ -30,6 +30,7 @@ from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
 from ..exceptions import PretabSerializationError
 from ..placement.base import PlacementResult
+from .inspection import representation_leaf
 from .registry import TransformerSpec
 
 SCHEMA_VERSION = 1
@@ -283,12 +284,14 @@ def _library_versions() -> dict:
 def _representation_summary(preprocessor) -> list:
     """Declarative per-representation summary (family/columns/locations).
 
-    One entry per block that ends in a PreTab transformer, built from its
+    One entry per block whose representation ends in a PreTab transformer (for a
+    missing-indicator / separate-state block, its representation branch; see
+    :func:`~pretab.compose.inspection.representation_leaf`), built from its
     :class:`RepresentationSpec` with the block's column names as input features
-    (as the feature lineage does). Blocks that end in a step without
-    ``get_representation_spec`` (scikit-learn scalers and encoders, embeddings)
-    have no entry. The steps are fitted, so a spec that fails to build is a bug:
-    its error propagates instead of silently dropping the entry.
+    (as the feature lineage does). Blocks whose representation ends in a step
+    without ``get_representation_spec`` (scikit-learn scalers and encoders,
+    embeddings) have no entry. The steps are fitted, so a spec that fails to
+    build is a bug: its error propagates instead of silently dropping the entry.
     """
     summary: list = []
     column_transformer = getattr(preprocessor, "column_transformer_", None)
@@ -297,7 +300,7 @@ def _representation_summary(preprocessor) -> list:
     for name, transformer, columns in column_transformer.transformers_:
         if name == "remainder":
             continue
-        leaf = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
+        leaf = representation_leaf(transformer)
         spec_fn = getattr(leaf, "get_representation_spec", None)
         if spec_fn is None:
             continue

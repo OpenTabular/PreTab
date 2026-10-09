@@ -29,6 +29,7 @@ from .compose.inspection import (
     build_transformer_summary,
     feature_names_out,
     get_output_slices,
+    representation_leaf,
 )
 from .compose.output import (
     compute_output_report,
@@ -1148,7 +1149,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
         for step_name, transformer, columns in self.column_transformer_.transformers_:
             name = block_name(step_name, columns)
-            last_step = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
+            last_step = representation_leaf(transformer)
             for attr in (
                 "thresholds_",
                 "knots_",

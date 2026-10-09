@@ -28,6 +28,7 @@ __all__ = [
     "clean_feature_names",
     "feature_names_out",
     "get_output_slices",
+    "representation_leaf",
 ]
 
 
@@ -177,6 +178,19 @@ def _separate_state_branches(transformer):
     if "representation" not in branches or "missing" not in branches:
         return None
     return branches["representation"], branches["missing"]
+
+
+def representation_leaf(transformer):
+    """Return the last step of a fitted per-column block's representation.
+
+    For a separate-state / missing-indicator union this is the last step of its
+    ``"representation"`` pipeline (the raw missing indicator beside it is not
+    part of the representation); for a pipeline it is the last step, and any
+    other block is returned unchanged.
+    """
+    separate_state = _separate_state_branches(transformer)
+    representation = transformer if separate_state is None else separate_state[0]
+    return representation.steps[-1][1] if hasattr(representation, "steps") else representation
 
 
 def _probe_input(step, value):

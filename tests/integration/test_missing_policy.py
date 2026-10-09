@@ -316,3 +316,25 @@ def test_imputer_indicator_only_marks_features_with_missing_values_at_fit(clean_
     pre = Preprocessor(numerical_method="minmax", add_missing_indicator=True).fit(clean_frame, y)
     assert not any("missing" in name for name in pre.get_feature_names_out())
     assert np.asarray(pre.transform(frame_with_nan, return_array=True)).shape == (6, 2)
+
+
+# --- representation summary of missing-indicator / separate-state blocks --------
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"add_missing_indicator": True},
+        {"missing_policy": "impute_with_indicator"},
+        {"missing_policy": "separate_state"},
+    ],
+)
+def test_missing_state_blocks_report_their_representation(frame_with_nan, y, options):
+    """The spec summary read each block's last step, which for these blocks is the
+    FeatureUnion of the representation and the missing indicator, so to_spec() and
+    reproducibility_report() listed no representation for them."""
+    plain = _bspline(missing_policy="impute").fit(frame_with_nan, y)
+    pre = _bspline(**options).fit(frame_with_nan, y)
+
+    assert pre.reproducibility_report()["representations"] == {"a": "bspline", "b": "bspline"}
+    assert pre.to_spec()["representations"] == plain.to_spec()["representations"]
