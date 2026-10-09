@@ -13,7 +13,12 @@ from sklearn.utils.validation import check_is_fitted
 
 from .compose.config import PreprocessorConfig
 from .compose.factory import build_column_transformer
-from .compose.feature_detection import detect_column_types, to_dataframe, with_string_labels
+from .compose.feature_detection import (
+    bool_columns_as_object,
+    detect_column_types,
+    to_dataframe,
+    with_string_labels,
+)
 from .compose.inspection import (
     block_name,
     build_feature_info,
@@ -581,7 +586,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
-        self.column_transformer_.fit(with_string_labels(X), y)
+        self.column_transformer_.fit(self._column_transformer_input(X), y)
         self.n_features_in_ = X.shape[1]
 
         self._enforce_output_budget(X.shape[0])
@@ -648,7 +653,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         output_kind = container if container in ("pandas", "polars") else ("array" if resolved_return_array else "dict")
         validate_embedding_request(embeddings, expected=self.embeddings_, output_kind=output_kind)
 
-        transformed_X = self.column_transformer_.transform(with_string_labels(X))
+        transformed_X = self.column_transformer_.transform(self._column_transformer_input(X))
         if not sp.issparse(transformed_X):
             transformed_X = np.asarray(transformed_X)
         if self.dtype is not None:
@@ -822,6 +827,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             else:
                 dims[self._input_label(columns[0])] = width
         return dims
+
+    @staticmethod
+    def _column_transformer_input(X):
+        """Adapt a frame to what the internal ColumnTransformer expects.
+
+        Column labels become strings (scikit-learn reads integer selectors as
+        positions) and boolean columns become ``object`` columns (the categorical
+        imputer rejects ``bool``). The caller's frame is never modified.
+        """
+        return with_string_labels(bool_columns_as_object(X))
 
     def _input_label(self, column):
         """Map a ColumnTransformer column back to the label it has in the input.
