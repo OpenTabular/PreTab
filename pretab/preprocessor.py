@@ -674,15 +674,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         check_is_fitted(self)
 
-        # Array columns are matched by position, so a different width can never be
-        # routed correctly; an extra column would silently shift or drop features.
-        if isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[1] != self.n_features_in_:
-            raise PretabDataError(
-                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
-                f"{self.n_features_in_} features as input."
-            )
-
-        X = to_dataframe(X, copy=True)
+        X = self._align_input(X)
 
         if self.missing_policy == "error":
             self._reject_missing(X)
@@ -886,6 +878,56 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             else:
                 dims[self._input_label(columns[0])] = width
         return dims
+
+    def _align_input(self, X):
+        """Return ``X`` as a DataFrame whose columns line up with the fitted columns.
+
+        A NumPy array is matched by position. Once the preprocessor was fitted on
+        named columns, an array of the fitted width takes those column labels
+        (numeric columns of an object array are re-inferred), and a DataFrame
+        passed to a preprocessor fitted on an array is matched by position too --
+        both with scikit-learn's usual warning about the missing or unexpected
+        feature names. Any other DataFrame is matched by column label.
+
+        Raises
+        ------
+        PretabDataError
+            If array-like input matched by position has a different number of
+            columns than seen during ``fit``: it could never be routed correctly.
+        """
+        fitted_labels = getattr(self.column_transformer_, "feature_names_in_", None)
+        positional_labels = [f"feature_{i}" for i in range(self.n_features_in_)]
+        fitted_on_array = (
+            not hasattr(self, "feature_names_in_")
+            and fitted_labels is not None
+            and list(fitted_labels) == positional_labels
+        )
+
+        is_array = isinstance(X, np.ndarray)
+        X = to_dataframe(X, copy=True)
+        if not (is_array or (fitted_on_array and list(X.columns) != positional_labels)):
+            return X
+        if X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
+                f"{self.n_features_in_} features as input."
+            )
+        if fitted_labels is None or list(X.columns) == list(fitted_labels):
+            return X
+        if hasattr(self, "feature_names_in_"):
+            warnings.warn(
+                f"X does not have valid feature names, but {type(self).__name__} was fitted with feature names",
+                UserWarning,
+                stacklevel=3,
+            )
+        elif not is_array:
+            warnings.warn(
+                f"X has feature names, but {type(self).__name__} was fitted without feature names",
+                UserWarning,
+                stacklevel=3,
+            )
+        X = X.set_axis(list(fitted_labels), axis=1)
+        return X.infer_objects() if is_array else X
 
     @staticmethod
     def _column_transformer_input(X):
