@@ -11,6 +11,7 @@ import copy
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..core.logging import get_logger
@@ -178,6 +179,19 @@ def _separate_state_branches(transformer):
     return branches["representation"], branches["missing"]
 
 
+def _probe_input(step, value):
+    """Return a one-row probe input for measuring a fitted step's output width.
+
+    A step fitted directly on the ColumnTransformer's DataFrame column records
+    ``feature_names_in_`` and, like scikit-learn, warns on input without feature
+    names, so its probe is a DataFrame carrying the fitted names.
+    """
+    names = getattr(step, "feature_names_in_", None)
+    if names is None:
+        return np.full((1, 1), value)
+    return pd.DataFrame(np.full((1, len(names)), value), columns=names)
+
+
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
     """Collect per-feature metadata (preprocessing, dimension, categories).
 
@@ -231,7 +245,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
             ):
                 last_step = representation_pipeline.steps[-1][1]
                 if hasattr(last_step, "transform"):
-                    dummy_input = np.zeros((1, 1)) + 1e-05
+                    dummy_input = _probe_input(last_step, 1e-05)
                     try:
                         transformed_feature = last_step.transform(dummy_input)
                         dimension = transformed_feature.shape[1]
@@ -276,7 +290,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
             else:
                 last_step = representation_pipeline.steps[-1][1]
                 if hasattr(last_step, "transform"):
-                    dummy_input = np.zeros((1, 1))
+                    dummy_input = _probe_input(last_step, 0.0)
                     try:
                         transformed_feature = last_step.transform(dummy_input)
                         dimension = transformed_feature.shape[1]

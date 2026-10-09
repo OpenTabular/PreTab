@@ -249,6 +249,10 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         if spec_fn is not None:
             base = spec_fn(input_features)
             return replace(base, uses_target=True, cross_fitted=True, n_folds=int(self.n_folds))
+        if input_features is None:
+            # Name the inputs as the wrapped estimator does, so a DataFrame fit
+            # passes its column names (not x0, x1, ...) to get_feature_names_out.
+            input_features = getattr(self.estimator_, "feature_names_in_", None)
         return super().get_representation_spec(input_features)
 
     def _representation_cross_fitting(self):

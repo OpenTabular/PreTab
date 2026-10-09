@@ -13,9 +13,12 @@ from typing import cast
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 
 from pretab import Preprocessor, PretabSerializationError, RepresentationPolicy
 from pretab.compose.serialize import SCHEMA_VERSION
+from pretab.transformers import RBFExpansionTransformer
 
 
 @pytest.fixture
@@ -105,6 +108,51 @@ def test_representation_summary_present(frame, target):
     spec = p.to_spec()
     families = {entry["family"] for entry in spec["representations"]}
     assert "rbf" in families
+
+
+@pytest.mark.parametrize("leaf_input", ["imputed", "frame"])
+def test_representation_summary_names_each_block_after_its_column(frame, target, leaf_input):
+    """Without an imputer or scaler each representation is fitted on its DataFrame
+    column; its spec raised there, and the summary silently came back empty. The
+    entries are named after the block's column instead of x0."""
+    params = {"numerical_method": "rbf", "target_aware": False, "placement_strategy": "quantile"}
+    if leaf_input == "frame":
+        params.update(numerical_imputation=None, scaling=None)
+    p = Preprocessor(**params).fit(frame, target)
+    entries = {entry["columns"][0]: entry for entry in p.to_spec()["representations"]}
+    inputs = {column: entry["input_features"] for column, entry in entries.items()}
+
+    assert p.reproducibility_report()["representations"] == {"a": "rbf", "b": "rbf", "c": "ordinal"}
+    assert inputs == {"a": ["a"], "b": ["b"], "c": ["c"]}
+    assert entries["a"]["output_features"] == [f"a_rbf{i}" for i in range(entries["a"]["output_dim"])]
+
+
+def test_representation_summary_of_a_leaf_behind_the_imputer_indicator(frame, target):
+    """Before the #62 fix, ``add_missing_indicator`` put the imputer's built-in
+    indicator in front of the representation, so a preprocessor fitted then has a
+    leaf with two inputs for a one-column block. Its summary entry names its own
+    inputs instead of failing on the single column name."""
+    X = frame.copy()
+    X.loc[::7, "a"] = np.nan
+    p = Preprocessor(numerical_method="rbf", target_aware=False, placement_strategy="quantile").fit(X, target)
+    legacy_block = Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median", add_indicator=True)),
+            ("rbf", RBFExpansionTransformer(target_aware=False, placement_strategy="quantile")),
+        ]
+    ).fit(X[["a"]], target)
+    column_transformer = p.column_transformer_
+    column_transformer.transformers_ = [
+        (name, legacy_block if columns == ["a"] else transformer, columns)
+        for name, transformer, columns in column_transformer.transformers_
+    ]
+
+    entries = {entry["columns"][0]: entry for entry in p.to_spec()["representations"]}
+
+    assert entries["a"]["input_features"] == ["x0", "x1"]
+    assert entries["b"]["input_features"] == ["b"]
+    assert p.reproducibility_report()["representations"] == {"a": "rbf", "b": "rbf", "c": "ordinal"}
+    assert isinstance(p.fingerprint_, str)
 
 
 def test_round_trip_preserves_dtype_and_output_format(frame, target):

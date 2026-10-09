@@ -28,7 +28,7 @@ from .._version import __version__ as _PRETAB_VERSION
 from ..core.parameters import UNSET
 from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
-from ..exceptions import PretabError, PretabSerializationError
+from ..exceptions import PretabSerializationError
 from ..placement.base import PlacementResult
 from .registry import TransformerSpec
 
@@ -281,7 +281,15 @@ def _library_versions() -> dict:
 
 
 def _representation_summary(preprocessor) -> list:
-    """Best-effort declarative per-representation summary (family/columns/locations)."""
+    """Declarative per-representation summary (family/columns/locations).
+
+    One entry per block that ends in a PreTab transformer, built from its
+    :class:`RepresentationSpec` with the block's column names as input features
+    (as the feature lineage does). Blocks that end in a step without
+    ``get_representation_spec`` (scikit-learn scalers and encoders, embeddings)
+    have no entry. The steps are fitted, so a spec that fails to build is a bug:
+    its error propagates instead of silently dropping the entry.
+    """
     summary: list = []
     column_transformer = getattr(preprocessor, "column_transformer_", None)
     if column_transformer is None:
@@ -293,11 +301,13 @@ def _representation_summary(preprocessor) -> list:
         spec_fn = getattr(leaf, "get_representation_spec", None)
         if spec_fn is None:
             continue
-        try:
-            entry = spec_fn().to_dict()
-        except (PretabError, ValueError, AttributeError, TypeError, KeyError):
-            continue
-        entry["columns"] = [str(col) for col in columns]
+        block_columns = [str(col) for col in columns]
+        # A leaf with more inputs than its block has columns (one fitted behind
+        # the imputer's built-in missing indicator, as before the #62 fix) names
+        # its own inputs.
+        fits_block = getattr(leaf, "n_features_in_", len(block_columns)) == len(block_columns)
+        entry = spec_fn(input_features=block_columns if fits_block else None).to_dict()
+        entry["columns"] = block_columns
         summary.append(entry)
     return summary
 

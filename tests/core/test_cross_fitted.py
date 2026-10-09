@@ -164,6 +164,32 @@ def test_wrapped_column_transformer_selects_by_column_name(mixed_frame):
     assert out.shape == (300, 4)
 
 
+def test_spec_after_a_dataframe_fit_names_the_columns(mixed_frame):
+    """The default spec passed x0, x1, ... to get_feature_names_out, which a
+    transformer fitted on a DataFrame rejects as not equal to feature_names_in_."""
+    X, y = mixed_frame
+    cf = CrossFittedTransformer(PLETransformer(output_dim=4), n_folds=3, random_state=0).fit(X[["num"]], y)
+    spec = cf.get_representation_spec()
+
+    assert spec.input_features == ("num",)
+    assert spec.output_features == tuple(cf.get_feature_names_out())
+    assert spec.cross_fitted is True
+
+
+def test_spec_of_a_wrapped_preprocessor_names_the_columns(mixed_frame):
+    """A wrapped estimator without its own spec takes the fallback path, which
+    used to fail the same way for a Preprocessor fitted on a DataFrame."""
+    from pretab import Preprocessor
+
+    X, y = mixed_frame
+    cf = CrossFittedTransformer(Preprocessor(output_dim=6, random_state=0), n_folds=3, random_state=0).fit(X, y)
+    spec = cf.get_representation_spec()
+
+    assert spec.input_features == ("num", "city")
+    assert spec.output_features == tuple(cf.get_feature_names_out())
+    assert (spec.cross_fitted, spec.n_folds) == (True, 3)
+
+
 def test_one_dimensional_input_is_still_a_single_column():
     rng = np.random.default_rng(0)
     x = rng.normal(size=200)
