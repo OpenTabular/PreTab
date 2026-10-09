@@ -28,6 +28,7 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from ..exceptions import IncompatibleParamsError, OptionalDependencyError
 from .knots import quantile_knots, select_knots, uniform_knots
 from .parameters import validate_task
+from .validation import single_target
 
 Task = Literal["regression", "classification"]
 
@@ -97,7 +98,7 @@ class BaseLocationSelector(ABC):
         x = np.asarray(x)
         if x.ndim == 1:
             x = x.reshape(-1, 1)
-        y = np.asarray(y).ravel()
+        y = single_target(y, type(self).__name__)
 
         # Only float targets can carry NaN; for integer / object (e.g. string
         # class label) targets, leave the target validation to the fitted model.

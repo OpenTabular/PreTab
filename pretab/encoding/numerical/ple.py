@@ -16,7 +16,7 @@ from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.parameters import UNSET, AliasResolverMixin, validate_task
 from ...core.representation import RepresentationSpecMixin
 from ...core.supervised import warn_target_leakage
-from ...core.validation import resolve_input_features
+from ...core.validation import resolve_input_features, single_target
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -169,7 +169,7 @@ class PLETransformer(
             ensure_2d=True,
             ensure_all_finite=True,  # type: ignore
         )
-        y = np.asarray(y).ravel()
+        y = single_target(y, type(self).__name__)
 
         if len(X) != len(y):
             raise PretabDataError(f"X and y must have same length. Got {len(X)} and {len(y)}")

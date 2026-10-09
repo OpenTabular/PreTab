@@ -614,3 +614,18 @@ def test_unsupervised_numerical_method_accepts_a_multi_output_target(method):
     options = {"numerical_method": method, "target_aware": False, "placement_strategy": "uniform"}
     reference = Preprocessor(**options).fit(frame).transform(frame)
     np.testing.assert_array_equal(Preprocessor(**options).fit(frame, Y).transform(frame), reference)
+
+
+@pytest.mark.parametrize("method", ["bspline", "naturalspline", "rbf", "ple"])
+def test_target_aware_numerical_method_rejects_a_multi_output_target(method):
+    """Target-aware placement fits one model on one target. A 2-D target was
+    flattened into twice as many values and failed with an unrelated IndexError /
+    broadcasting error; it now raises a clear error pointing to target_aware=False."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+
+    with pytest.raises(IncompatibleParamsError, match=r"single target, but y has shape \(200, 2\)"):
+        Preprocessor(numerical_method=method).fit(frame, Y)
+    # A column vector is a single target.
+    Preprocessor(numerical_method=method).fit(frame, Y[:, :1])

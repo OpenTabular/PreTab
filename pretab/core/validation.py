@@ -14,9 +14,9 @@ import numpy as np
 import pandas as pd
 from sklearn.utils.validation import _check_feature_names, _check_feature_names_in, check_array
 
-from ..exceptions import DataWarning, PretabDataError, invalid_param_error
+from ..exceptions import DataWarning, IncompatibleParamsError, PretabDataError, invalid_param_error
 
-__all__ = ["is_polars_frame", "polars_to_pandas", "resolve_input_features", "validate_2d_allow_nan"]
+__all__ = ["is_polars_frame", "polars_to_pandas", "resolve_input_features", "single_target", "validate_2d_allow_nan"]
 
 
 def is_polars_frame(X) -> bool:
@@ -71,6 +71,28 @@ def resolve_input_features(estimator, input_features) -> list:
         )
     names = cast(np.ndarray, _check_feature_names_in(estimator, input_features))
     return [str(name) for name in names]
+
+
+def single_target(y, estimator: str) -> np.ndarray:
+    """Return the target that target-aware placement fits on, as a 1D array.
+
+    Locations are placed by one decision tree or boosting model fitted on a single
+    target: a column vector is flattened, while a multi-output ``y`` raises instead
+    of being flattened into ``n_samples * n_outputs`` values.
+
+    Raises
+    ------
+    IncompatibleParamsError
+        If ``y`` has more than one output column.
+    """
+    y = np.asarray(y)
+    if y.ndim > 1 and int(np.prod(y.shape[1:])) != 1:
+        raise IncompatibleParamsError(
+            f"{estimator} places locations against a single target, but y has shape {y.shape}.\n"
+            "Fix: fit on one target column, or use unsupervised placement (target_aware=False) "
+            "for a multi-output target."
+        )
+    return y.ravel()
 
 
 def validate_2d_allow_nan(X, *, allow_nan: bool = True, reset: bool, estimator):
