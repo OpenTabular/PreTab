@@ -74,7 +74,14 @@ class MSplineTransformer(BaseSplineTransformer):
         return "ms"
 
     def _mspline_basis(self, x: np.ndarray, knots: np.ndarray, basis_idx: int) -> np.ndarray:
-        """Compute a single M-spline basis function."""
+        """Compute a single M-spline basis function.
+
+        ``M_k = (p + 1) / (t_{k+p+1} - t_k) * B_k``, which integrates to one. The
+        values scale like ``1 / span`` and are left unclipped, so the basis does
+        not depend on the units of the feature. Only a basis function whose
+        support is degenerate relative to the knot range (zero width, possible
+        only for a knot vector with a repeated knot) is returned as zeros.
+        """
         n_coef = len(knots) - self.degree - 1
         coef = np.zeros(n_coef)
         coef[basis_idx] = 1.0
@@ -82,17 +89,13 @@ class MSplineTransformer(BaseSplineTransformer):
         values = np.nan_to_num(spline(x), nan=0.0)
 
         knot_span = knots[basis_idx + self.degree + 1] - knots[basis_idx]
-        if knot_span > 1e-6:
-            values = values * (self.degree + 1) / knot_span
-            values = np.clip(values, 0.0, 1e6)
-        else:
-            values = np.zeros(len(x))
-        return np.maximum(values, 0.0)
+        if knot_span <= np.finfo(float).eps * (knots[-1] - knots[0]):
+            return np.zeros(len(x))
+        return np.maximum(values * (self.degree + 1) / knot_span, 0.0)
 
     def _design_matrix(self, x: np.ndarray, knots: np.ndarray) -> np.ndarray:
         n_coef = len(knots) - self.degree - 1
         design = np.zeros((len(x), n_coef))
         for i in range(n_coef):
             design[:, i] = self._mspline_basis(x, knots, i)
-        design = np.nan_to_num(design, nan=0.0, posinf=0.0, neginf=0.0)
-        return np.clip(design, -1e3, 1e3)
+        return np.nan_to_num(design, nan=0.0)
