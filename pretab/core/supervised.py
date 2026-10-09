@@ -87,6 +87,25 @@ def warn_target_leakage(estimator, y) -> None:
     )
 
 
+def _as_2d(X):
+    """Return ``X`` as 2D input for the wrapped transformer.
+
+    A pandas DataFrame is passed through unchanged, so column names and per-column
+    dtypes reach the wrapped estimator (e.g. a Preprocessor detecting numerical
+    vs categorical columns, or a name-based ColumnTransformer); any other input
+    is converted to a NumPy array, with 1D input reshaped to a single column.
+    """
+    if hasattr(X, "iloc") and getattr(X, "ndim", None) == 2:
+        return X
+    X = np.asarray(X)
+    return X.reshape(-1, 1) if X.ndim == 1 else X
+
+
+def _take_rows(X, indices):
+    """Select rows of a DataFrame or array by position."""
+    return X.iloc[indices] if hasattr(X, "iloc") else X[indices]
+
+
 class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
     """Cross-fit a supervised transformer to remove target leakage on training data.
 
@@ -98,7 +117,10 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     Parameters
     ----------
     transformer : estimator
-        A supervised (target-aware) PreTab transformer to cross-fit.
+        A supervised (target-aware) PreTab transformer to cross-fit, or an
+        estimator such as a :class:`~pretab.Preprocessor` or ``Pipeline`` built from
+        them. A pandas DataFrame ``X`` is passed to it unchanged (each fold is a row
+        subset), so column names and dtypes are preserved.
     n_folds : int, default=5
         Number of cross-fitting folds. Must be at least 2.
     task : {"regression", "classification"}, default="regression"
@@ -141,9 +163,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
             raise InvalidParamError(f"n_folds must be an integer >= 2; got {self.n_folds!r}.")
         if self.task not in ("regression", "classification"):
             raise InvalidParamError(f"task must be 'regression' or 'classification'; got {self.task!r}.")
-        X_arr = np.asarray(X)
-        if X_arr.ndim == 1:
-            X_arr = X_arr.reshape(-1, 1)
+        X_arr = _as_2d(X)
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):
             raise PretabDataError(f"X and y must have same length. Got {len(X_arr)} and {len(y_arr)}")
@@ -165,10 +185,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     def transform(self, X):
         """Transform ``X`` using the transformer fit on all training data."""
         check_is_fitted(self, "estimator_")
-        X_arr = np.asarray(X)
-        if X_arr.ndim == 1:
-            X_arr = X_arr.reshape(-1, 1)
-        return self.estimator_.transform(X_arr)
+        return self.estimator_.transform(_as_2d(X))
 
     def fit_transform(self, X, y=None):
         """Fit and return leakage-free out-of-fold features for the training data."""
@@ -180,8 +197,8 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         try:
             for train_idx, test_idx in splitter.split(X_arr, y_arr):
                 fold = cast(TransformerLike, clone(self.transformer))
-                fold.fit(X_arr[train_idx], y_arr[train_idx])
-                fold_out = np.asarray(fold.transform(X_arr[test_idx]))
+                fold.fit(_take_rows(X_arr, train_idx), y_arr[train_idx])
+                fold_out = np.asarray(fold.transform(_take_rows(X_arr, test_idx)))
                 if fold_out.shape[1] != width:
                     raise IncompatibleParamsError(
                         "Cross-fitting requires a fixed output width across folds; expected "

@@ -118,3 +118,52 @@ def test_cross_fitting_a_discrete_feature_keeps_a_fixed_width(seed):
         RBFExpansionTransformer(output_dim=10, target_aware=True), n_folds=5, random_state=0
     ).fit_transform(x, y)
     assert out.shape == (200, 10)
+
+
+# --- DataFrame input is passed through (issue #58) --------------------------------
+
+
+@pytest.fixture
+def mixed_frame():
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(
+        {"num": rng.normal(size=300), "city": rng.choice(["a", "b", "c"], size=300)},
+        index=rng.permutation(1000)[:300],
+    )
+    return X, X["num"].to_numpy() ** 2 + rng.normal(scale=0.1, size=300)
+
+
+def test_wrapped_preprocessor_keeps_dataframe_column_types(mixed_frame):
+    """Regression guard for issue #58: np.asarray turned the frame into an object
+    array, so the wrapped Preprocessor treated every column as categorical."""
+    from pretab import Preprocessor
+
+    X, y = mixed_frame
+    direct = Preprocessor(output_dim=6, random_state=0).fit(X, y)
+    cross_fitted = CrossFittedTransformer(Preprocessor(output_dim=6, random_state=0), n_folds=3, random_state=0)
+    out = cross_fitted.fit_transform(X, y)
+
+    assert cross_fitted.estimator_.numerical_features_ == ["num"]
+    assert cross_fitted.estimator_.categorical_features_ == ["city"]
+    assert out.shape == (300, direct.total_output_dim_)
+    assert list(cross_fitted.get_feature_names_out()) == list(direct.get_feature_names_out())
+    assert len(np.unique(out[:, 0])) > 1  # a supervised encoding, not an "unseen category" code
+    assert cross_fitted.transform(X).shape == out.shape
+
+
+def test_wrapped_column_transformer_selects_by_column_name(mixed_frame):
+    from sklearn.compose import ColumnTransformer
+
+    X, y = mixed_frame
+    wrapped = ColumnTransformer([("ple", PLETransformer(output_dim=4), ["num"])])
+    out = CrossFittedTransformer(wrapped, n_folds=3, random_state=0).fit_transform(X, y)
+    assert out.shape == (300, 4)
+
+
+def test_one_dimensional_input_is_still_a_single_column():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=200)
+    out = CrossFittedTransformer(PLETransformer(output_dim=4), n_folds=3, random_state=0).fit_transform(x, x**2)
+    assert out.shape == (200, 4)
