@@ -67,7 +67,9 @@ pip install "pretab[polars]"
 `polars` is only needed for the `set_output(transform="polars")` output path; every other
 output (`output_structure="matrix"`/`"blocks"`, `output_format="dense"`/`"sparse"`,
 `set_output(transform="pandas")`) works without it. Requesting `"polars"` output without the
-extra installed raises a clear `OptionalDependencyError`.
+extra installed raises a clear `OptionalDependencyError`. A `polars.DataFrame` is also accepted
+as input to `fit` / `transform` (see
+[Polars DataFrame input](../core_concepts/configuration.md#polars-dataframe-input)).
 ```
 
 Use the convenience `all` extra to install every optional dependency at once:

@@ -6,6 +6,7 @@ warning registry de-duplicate it instead of re-firing per transformer per
 ``transform`` -- and so ``n_features_in_`` is recorded consistently.
 """
 
+import sys
 import warnings
 from typing import Literal, cast
 
@@ -14,7 +15,17 @@ from sklearn.utils.validation import _check_feature_names, _check_feature_names_
 
 from ..exceptions import DataWarning, PretabDataError, invalid_param_error
 
-__all__ = ["resolve_input_features", "validate_2d_allow_nan"]
+__all__ = ["is_polars_frame", "resolve_input_features", "validate_2d_allow_nan"]
+
+
+def is_polars_frame(X) -> bool:
+    """Return True if ``X`` is a polars DataFrame, without importing polars.
+
+    A polars object can only exist once polars has been imported, so when the
+    module is absent from ``sys.modules`` ``X`` cannot be a polars frame.
+    """
+    polars = sys.modules.get("polars")
+    return polars is not None and isinstance(X, polars.DataFrame)
 
 
 def resolve_input_features(estimator, input_features) -> list:

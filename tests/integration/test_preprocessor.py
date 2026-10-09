@@ -485,6 +485,13 @@ def test_transform_accepts_an_ndarray_of_the_fitted_width():
     assert np.asarray(pre.transform(X)).shape[0] == 60
 
 
+def test_a_list_of_rows_is_read_like_an_array():
+    rows = [[1.0, 2.0], [3.0, 5.0], [4.0, 9.0]]
+    pre = Preprocessor(numerical_method="minmax").fit(rows)
+    assert not hasattr(pre, "feature_names_in_")
+    np.testing.assert_allclose(np.asarray(pre.transform(rows)), np.asarray(pre.transform(np.asarray(rows))))
+
+
 # --- get_feature_names_out(input_features) (issue #65) ----------------------------
 
 

@@ -34,6 +34,7 @@ from ..exceptions import (
 from ._typing import TransformerLike
 from .parameters import validate_task
 from .representation import RepresentationSpecMixin
+from .validation import is_polars_frame
 
 __all__ = ["CrossFittedTransformer", "in_controlled_context", "warn_target_leakage"]
 
@@ -93,19 +94,19 @@ def warn_target_leakage(estimator, y) -> None:
 def _as_2d(X):
     """Return ``X`` as 2D input for the wrapped transformer.
 
-    A pandas DataFrame is passed through unchanged, so column names and per-column
+    A pandas or polars DataFrame is passed through unchanged, so column names and per-column
     dtypes reach the wrapped estimator (e.g. a Preprocessor detecting numerical
     vs categorical columns, or a name-based ColumnTransformer); any other input
     is converted to a NumPy array, with 1D input reshaped to a single column.
     """
-    if hasattr(X, "iloc") and getattr(X, "ndim", None) == 2:
+    if (hasattr(X, "iloc") and getattr(X, "ndim", None) == 2) or is_polars_frame(X):
         return X
     X = np.asarray(X)
     return X.reshape(-1, 1) if X.ndim == 1 else X
 
 
 def _take_rows(X, indices):
-    """Select rows of a DataFrame or array by position."""
+    """Select rows of a DataFrame (pandas or polars) or array by position."""
     return X.iloc[indices] if hasattr(X, "iloc") else X[indices]
 
 

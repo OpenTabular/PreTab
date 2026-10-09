@@ -18,6 +18,7 @@ from .compose.factory import build_column_transformer
 from .compose.feature_detection import (
     bool_columns_as_object,
     detect_column_types,
+    has_column_labels,
     to_dataframe,
     with_string_labels,
 )
@@ -146,7 +147,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     --------
     - Supports a wide range of preprocessing methods for numerical and categorical features.
     - Automatically detects feature types (numerical vs. categorical).
-    - Compatible with both pandas DataFrames and NumPy arrays.
+    - Compatible with pandas and polars DataFrames and NumPy arrays (a polars frame is read
+      through pandas, so it gets the same column-type detection).
     - Handles external embedding arrays for models that require learned representations.
     - Returns either a dictionary of transformed feature blocks or a single NumPy array.
     - Fully compatible with scikit-learn transformers and pipelines.
@@ -503,8 +505,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
-            The input features.
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
+            The input features. A frame or dict is matched by column name, an array (or a list
+            of rows) by position.
         y : array-like, default=None
             Target values (used for decision tree-based methods).
         embeddings : np.ndarray or list of np.ndarray, optional
@@ -550,7 +553,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             verbose=resolved["verbose"],
         )
 
-        fitted_on_array = isinstance(X, np.ndarray)
+        fitted_on_array = not has_column_labels(X)
         X = to_dataframe(X)
 
         if self.feature_preprocessing:
@@ -663,7 +666,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input features to transform.
         embeddings : np.ndarray or list of np.ndarray, optional
             External embeddings to attach to dictionary output. Required when
@@ -728,7 +731,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input features.
         y : array-like, optional
             Target values.
@@ -907,12 +910,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     def _align_input(self, X):
         """Return ``X`` as a DataFrame whose columns line up with the fitted columns.
 
-        A NumPy array is matched by position. Once the preprocessor was fitted on
-        named columns, an array of the fitted width takes those column labels
-        (numeric columns of an object array are re-inferred), and a DataFrame
-        passed to a preprocessor fitted on an array is matched by position too --
-        both with scikit-learn's usual warning about the missing or unexpected
-        feature names. Any other DataFrame is matched by column label.
+        A NumPy array (or a list of rows) is matched by position. Once the
+        preprocessor was fitted on named columns, an array of the fitted width
+        takes those column labels (numeric columns of an object array are
+        re-inferred), and a DataFrame passed to a preprocessor fitted on an array
+        is matched by position too -- both with scikit-learn's usual warning about
+        the missing or unexpected feature names. Any other DataFrame (pandas or
+        polars) is matched by column label.
 
         Raises
         ------
@@ -928,7 +932,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             and list(fitted_labels) == positional_labels
         )
 
-        is_array = isinstance(X, np.ndarray)
+        is_array = not has_column_labels(X)
         X = to_dataframe(X, copy=True)
         if not (is_array or (fitted_on_array and list(X.columns) != positional_labels)):
             return X
@@ -1023,7 +1027,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input whose row count drives the estimate; not transformed.
 
         Returns
@@ -1043,7 +1047,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input whose row count drives the estimate; not transformed.
 
         Returns
