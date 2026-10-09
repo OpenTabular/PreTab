@@ -338,3 +338,59 @@ def test_object_arrays_written_before_element_encoding_still_load():
     assert isinstance(decoded, np.ndarray)
     assert decoded.dtype == object
     assert decoded.tolist() == [["a", None], [True, 1.5]]
+
+
+# --- strict JSON: no NaN / Infinity tokens --------------------------------------------
+
+
+def _strict_loads(text):
+    def reject(token):
+        raise ValueError(f"non-standard JSON token {token}")
+
+    return json.loads(text, parse_constant=reject)
+
+
+@pytest.fixture
+def frame_with_missing():
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=80)
+    a[:6] = np.nan
+    X = pd.DataFrame({"a": a, "b": rng.exponential(size=80), "c": rng.choice(["x", "y"], 80)})
+    return X, rng.normal(size=80)
+
+
+def test_default_spec_file_is_strict_json(frame_with_missing, tmp_path):
+    """The imputers' NaN missing-value marker was written as a bare NaN token,
+    which strict JSON parsers (JavaScript, Go, Rust, ...) reject."""
+    X, y = frame_with_missing
+    pre = Preprocessor(random_state=0).fit(X, y)
+    path = tmp_path / "spec.json"
+    pre.to_spec(path)
+    text = path.read_text(encoding="utf-8")
+    assert "NaN" not in text and "Infinity" not in text
+    loaded = Preprocessor.from_spec(_strict_loads(text))
+    np.testing.assert_array_equal(np.asarray(loaded.transform(X)), np.asarray(pre.transform(X)))
+    assert loaded.fingerprint_ == pre.fingerprint_
+
+
+def test_non_finite_floats_round_trip():
+    from pretab.compose.serialize import _decode, _encode
+
+    array = np.array([[1.0, np.nan], [np.inf, -np.inf]])
+    decoded = _decode(_strict_loads(json.dumps(_encode(array), allow_nan=False)))
+    assert isinstance(decoded, np.ndarray)
+    np.testing.assert_array_equal(decoded, array)
+    assert decoded.dtype == array.dtype
+    scalars = [_decode(_strict_loads(json.dumps(_encode(value), allow_nan=False))) for value in (np.nan, -np.inf)]
+    assert np.isnan(scalars[0]) and scalars[1] == -np.inf
+
+
+def test_specs_with_bare_nan_tokens_still_load(frame_with_missing):
+    X, y = frame_with_missing
+    pre = Preprocessor(random_state=0).fit(X, y)
+    spec = json.loads(json.dumps(pre.to_spec()))
+    # Rewrite the tagged floats the way older versions wrote them: as bare NaN.
+    legacy_text = json.dumps(spec).replace('{"__float__": "nan"}', "NaN")
+    assert "NaN" in legacy_text
+    loaded = Preprocessor.from_spec(json.loads(legacy_text))
+    np.testing.assert_array_equal(np.asarray(loaded.transform(X)), np.asarray(pre.transform(X)))

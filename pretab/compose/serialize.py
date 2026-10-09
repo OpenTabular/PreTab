@@ -16,6 +16,7 @@ center / bin locations, scalers, nested estimators) for exact reconstruction.
 
 import dataclasses
 import importlib
+import math
 from collections import UserList
 from typing import Any, cast
 
@@ -88,14 +89,23 @@ def _resolve(dotted: str):
 
 
 # --- encoding ------------------------------------------------------------
+def _encode_float(value):
+    """Return ``value``, tagging NaN / +-inf, which strict JSON cannot represent."""
+    if math.isfinite(value):
+        return value
+    return {"__float__": repr(float(value))}
+
+
 def _encode(obj):
     if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, np.integer):
         return int(obj)
     if isinstance(obj, np.floating):
-        return float(obj)
-    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return _encode_float(float(obj))
+    if isinstance(obj, float):
+        return _encode_float(obj)
+    if obj is None or isinstance(obj, (bool, int, str)):
         return obj
     if obj is UNSET:
         return {"__unset__": True}
@@ -105,6 +115,8 @@ def _encode(obj):
             # tolist() keeps the elements of an object array as they are (e.g.
             # numpy scalars such as np.bool_), so encode each one.
             data = _map_elements(data, obj.ndim, _encode)
+        elif obj.dtype.kind == "f" and not np.isfinite(obj).all():
+            data = _map_elements(data, obj.ndim, _encode_float)
         return {"__ndarray__": {"dtype": obj.dtype.str, "shape": list(obj.shape), "data": data}}
     if isinstance(obj, np.dtype):
         return {"__npdtype__": obj.str}
@@ -151,7 +163,9 @@ def _json_safe(obj):
     Keeps JSON-native values verbatim and falls back to the tagged :func:`_encode`
     form only for exotic values. The result is informational and never decoded.
     """
-    if obj is None or isinstance(obj, (bool, int, float, str)):
+    if isinstance(obj, float):
+        return _encode_float(obj)
+    if obj is None or isinstance(obj, (bool, int, str)):
         return obj
     if isinstance(obj, dict) and all(isinstance(k, str) for k in obj):
         return {k: _json_safe(v) for k, v in obj.items()}
@@ -173,7 +187,10 @@ def _decode_ndarray(payload: dict) -> np.ndarray:
         for index, element in enumerate(elements):
             arr[index] = element
         return arr.reshape(shape)
-    arr = np.array(payload["data"], dtype=dtype)
+    data = payload["data"]
+    if dtype.kind == "f":
+        data = _map_elements(data, len(payload["shape"]), _decode)
+    arr = np.array(data, dtype=dtype)
     return arr.reshape(payload["shape"])
 
 
@@ -187,6 +204,8 @@ def _decode(obj):
             return _decode_ndarray(obj["__ndarray__"])
         if "__unset__" in obj:
             return UNSET
+        if "__float__" in obj:
+            return float(obj["__float__"])
         if "__npdtype__" in obj:
             return np.dtype(obj["__npdtype__"])
         if "__type__" in obj:

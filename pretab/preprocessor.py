@@ -104,9 +104,13 @@ _PRESET_PARAM_DEFAULTS = {
 
 
 def _spec_json(spec: dict, **kwargs) -> str:
-    """Serialize a spec to JSON text, raising a typed error for unsupported state."""
+    """Serialize a spec to strict JSON text, raising a typed error for unsupported state.
+
+    Non-finite floats are tagged by the encoder, so ``allow_nan=False`` keeps bare
+    ``NaN`` / ``Infinity`` tokens (rejected by strict JSON parsers) out of the spec.
+    """
     try:
-        return json.dumps(spec, **kwargs)
+        return json.dumps(spec, allow_nan=False, **kwargs)
     except (TypeError, ValueError) as exc:
         raise PretabSerializationError(f"The fitted state cannot be written as JSON: {exc}") from exc
 
