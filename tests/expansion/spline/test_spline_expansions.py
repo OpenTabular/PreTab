@@ -253,3 +253,40 @@ def test_adaptive_spline_width_is_not_capped_at_the_legacy_window(cls):
         adaptive=True, min_output_dim=5, max_output_dim=40, target_aware=True, placement_strategy="cart"
     ).fit(x.reshape(-1, 1), y)
     assert 15 < transformer.total_output_dim_ <= 40
+
+
+# --- explicit knot_locations ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("knots", [[5.0], [2.0, 4.0, 6.0, 8.0], list(np.linspace(1, 9, 12))])
+def test_knot_locations_set_the_width_regardless_of_output_dim(cls, knots):
+    """knot_locations raised unless its length matched the default output_dim, although
+    the docstring says output_dim is ignored when knots are given."""
+    X = np.linspace(0, 10, 50).reshape(-1, 1)
+    transformer = cls(knot_locations=knots).fit(X)
+    np.testing.assert_allclose(transformer.knots_[0][4:-4], knots)
+    assert transformer.transform(X).shape == (50, len(knots) + 4)
+
+
+def test_knot_locations_are_kept_in_adaptive_mode():
+    X = np.linspace(0, 10, 50).reshape(-1, 1)
+    transformer = BSplineTransformer(knot_locations=[2, 4, 6, 8], adaptive=True, min_output_dim=5, max_output_dim=6)
+    np.testing.assert_array_equal(transformer.fit(X).knots_[0][4:-4], [2, 4, 6, 8])
+
+
+def test_knot_locations_outside_the_range_are_dropped_with_a_warning():
+    from pretab.exceptions import DataWarning
+
+    X = np.linspace(0, 10, 50).reshape(-1, 1)
+    with pytest.warns(DataWarning, match=r"\[-5\.0, 15\.0\] lie outside"):
+        transformer = BSplineTransformer(knot_locations=[-5, 3, 3, 15]).fit(X)
+    np.testing.assert_array_equal(transformer.knots_[0][4:-4], [3.0])
+
+
+@pytest.mark.parametrize("knots", [[[1.0, 2.0]], ["a"], [np.nan]])
+def test_invalid_knot_locations_raise_a_typed_error(knots):
+    from pretab.exceptions import InvalidParamError
+
+    with pytest.raises(InvalidParamError, match="knot_locations"):
+        BSplineTransformer(knot_locations=knots).fit(np.linspace(0, 10, 50).reshape(-1, 1))
