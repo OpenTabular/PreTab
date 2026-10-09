@@ -27,7 +27,7 @@ from ...core.knots import (
     select_knots,
     supplement_interior_knots,
 )
-from ...core.parameters import UNSET, validate_placement
+from ...core.parameters import UNSET, validate_placement, validate_task
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...core.supervised import warn_target_leakage
 from ...exceptions import (
@@ -83,7 +83,9 @@ class BaseSplineTransformer(BasePreTabTransformer):
         evenly across the range, ``"quantile"`` places them at data quantiles.
 
     task : {"regression", "classification"} or None, default=None
-        Task passed to the target-aware selector when ``target_aware=True``.
+        Task passed to the target-aware selector when ``target_aware=True``. ``None`` is
+        treated as ``"regression"``; any other value raises
+        :class:`~pretab.exceptions.InvalidParamError` at ``fit``.
 
     adaptive : bool, default=False
         If True, the per-feature output dimension may vary within
@@ -299,6 +301,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         """Determine per-feature knot vectors."""
         warn_target_leakage(self, y)
         validate_placement(self.target_aware, self.placement_strategy)
+        validate_task(self.task, type(self).__name__, allow_none=True)
         n_basis = self._resolve_param("output_dim", default=6)
         min_basis_req = self._resolve_param("min_output_dim", default=None)
         max_basis_req = self._resolve_param("max_output_dim", default=None)

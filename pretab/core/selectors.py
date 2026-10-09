@@ -27,6 +27,7 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from ..exceptions import IncompatibleParamsError, OptionalDependencyError
 from .knots import quantile_knots, select_knots, uniform_knots
+from .parameters import validate_task
 
 Task = Literal["regression", "classification"]
 
@@ -72,8 +73,8 @@ class BaseLocationSelector(ABC):
             Input feature values for one feature.
         y : np.ndarray of shape (n_samples,)
             Target values. Required -- these selectors are target aware.
-        task : {"regression", "classification"}, optional
-            Type of prediction task. Defaults to ``"regression"``.
+        task : {"regression", "classification"} or None, default="regression"
+            Type of prediction task. ``None`` is treated as ``"regression"``.
         min_count : int
             Minimum number of locations to return.
         max_count : int
@@ -83,10 +84,15 @@ class BaseLocationSelector(ABC):
         -------
         locations : np.ndarray
             Sorted array of selected locations.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``task`` is not ``"regression"``, ``"classification"`` or ``None``.
         """
         if y is None:
             raise IncompatibleParamsError(f"{type(self).__name__} requires y to select locations.")
-        task = task or "regression"
+        task = validate_task(task, type(self).__name__, allow_none=True) or "regression"
 
         x = np.asarray(x)
         if x.ndim == 1:
@@ -235,20 +241,13 @@ class CARTLocationSelector(BaseLocationSelector):
         self.min_samples_floor = min_samples_split
 
     def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
-        if task == "regression":
-            tree = DecisionTreeRegressor(
-                max_depth=self.max_tree_depth,
-                min_samples_split=self.min_samples_split,
-                min_samples_leaf=self.min_samples_leaf,
-                random_state=self.random_state,
-            )
-        else:
-            tree = DecisionTreeClassifier(
-                max_depth=self.max_tree_depth,
-                min_samples_split=self.min_samples_split,
-                min_samples_leaf=self.min_samples_leaf,
-                random_state=self.random_state,
-            )
+        tree_class = DecisionTreeClassifier if task == "classification" else DecisionTreeRegressor
+        tree = tree_class(
+            max_depth=self.max_tree_depth,
+            min_samples_split=self.min_samples_split,
+            min_samples_leaf=self.min_samples_leaf,
+            random_state=self.random_state,
+        )
 
         tree.fit(x_valid, y_valid)
         importance = self._split_importance(tree, x_valid)
@@ -355,9 +354,7 @@ class LightGBMLocationSelector(BaseLocationSelector):
     def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         lgb = self._import_lightgbm()
 
-        if task == "regression":
-            objective = {"objective": "regression", "metric": "rmse"}
-        else:
+        if task == "classification":
             # LightGBM needs integer class codes: its binary objective treats every
             # label > 0 as positive and it cannot read string labels.
             classes, y_valid = np.unique(y_valid, return_inverse=True)
@@ -367,6 +364,8 @@ class LightGBMLocationSelector(BaseLocationSelector):
                 objective = {"objective": "binary", "metric": "binary_logloss"}
             else:
                 objective = {"objective": "multiclass", "metric": "multi_logloss", "num_class": len(classes)}
+        else:
+            objective = {"objective": "regression", "metric": "rmse"}
 
         params = {
             **objective,

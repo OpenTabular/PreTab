@@ -32,6 +32,7 @@ from ..exceptions import (
     PretabDataError,
 )
 from ._typing import TransformerLike
+from .parameters import validate_task
 from .representation import RepresentationSpecMixin
 
 __all__ = ["CrossFittedTransformer", "in_controlled_context", "warn_target_leakage"]
@@ -203,8 +204,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
             raise IncompatibleParamsError("CrossFittedTransformer requires y at fit time; got y=None.")
         if not isinstance(self.n_folds, (int, np.integer)) or self.n_folds < 2:
             raise InvalidParamError(f"n_folds must be an integer >= 2; got {self.n_folds!r}.")
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(f"task must be 'regression' or 'classification'; got {self.task!r}.")
+        validate_task(self.task, type(self).__name__)
         X_arr = _as_2d(X)
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):

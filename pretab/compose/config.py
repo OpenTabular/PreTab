@@ -3,10 +3,10 @@
 :class:`PreprocessorConfig` is the frozen, canonical view of the user-supplied
 Preprocessor parameters. It normalizes the global method names (resolving
 aliases and separator/case variants, mapping ``None`` to ``"none"``) and
-validates the global ``target_aware`` / ``placement_strategy`` contract up front.
-The user's original constructor arguments stay untouched on the estimator (as
-scikit-learn requires); this object is the internal, normalized counterpart the
-composition layer consumes.
+validates the global ``target_aware`` / ``placement_strategy`` contract and the
+``task`` up front. The user's original constructor arguments stay untouched on
+the estimator (as scikit-learn requires); this object is the internal, normalized
+counterpart the composition layer consumes.
 
 Per-column overrides in ``feature_preprocessing`` are kept verbatim because the
 namespace they resolve in (numerical vs categorical) depends on the column type,
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..core.parameters import validate_placement
+from ..core.parameters import validate_placement, validate_task
 from ..exceptions import invalid_param_error
 from .registry import (
     CATEGORICAL_ALIASES,
@@ -47,8 +47,8 @@ class PreprocessorConfig:
     """Frozen, normalized configuration derived from Preprocessor parameters.
 
     Built via :meth:`from_params`, which normalizes the global method names and
-    validates the placement contract. All other knobs are carried through as-is
-    for the factory and orchestration layers.
+    validates the placement contract and the task. All other knobs are carried
+    through as-is for the factory and orchestration layers.
     """
 
     numerical_method: str
@@ -103,9 +103,12 @@ class PreprocessorConfig:
         ------
         InvalidParamError
             If the ``target_aware`` / ``placement_strategy`` combination is
-            invalid (via :func:`~pretab.core.parameters.validate_placement`).
+            invalid (via :func:`~pretab.core.parameters.validate_placement`), or
+            ``task`` is not ``"regression"`` / ``"classification"`` (via
+            :func:`~pretab.core.parameters.validate_task`).
         """
         validate_placement(target_aware, placement_strategy)
+        validate_task(task, "Preprocessor")
         if missing_policy is not None and missing_policy not in MISSING_POLICIES:
             raise invalid_param_error(
                 "Preprocessor",

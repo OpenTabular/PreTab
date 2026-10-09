@@ -42,7 +42,7 @@ from .compose.output import (
 )
 from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
 from .core.logging import configure_logging, get_logger
-from .core.parameters import UNSET
+from .core.parameters import UNSET, validate_task
 from .core.policy import RepresentationPolicy, apply_constant_policy
 from .exceptions import (
     ConfigWarning,
@@ -87,7 +87,8 @@ def _preset_numerical_method(task) -> str:
     """Return the preset numerical method for a given ``task``.
 
     Splines (``"bspline"``) are the preset default for regression, and piecewise-linear
-    encoding (``"ple"``) remains the default for classification.
+    encoding (``"ple"``) remains the default for classification. ``task`` must already
+    be validated (see :meth:`Preprocessor._resolved_params`).
     """
     return "bspline" if task == "regression" else "ple"
 
@@ -200,7 +201,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Multivariate tensor-product and thin-plate splines are available as standalone transformers.
     task : str, default="regression"
         Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
-        place basis units / knots against ``y``. Only consulted when ``target_aware`` is True.
+        place basis units / knots against ``y``. Only consulted when ``target_aware`` is True (and
+        by ``preset`` to pick ``numerical_method``). Matched exactly: any other value, e.g.
+        ``"Regression"``, raises :class:`~pretab.exceptions.InvalidParamError` at ``fit``.
     adaptive : bool, default=False
         Whether adaptive-capable methods size each feature's output dimension from the data
         (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
@@ -755,10 +758,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         back to the preset's value, or to their ordinary default when no
         preset supplies one. The ``preset`` key is dropped from the returned
         mapping.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``task`` or ``preset`` is invalid. ``task`` is validated before a
+            preset derives ``numerical_method`` from it.
         """
         params = self.get_params(deep=False)
         preset = params.pop("preset", None)
         resolved = {key: (_PRESET_PARAM_DEFAULTS[key] if value is UNSET else value) for key, value in params.items()}
+        validate_task(resolved["task"], type(self).__name__)
         if preset is None:
             return resolved
         if preset not in PRESETS:
@@ -790,6 +800,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         -------
         dict
             The resolved parameter mapping.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``task`` or ``preset`` is invalid, exactly as ``fit`` would raise.
         """
         return self._resolved_params()
 
