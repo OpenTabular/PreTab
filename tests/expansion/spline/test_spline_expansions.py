@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 
@@ -110,12 +112,57 @@ def test_mspline_non_negative(data):
 
 
 def test_mspline_handles_nan():
+    """A missing value is left out of knot placement and expands to a NaN row."""
     X = np.linspace(0, 1, 50).reshape(-1, 1)
     X[5] = np.nan
     transformer = MSplineTransformer(output_dim=6)
     Xt = transformer.fit_transform(X)
     assert Xt.shape == (50, 6)
-    assert np.isfinite(Xt).all()
+    assert np.isnan(Xt[5]).all()
+    assert np.isfinite(np.delete(Xt, 5, axis=0)).all()
+
+
+# --- missing values expand to NaN basis rows -------------------------------------------
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("include_bias", [False, True])
+@pytest.mark.parametrize("out_of_range", ["clip", "extrapolate", "warn", "error"])
+def test_bmi_spline_missing_value_expands_to_a_nan_row(cls, include_bias, out_of_range):
+    """A missing value became a finite all-zero basis row: impossible data for the
+    B/M-spline and, for the I-spline, the exact encoding of the training minimum."""
+    X = np.linspace(0.0, 10.0, 50).reshape(-1, 1)
+    transformer = cls(output_dim=5, include_bias=include_bias, policy={"out_of_range": out_of_range}).fit(X)
+    observed = np.array([[0.0], [2.5], [10.0]])
+    if out_of_range in ("clip", "extrapolate"):
+        observed = np.vstack([observed, [[-3.0], [14.0]]])
+    expected = transformer.transform(observed)
+
+    probe = np.insert(observed, [0, 2], np.nan, axis=0)
+    with warnings.catch_warnings():
+        # A missing value is not out of range: it must not trigger "warn" / "error".
+        warnings.simplefilter("error")
+        out = transformer.transform(probe)
+
+    missing = np.isnan(probe[:, 0])
+    basis = slice(1, None) if include_bias else slice(None)
+    assert np.isnan(out[missing, basis]).all()
+    if include_bias:
+        np.testing.assert_array_equal(out[:, 0], 1.0)
+    np.testing.assert_array_equal(out[~missing], expected)
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+def test_bmi_spline_missing_value_only_affects_its_own_feature_block(cls):
+    rng = np.random.default_rng(0)
+    X = rng.uniform(0.0, 10.0, size=(60, 2))
+    X[4, 0] = np.nan
+    X[9, 1] = np.nan
+    transformer = cls(output_dim=6).fit(X)
+    out = transformer.transform(X)
+    np.testing.assert_array_equal(np.isnan(out[:, :6]).any(axis=1), np.isnan(X[:, 0]))
+    np.testing.assert_array_equal(np.isnan(out[:, 6:]).any(axis=1), np.isnan(X[:, 1]))
+    assert np.isnan(out[4, :6]).all() and np.isnan(out[9, 6:]).all()
 
 
 @pytest.mark.parametrize("scale", [1.0, 1e-2, 1e-3, 1e-7])

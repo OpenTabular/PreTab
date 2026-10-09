@@ -232,8 +232,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     numerical_imputation : str or None, default="median"
         Strategy for the ``SimpleImputer`` that runs *before* every numerical method. Accepts
         any ``sklearn`` strategy (``"median"``, ``"mean"``, ``"most_frequent"``, ``"constant"``).
-        ``None`` disables imputation, so NaNs reach the numerical transformers unchanged and the
-        finite-input methods (all numerical methods, including PLE) raise on missing values.
+        ``None`` disables imputation, so NaNs reach the numerical transformers unchanged: the
+        scalers, splines and ``rbf`` / ``relu`` / ``sigmoid`` / ``tanh`` feature maps propagate a
+        missing value as NaN in that feature's output, while the finite-input methods
+        (``"ple"``, ``"custombin"``, ``"fourier"``, ``"polynomial"``) raise.
     categorical_imputation : str or None, default="most_frequent"
         Strategy for the ``SimpleImputer`` that runs *before* every categorical method. ``None``
         disables imputation for categorical columns.

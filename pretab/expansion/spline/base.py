@@ -131,6 +131,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
     takes precedence over the automatic ``output_dim`` strategy. Multi-column input
     is expanded column by column and stacked horizontally.
 
+    Missing values are ignored for knot placement; at transform time a missing value
+    expands to a row of NaN in its feature's basis block (an optional bias column
+    stays 1), as in the other spline families.
+
     Examples
     --------
     >>> import numpy as np
@@ -354,7 +358,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
         for i in range(X.shape[1]):
             knots = self.knots_[i]
             xi = resolve_out_of_range(X[:, i], knots[0], knots[-1], self._resolved_policy(), estimator=self)
-            design = self._design_matrix(xi, knots)
+            # A missing value has no position on the basis: only the observed rows
+            # are evaluated and the missing ones stay NaN (the "propagate" contract
+            # of the other spline families) instead of becoming a finite basis row.
+            observed = ~np.isnan(xi)
+            design = np.full((len(xi), self.n_basis_[i]), np.nan)
+            design[observed] = self._design_matrix(xi[observed], knots)
             if self.include_bias:
                 design = np.hstack([np.ones((design.shape[0], 1)), design])
             transformed.append(design)
@@ -366,7 +375,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
         return self.fit(X, y).transform(X)
 
     def _design_matrix(self, x: np.ndarray, knots: np.ndarray) -> np.ndarray:
-        """Return the basis matrix for a single feature (without the bias column)."""
+        """Return the basis matrix for a single feature (without the bias column).
+
+        ``x`` holds only the observed (non-missing) values, already resolved
+        against the out-of-range policy; :meth:`transform` fills the rows of
+        missing values with NaN.
+        """
         raise NotImplementedError
 
     def _feature_suffix(self) -> str:
