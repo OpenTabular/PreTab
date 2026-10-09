@@ -276,3 +276,50 @@ def test_auto_format_is_fixed_at_fit_for_sparse_training_output():
 def test_explicit_formats_are_stored_as_resolved(frame, y, output_format):
     pre = Preprocessor(numerical_method="minmax", output_format=output_format).fit(frame, y)
     assert pre.output_format_ == output_format
+
+
+# --- global scikit-learn output config ----------------------------------------------
+
+
+@pytest.fixture
+def mixed_frame():
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=40)
+    a[:4] = np.nan
+    return pd.DataFrame({"a": a, "color": rng.choice(["red", "green", "blue"], 40)}), rng.normal(size=40)
+
+
+@pytest.mark.parametrize("options", [{"categorical_method": "one-hot"}, {"preset": "expanded"}])
+def test_one_hot_works_under_a_global_pandas_output_config(mixed_frame, options):
+    """The global transform_output reached the inner sparse OneHotEncoder, which refused it."""
+    import sklearn
+
+    X, y = mixed_frame
+    with sklearn.config_context(transform_output="pandas"):
+        pre = Preprocessor(**options).fit(X, y)
+        out = pre.transform(X)
+    assert isinstance(out, pd.DataFrame)
+    assert list(out.columns) == list(pre.get_feature_names_out())
+    assert set(map(str, out.dtypes)) == {"float64"}
+
+
+def test_missing_indicator_stays_numeric_under_a_global_pandas_output_config(mixed_frame):
+    import sklearn
+
+    X, y = mixed_frame
+    with sklearn.config_context(transform_output="pandas"):
+        out = Preprocessor(numerical_method="minmax", add_missing_indicator=True).fit(X, y).transform(X)
+    assert isinstance(out, pd.DataFrame)
+    assert all(dtype.kind == "f" for dtype in out.dtypes)
+    np.testing.assert_array_equal(out["num_a__missingindicator_a"], X["a"].isna().astype(float))
+
+
+def test_global_polars_output_config_is_honoured(mixed_frame):
+    import sklearn
+
+    pl = pytest.importorskip("polars")
+    X, y = mixed_frame
+    with sklearn.config_context(transform_output="polars"):
+        out = Preprocessor(categorical_method="one-hot").fit(X, y).transform(X)
+    assert isinstance(out, pl.DataFrame)
+    assert np.asarray(out).shape[0] == len(X)

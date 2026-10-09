@@ -2,9 +2,10 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ....core.knots import bspline_basis
+from ....core.knots import bspline_basis, extrapolate_bspline_rows
 from ....core.parameters import UNSET
 from ....core.policy import RepresentationPolicy, resolve_out_of_range
+from ....core.validation import resolve_input_features
 from ....exceptions import InvalidParamError
 from ..mixins import SplineBasisMixin
 
@@ -165,6 +166,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         B = np.zeros((len(x), n_basis))
         for i in range(n_basis):
             B[:, i] = bspline_basis(x, knots, self.degree, i)
+        B = extrapolate_bspline_rows(B, x, knots, self.degree)
         if self.include_bias:
             B = np.hstack([np.ones((len(x), 1)), B])
         return B
@@ -246,8 +248,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
     def get_feature_names_out(self, input_features=None):
         """Return names for the interaction basis as ``tp_{feat0 i}_{feat1 j}...``."""
         check_is_fitted(self, "marginal_sizes_")
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        input_features = resolve_input_features(self, input_features)
         sizes = self.marginal_sizes_
         names = []
         for multi_index in np.ndindex(*sizes):

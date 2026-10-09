@@ -117,8 +117,16 @@ class BaseCenterExpansion(BasePreTabTransformer):
         for i in range(X.shape[1]):
             if np.isnan(X[:, i]).all():
                 raise PretabDataError(f"Feature at index {i} has only NaN values")
-            self.centers_.append(adapter.get_centers(X[:, i], y_place, min_centers, max_centers))
+            if self.target_aware:
+                centers = adapter.get_centers(X[:, i], y_place, min_centers, max_centers)
+            else:
+                centers = self._unsupervised_centers(adapter, X[:, i], n_centers)
+            self.centers_.append(centers)
         return self
+
+    def _unsupervised_centers(self, adapter, x, n_centers):
+        """Return ``n_centers`` quantile / uniform centers spanning the feature range."""
+        return adapter.get_centers(x, None, n_centers, n_centers)
 
     def transform(self, X):
         """Expand every feature against its centers and stack the results."""

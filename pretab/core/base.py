@@ -10,12 +10,11 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ..exceptions import invalid_param_error
 from .adaptive import AdaptiveResolutionMixin
 from .parameters import AliasResolverMixin
 from .policy import RepresentationPolicy, apply_constant_policy
 from .representation import RepresentationSpecMixin
-from .validation import validate_2d_allow_nan
+from .validation import resolve_input_features, validate_2d_allow_nan
 
 __all__ = ["BasePreTabTransformer"]
 
@@ -58,19 +57,24 @@ class BasePreTabTransformer(
     def _resolved_policy(self) -> RepresentationPolicy:
         """Return the effective edge-case policy for this instance.
 
-        An explicit ``policy`` constructor argument, on the transformers that expose
-        one, always wins verbatim over the class-level defaults below. Otherwise, the
-        shared default policy is narrowed by this family's ``_constant_policy`` /
-        ``_out_of_range_policy`` class attributes, which record each family's
-        historical, non-configurable default behavior.
+        The shared default policy is narrowed by this family's ``_constant_policy``
+        / ``_out_of_range_policy`` class attributes, which record each family's
+        historical default behavior. An explicit ``policy`` constructor argument, on
+        the transformers that expose one, then applies on top: a mapping overrides
+        only the axes it names (so ``{"constant": "error"}`` keeps the family's
+        out-of-range handling), and a :class:`RepresentationPolicy` instance is used
+        verbatim.
         """
-        instance_policy = getattr(self, "policy", None)
-        if instance_policy is not None:
-            return RepresentationPolicy.resolve(instance_policy)
-        return self._policy.merge(
+        family_policy = self._policy.merge(
             constant=self._constant_policy,
             out_of_range=self._out_of_range_policy,
         )
+        instance_policy = getattr(self, "policy", None)
+        if instance_policy is None:
+            return family_policy
+        if isinstance(instance_policy, dict):
+            return family_policy.merge(**instance_policy)
+        return RepresentationPolicy.resolve(instance_policy)
 
     def _validate(self, X, *, reset: bool):
         """Validate ``X`` through the shared NaN-aware validator."""
@@ -90,15 +94,7 @@ class BasePreTabTransformer(
     def get_feature_names_out(self, input_features=None):
         """Return output feature names of the form ``{feature}_{suffix}{j}``."""
         check_is_fitted(self, "n_features_in_")
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
-        elif len(input_features) != self.n_features_in_:
-            raise invalid_param_error(
-                type(self).__name__,
-                "get_feature_names_out.input_features",
-                len(input_features),
-                f"must have exactly {self.n_features_in_} entries (one per input feature)",
-            )
+        input_features = resolve_input_features(self, input_features)
         suffix = self._feature_suffix()
         names = []
         for feature, n_cols in zip(input_features, self._output_sizes(), strict=False):

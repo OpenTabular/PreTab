@@ -1,8 +1,11 @@
 import warnings
 
 import numpy as np
+import pandas as pd
 import pytest
+from sklearn.base import clone
 
+from pretab import transformers
 from pretab.core.representation import RepresentationSpec, RepresentationSpecMixin
 from pretab.transformers import (
     BSplineTransformer,
@@ -201,6 +204,32 @@ def test_every_transformer_has_representation_spec():
     for _id, transformer, *_ in CASES:
         assert isinstance(transformer, RepresentationSpecMixin)
         assert hasattr(transformer, "get_representation_spec")
+
+
+def test_cases_cover_every_exported_representation():
+    exported = {getattr(transformers, name) for name in transformers.__all__}
+    with_spec = {cls for cls in exported if hasattr(cls, "get_representation_spec")}
+    assert with_spec == {type(case[1]) for case in CASES}
+
+
+@pytest.mark.parametrize(
+    ("transformer", "X", "y"),
+    [(case[1], case[2], case[3]) for case in CASES],
+    ids=CASE_IDS,
+)
+def test_spec_after_a_dataframe_fit_follows_get_feature_names_out(transformer, X, y):
+    """A DataFrame fit records ``feature_names_in_``; the default spec passed
+    ``x0, x1, ...`` to ``get_feature_names_out``, which then raised a ValueError.
+    The spec now resolves its input names exactly like ``get_feature_names_out``."""
+    frame = pd.DataFrame({f"feat_{i}": X[:, i] for i in range(X.shape[1])})
+    fitted = _fit(clone(transformer), frame, y)
+    spec = fitted.get_representation_spec()
+
+    generic = [f"x{i}" for i in range(X.shape[1])]
+    inputs = [str(name) for name in getattr(fitted, "feature_names_in_", generic)]
+    assert spec.input_features == tuple(inputs)
+    assert spec.output_features == tuple(str(name) for name in fitted.get_feature_names_out(inputs))
+    assert fitted.get_representation_spec(input_features=inputs) == spec
 
 
 def test_periodic_spec_reports_period():

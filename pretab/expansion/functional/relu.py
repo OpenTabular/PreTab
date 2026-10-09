@@ -78,6 +78,16 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
     _feature_suffix_value = "relu"
     _representation_family = "relu"
 
+    def _unsupervised_centers(self, adapter, x, n_centers):
+        """Return ``n_centers`` centers that each start a ramp inside the data.
+
+        A ramp ``max(0, x - c)`` centered at the training maximum is identically
+        zero on the training data, so ``n_centers + 1`` range-spanning locations
+        are placed and the right endpoint is dropped (the first center stays at
+        the minimum, giving the linear term).
+        """
+        return adapter.get_centers(x, None, n_centers + 1, n_centers + 1)[:-1]
+
     def __init__(
         self,
         output_dim=UNSET,

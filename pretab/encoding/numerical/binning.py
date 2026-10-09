@@ -2,10 +2,11 @@ from typing import ClassVar
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.validation import _check_feature_names, check_is_fitted
 
 from ...core.parameters import UNSET, AliasResolverMixin
 from ...core.representation import RepresentationSpecMixin
+from ...core.validation import resolve_input_features
 from ...exceptions import InsufficientSamplesError, InvalidParamError, PretabDataError
 
 _VALID_ENCODINGS = ("ordinal", "onehot", "soft")
@@ -89,7 +90,8 @@ class NumericBinningTransformer(RepresentationSpecMixin, AliasResolverMixin, Tra
         self.placement_strategy = placement_strategy
 
     def _check_array(self, X, *, reset):
-        """Validate ``X`` is a 2D numeric array and (re)set the feature count."""
+        """Validate ``X`` is a 2D numeric array and (re)set the feature count and names."""
+        _check_feature_names(self, X, reset=reset)
         X = np.asarray(X)
         if X.ndim != 2:
             raise PretabDataError("Input must be a 2D array of shape (n_samples, n_features).")
@@ -120,7 +122,8 @@ class NumericBinningTransformer(RepresentationSpecMixin, AliasResolverMixin, Tra
             self.n_features_in_ = X.shape[1]
         elif X.shape[1] != self.n_features_in_:
             raise PretabDataError(
-                f"Input has {X.shape[1]} features, but NumericBinningTransformer was fitted with {self.n_features_in_}."
+                f"X has {X.shape[1]} features, but NumericBinningTransformer is expecting "
+                f"{self.n_features_in_} features as input."
             )
         return X
 
@@ -250,8 +253,7 @@ class NumericBinningTransformer(RepresentationSpecMixin, AliasResolverMixin, Tra
             ``"{feature}_bin{k}"`` name per bin.
         """
         check_is_fitted(self, "n_features_in_")
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        input_features = resolve_input_features(self, input_features)
         if self.encode == "ordinal":
             return np.asarray(input_features, dtype=object)
         check_is_fitted(self, "n_bins_")

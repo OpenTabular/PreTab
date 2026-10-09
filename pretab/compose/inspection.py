@@ -11,21 +11,25 @@ import copy
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
+from .registry import TRANSFORMER_REGISTRY
 
 logger = get_logger(__name__)
 
 __all__ = [
     "block_name",
+    "block_uses_target",
     "build_feature_info",
     "build_feature_lineage",
     "build_transformer_summary",
     "clean_feature_names",
     "feature_names_out",
     "get_output_slices",
+    "representation_leaf",
 ]
 
 
@@ -177,6 +181,32 @@ def _separate_state_branches(transformer):
     return branches["representation"], branches["missing"]
 
 
+def representation_leaf(transformer):
+    """Return the last step of a fitted per-column block's representation.
+
+    For a separate-state / missing-indicator union this is the last step of its
+    ``"representation"`` pipeline (the raw missing indicator beside it is not
+    part of the representation); for a pipeline it is the last step, and any
+    other block is returned unchanged.
+    """
+    separate_state = _separate_state_branches(transformer)
+    representation = transformer if separate_state is None else separate_state[0]
+    return representation.steps[-1][1] if hasattr(representation, "steps") else representation
+
+
+def _probe_input(step, value):
+    """Return a one-row probe input for measuring a fitted step's output width.
+
+    A step fitted directly on the ColumnTransformer's DataFrame column records
+    ``feature_names_in_`` and, like scikit-learn, warns on input without feature
+    names, so its probe is a DataFrame carrying the fitted names.
+    """
+    names = getattr(step, "feature_names_in_", None)
+    if names is None:
+        return np.full((1, 1), value)
+    return pd.DataFrame(np.full((1, len(names)), value), columns=names)
+
+
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
     """Collect per-feature metadata (preprocessing, dimension, categories).
 
@@ -230,7 +260,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
             ):
                 last_step = representation_pipeline.steps[-1][1]
                 if hasattr(last_step, "transform"):
-                    dummy_input = np.zeros((1, 1)) + 1e-05
+                    dummy_input = _probe_input(last_step, 1e-05)
                     try:
                         transformed_feature = last_step.transform(dummy_input)
                         dimension = transformed_feature.shape[1]
@@ -275,7 +305,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
             else:
                 last_step = representation_pipeline.steps[-1][1]
                 if hasattr(last_step, "transform"):
-                    dummy_input = np.zeros((1, 1))
+                    dummy_input = _probe_input(last_step, 0.0)
                     try:
                         transformed_feature = last_step.transform(dummy_input)
                         dimension = transformed_feature.shape[1]
@@ -348,8 +378,9 @@ def _resolve_block_representation(pipeline, columns):
     """Return ``(family, component, uses_target, is_interaction)`` for a block.
 
     The representation-bearing step is the last pipeline step exposing a
-    ``get_representation_spec`` (a PreTab transformer) or a known scikit-learn
-    step name; helper steps such as imputers and float casts are skipped.
+    ``get_representation_spec`` (a PreTab transformer), a known scikit-learn
+    step name, or a registered method that consumes the target; helper steps
+    such as imputers and float casts are skipped.
     """
     steps = pipeline.steps if hasattr(pipeline, "steps") else [("_", pipeline)]
     for step_name, transformer in reversed(steps):
@@ -359,7 +390,26 @@ def _resolve_block_representation(pipeline, columns):
         if step_name in _STEP_FAMILY:
             family, component = _STEP_FAMILY[step_name]
             return family, component, False, False
+        registered = TRANSFORMER_REGISTRY.get(step_name)
+        if registered is not None and registered.target_usage != "forbidden":
+            # A registered class without a RepresentationSpec (e.g. scikit-learn's
+            # TargetEncoder): its declared supervision says whether it used y, so
+            # cross-fitting refits it per fold instead of reusing the all-data fit.
+            uses_target = registered.target_usage == "required" or bool(getattr(transformer, "target_aware", False))
+            component = "category" if registered.is_categorical else "basis"
+            return step_name, component, uses_target, registered.is_multivariate
     return "passthrough", "raw", False, False
+
+
+def block_uses_target(transformer, columns) -> bool:
+    """Whether a fitted per-column block's representation consumed the target ``y``.
+
+    For a separate-state / missing-indicator union the representation branch
+    decides; helper steps such as imputers and scalers never use the target.
+    """
+    separate_state = _separate_state_branches(transformer)
+    representation = separate_state[0] if separate_state is not None else transformer
+    return bool(_resolve_block_representation(representation, columns)[2])
 
 
 def _passthrough_source(columns, offset, feature_names_in):

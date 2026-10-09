@@ -7,13 +7,18 @@ policy preservation, and the security allow-list that keeps loading a spec safe
 """
 
 import json
+import math
+from typing import cast
 
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 
 from pretab import Preprocessor, PretabSerializationError, RepresentationPolicy
 from pretab.compose.serialize import SCHEMA_VERSION
+from pretab.transformers import RBFExpansionTransformer
 
 
 @pytest.fixture
@@ -103,6 +108,51 @@ def test_representation_summary_present(frame, target):
     spec = p.to_spec()
     families = {entry["family"] for entry in spec["representations"]}
     assert "rbf" in families
+
+
+@pytest.mark.parametrize("leaf_input", ["imputed", "frame"])
+def test_representation_summary_names_each_block_after_its_column(frame, target, leaf_input):
+    """Without an imputer or scaler each representation is fitted on its DataFrame
+    column; its spec raised there, and the summary silently came back empty. The
+    entries are named after the block's column instead of x0."""
+    params = {"numerical_method": "rbf", "target_aware": False, "placement_strategy": "quantile"}
+    if leaf_input == "frame":
+        params.update(numerical_imputation=None, scaling=None)
+    p = Preprocessor(**params).fit(frame, target)
+    entries = {entry["columns"][0]: entry for entry in p.to_spec()["representations"]}
+    inputs = {column: entry["input_features"] for column, entry in entries.items()}
+
+    assert p.reproducibility_report()["representations"] == {"a": "rbf", "b": "rbf", "c": "ordinal"}
+    assert inputs == {"a": ["a"], "b": ["b"], "c": ["c"]}
+    assert entries["a"]["output_features"] == [f"a_rbf{i}" for i in range(entries["a"]["output_dim"])]
+
+
+def test_representation_summary_of_a_leaf_behind_the_imputer_indicator(frame, target):
+    """Before the #62 fix, ``add_missing_indicator`` put the imputer's built-in
+    indicator in front of the representation, so a preprocessor fitted then has a
+    leaf with two inputs for a one-column block. Its summary entry names its own
+    inputs instead of failing on the single column name."""
+    X = frame.copy()
+    X.loc[::7, "a"] = np.nan
+    p = Preprocessor(numerical_method="rbf", target_aware=False, placement_strategy="quantile").fit(X, target)
+    legacy_block = Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median", add_indicator=True)),
+            ("rbf", RBFExpansionTransformer(target_aware=False, placement_strategy="quantile")),
+        ]
+    ).fit(X[["a"]], target)
+    column_transformer = p.column_transformer_
+    column_transformer.transformers_ = [
+        (name, legacy_block if columns == ["a"] else transformer, columns)
+        for name, transformer, columns in column_transformer.transformers_
+    ]
+
+    entries = {entry["columns"][0]: entry for entry in p.to_spec()["representations"]}
+
+    assert entries["a"]["input_features"] == ["x0", "x1"]
+    assert entries["b"]["input_features"] == ["b"]
+    assert p.reproducibility_report()["representations"] == {"a": "rbf", "b": "rbf", "c": "ordinal"}
+    assert isinstance(p.fingerprint_, str)
 
 
 def test_round_trip_preserves_dtype_and_output_format(frame, target):
@@ -338,3 +388,62 @@ def test_object_arrays_written_before_element_encoding_still_load():
     assert isinstance(decoded, np.ndarray)
     assert decoded.dtype == object
     assert decoded.tolist() == [["a", None], [True, 1.5]]
+
+
+# --- strict JSON: no NaN / Infinity tokens --------------------------------------------
+
+
+def _strict_loads(text):
+    def reject(token):
+        raise ValueError(f"non-standard JSON token {token}")
+
+    return json.loads(text, parse_constant=reject)
+
+
+@pytest.fixture
+def frame_with_missing():
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=80)
+    a[:6] = np.nan
+    X = pd.DataFrame({"a": a, "b": rng.exponential(size=80), "c": rng.choice(["x", "y"], 80)})
+    return X, rng.normal(size=80)
+
+
+def test_default_spec_file_is_strict_json(frame_with_missing, tmp_path):
+    """The imputers' NaN missing-value marker was written as a bare NaN token,
+    which strict JSON parsers (JavaScript, Go, Rust, ...) reject."""
+    X, y = frame_with_missing
+    pre = Preprocessor(random_state=0).fit(X, y)
+    path = tmp_path / "spec.json"
+    pre.to_spec(path)
+    text = path.read_text(encoding="utf-8")
+    assert "NaN" not in text and "Infinity" not in text
+    loaded = Preprocessor.from_spec(_strict_loads(text))
+    np.testing.assert_array_equal(np.asarray(loaded.transform(X)), np.asarray(pre.transform(X)))
+    assert loaded.fingerprint_ == pre.fingerprint_
+
+
+def test_non_finite_floats_round_trip():
+    from pretab.compose.serialize import _decode, _encode
+
+    array = np.array([[1.0, np.nan], [np.inf, -np.inf]])
+    decoded = _decode(_strict_loads(json.dumps(_encode(array), allow_nan=False)))
+    assert isinstance(decoded, np.ndarray)
+    np.testing.assert_array_equal(decoded, array)
+    assert decoded.dtype == array.dtype
+    nan, neg_inf = (
+        float(cast(float, _decode(_strict_loads(json.dumps(_encode(value), allow_nan=False)))))
+        for value in (np.nan, -np.inf)
+    )
+    assert math.isnan(nan) and neg_inf == -math.inf
+
+
+def test_specs_with_bare_nan_tokens_still_load(frame_with_missing):
+    X, y = frame_with_missing
+    pre = Preprocessor(random_state=0).fit(X, y)
+    spec = json.loads(json.dumps(pre.to_spec()))
+    # Rewrite the tagged floats the way older versions wrote them: as bare NaN.
+    legacy_text = json.dumps(spec).replace('{"__float__": "nan"}', "NaN")
+    assert "NaN" in legacy_text
+    loaded = Preprocessor.from_spec(json.loads(legacy_text))
+    np.testing.assert_array_equal(np.asarray(loaded.transform(X)), np.asarray(pre.transform(X)))

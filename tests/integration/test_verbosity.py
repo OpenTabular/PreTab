@@ -120,6 +120,17 @@ def test_verbose_3_logs_internal_decisions(sample_data, caplog):
     assert "thresholds_" in debug_text or "total_output_dim_" in debug_text
 
 
+@pytest.mark.parametrize("options", [{"add_missing_indicator": True}, {"missing_policy": "separate_state"}])
+def test_verbose_3_logs_internal_decisions_of_missing_state_blocks(sample_data, caplog, options):
+    """These blocks are a FeatureUnion of the representation and the missing
+    indicator; the union itself has no fitted thresholds, so none were logged."""
+    X, y = sample_data
+    caplog.set_level(logging.DEBUG, logger="pretab")
+    Preprocessor(numerical_method="ple", verbose=3, **options).fit(X, y)
+    debug_text = "\n".join(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
+    assert "num_num1.thresholds_" in debug_text
+
+
 def test_verbose_true_behaves_like_level_1(sample_data, caplog):
     X, y = sample_data
     caplog.set_level(logging.DEBUG, logger="pretab")

@@ -7,14 +7,34 @@ warning registry de-duplicate it instead of re-firing per transformer per
 """
 
 import warnings
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
-from sklearn.utils.validation import check_array
+from sklearn.utils.validation import _check_feature_names, _check_feature_names_in, check_array
 
-from ..exceptions import DataWarning, PretabDataError
+from ..exceptions import DataWarning, PretabDataError, invalid_param_error
 
-__all__ = ["validate_2d_allow_nan"]
+__all__ = ["resolve_input_features", "validate_2d_allow_nan"]
+
+
+def resolve_input_features(estimator, input_features) -> list:
+    """Return the input feature names that a transformer's output names are built from.
+
+    Follows scikit-learn's ``get_feature_names_out`` contract: explicit
+    ``input_features`` need one entry per input feature and, when the estimator was
+    fitted on named (DataFrame) columns, must equal ``feature_names_in_``; ``None``
+    falls back to ``feature_names_in_``, else to ``x0, x1, ...``.
+    """
+    n_features_in_ = getattr(estimator, "n_features_in_", None)
+    if input_features is not None and n_features_in_ is not None and len(input_features) != n_features_in_:
+        raise invalid_param_error(
+            type(estimator).__name__,
+            "get_feature_names_out.input_features",
+            len(input_features),
+            f"must have exactly {n_features_in_} entries (one per input feature)",
+        )
+    names = cast(np.ndarray, _check_feature_names_in(estimator, input_features))
+    return [str(name) for name in names]
 
 
 def validate_2d_allow_nan(X, *, allow_nan: bool = True, reset: bool, estimator):
@@ -28,9 +48,11 @@ def validate_2d_allow_nan(X, *, allow_nan: bool = True, reset: bool, estimator):
         When True, missing values are preserved so a later imputer can handle
         them; when False, NaN/inf values raise as usual.
     reset : bool
-        When True (during ``fit``) record ``estimator.n_features_in_``; when
-        False (during ``transform``) verify the feature count matches the value
-        seen at ``fit`` and raise otherwise.
+        When True (during ``fit``) record ``estimator.n_features_in_`` and, for a
+        DataFrame, ``estimator.feature_names_in_``; when False (during
+        ``transform``) verify the feature count matches the value seen at ``fit``
+        and raise otherwise, and check the column names as scikit-learn does
+        (renamed or reordered columns raise).
     estimator : object
         The calling transformer; used for the ``n_features_in_`` side effect and
         the transform-time feature-count check.
@@ -40,6 +62,7 @@ def validate_2d_allow_nan(X, *, allow_nan: bool = True, reset: bool, estimator):
     X : ndarray of shape (n_samples, n_features)
         The validated float array.
     """
+    _check_feature_names(estimator, X, reset=reset)
     input_shape = getattr(X, "shape", None)
     original_dim = input_shape[1] if input_shape is not None and len(input_shape) == 2 else None
     ensure_all_finite: Literal["allow-nan"] | bool = "allow-nan" if allow_nan else True

@@ -19,6 +19,7 @@ from dataclasses import replace
 from typing import cast
 
 import numpy as np
+from scipy import sparse as sp
 from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.utils.validation import check_is_fitted
@@ -120,7 +121,11 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         A supervised (target-aware) PreTab transformer to cross-fit, or an
         estimator such as a :class:`~pretab.Preprocessor` or ``Pipeline`` built from
         them. A pandas DataFrame ``X`` is passed to it unchanged (each fold is a row
-        subset), so column names and dtypes are preserved.
+        subset), so column names and dtypes are preserved. For a
+        :class:`~pretab.Preprocessor`, only its target-aware blocks are refit per
+        fold: column types, category codes and the blocks that do not use ``y``
+        come from the all-data fit, so the out-of-fold features use exactly the
+        encoding of :meth:`transform`.
     n_folds : int, default=5
         Number of cross-fitting folds. Must be at least 2.
     task : {"regression", "classification"}, default="regression"
@@ -187,6 +192,21 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         check_is_fitted(self, "estimator_")
         return self.estimator_.transform(_as_2d(X))
 
+    def _fit_fold(self, X, y):
+        """Return the model that encodes one held-out fold, fit on the other rows.
+
+        A wrapped estimator that implements ``_cross_fit_fold`` (the
+        :class:`~pretab.Preprocessor`) derives the fold model from ``estimator_``
+        and refits only its target-aware parts, so the out-of-fold features share
+        the encoding ``transform`` uses. Any other estimator is cloned and refit.
+        """
+        cross_fit_fold = getattr(self.estimator_, "_cross_fit_fold", None)
+        if cross_fit_fold is not None:
+            return cast(TransformerLike, cross_fit_fold(X, y))
+        fold = cast(TransformerLike, clone(self.transformer))
+        fold.fit(X, y)
+        return fold
+
     def fit_transform(self, X, y=None):
         """Fit and return leakage-free out-of-fold features for the training data."""
         X_arr, y_arr = self._fit_full(X, y)
@@ -196,14 +216,21 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         token = _cross_fit_active.set(True)
         try:
             for train_idx, test_idx in splitter.split(X_arr, y_arr):
-                fold = cast(TransformerLike, clone(self.transformer))
-                fold.fit(_take_rows(X_arr, train_idx), y_arr[train_idx])
-                fold_out = np.asarray(fold.transform(_take_rows(X_arr, test_idx)))
+                fold = self._fit_fold(_take_rows(X_arr, train_idx), y_arr[train_idx])
+                fold_out = fold.transform(_take_rows(X_arr, test_idx))
+                if isinstance(fold_out, dict):
+                    raise IncompatibleParamsError(
+                        "Cross-fitting stacks the out-of-fold features into one array; the "
+                        "wrapped transformer returned a dict of blocks. Use output_structure="
+                        "'matrix' on a wrapped Preprocessor."
+                    )
+                fold_out = fold_out.toarray() if sp.issparse(fold_out) else np.asarray(fold_out)
                 if fold_out.shape[1] != width:
                     raise IncompatibleParamsError(
                         "Cross-fitting requires a fixed output width across folds; expected "
-                        f"{width}, got {fold_out.shape[1]}. Disable adaptive sizing on the "
-                        "wrapped transformer."
+                        f"{width}, got {fold_out.shape[1]}. The wrapped transformer's width "
+                        "depends on the training rows (e.g. adaptive sizing); fix it, for "
+                        "example by disabling adaptive sizing."
                     )
                 out[test_idx] = fold_out
         finally:
@@ -222,6 +249,10 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         if spec_fn is not None:
             base = spec_fn(input_features)
             return replace(base, uses_target=True, cross_fitted=True, n_folds=int(self.n_folds))
+        if input_features is None:
+            # Name the inputs as the wrapped estimator does, so a DataFrame fit
+            # passes its column names (not x0, x1, ...) to get_feature_names_out.
+            input_features = getattr(self.estimator_, "feature_names_in_", None)
         return super().get_representation_spec(input_features)
 
     def _representation_cross_fitting(self):

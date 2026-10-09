@@ -1,10 +1,11 @@
+import copy
 import hashlib
 import json
 import logging
 import os
 import time
 import warnings
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from scipy import sparse as sp
@@ -22,11 +23,13 @@ from .compose.feature_detection import (
 )
 from .compose.inspection import (
     block_name,
+    block_uses_target,
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
     feature_names_out,
     get_output_slices,
+    representation_leaf,
 )
 from .compose.output import (
     compute_output_report,
@@ -102,9 +105,13 @@ _PRESET_PARAM_DEFAULTS = {
 
 
 def _spec_json(spec: dict, **kwargs) -> str:
-    """Serialize a spec to JSON text, raising a typed error for unsupported state."""
+    """Serialize a spec to strict JSON text, raising a typed error for unsupported state.
+
+    Non-finite floats are tagged by the encoder, so ``allow_nan=False`` keeps bare
+    ``NaN`` / ``Infinity`` tokens (rejected by strict JSON parsers) out of the spec.
+    """
     try:
-        return json.dumps(spec, **kwargs)
+        return json.dumps(spec, allow_nan=False, **kwargs)
     except (TypeError, ValueError) as exc:
         raise PretabSerializationError(f"The fitted state cannot be written as JSON: {exc}") from exc
 
@@ -604,6 +611,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
+        # The Preprocessor wraps its own output (set_output / output_format), so the
+        # internal steps always produce plain arrays. Otherwise a global
+        # ``sklearn.set_config(transform_output="pandas")`` reaches them: the sparse
+        # OneHotEncoder refuses pandas output, and mixed float / bool indicator
+        # blocks are stacked into an object-dtype frame.
+        self.column_transformer_.set_output(transform="default")
         # ColumnTransformer.fit runs fit_transform internally; keep the training
         # output to resolve output_format="auto" once, from the training density.
         training_output = self.column_transformer_.fit_transform(self._column_transformer_input(X), y)
@@ -668,15 +681,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         check_is_fitted(self)
 
-        # Array columns are matched by position, so a different width can never be
-        # routed correctly; an extra column would silently shift or drop features.
-        if isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[1] != self.n_features_in_:
-            raise PretabDataError(
-                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
-                f"{self.n_features_in_} features as input."
-            )
-
-        X = to_dataframe(X, copy=True)
+        X = self._align_input(X)
 
         if self.missing_policy == "error":
             self._reject_missing(X)
@@ -881,6 +886,85 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 dims[self._input_label(columns[0])] = width
         return dims
 
+    def _align_input(self, X):
+        """Return ``X`` as a DataFrame whose columns line up with the fitted columns.
+
+        A NumPy array is matched by position. Once the preprocessor was fitted on
+        named columns, an array of the fitted width takes those column labels
+        (numeric columns of an object array are re-inferred), and a DataFrame
+        passed to a preprocessor fitted on an array is matched by position too --
+        both with scikit-learn's usual warning about the missing or unexpected
+        feature names. Any other DataFrame is matched by column label.
+
+        Raises
+        ------
+        PretabDataError
+            If array-like input matched by position has a different number of
+            columns than seen during ``fit``: it could never be routed correctly.
+        """
+        fitted_labels = getattr(self.column_transformer_, "feature_names_in_", None)
+        positional_labels = [f"feature_{i}" for i in range(self.n_features_in_)]
+        fitted_on_array = (
+            not hasattr(self, "feature_names_in_")
+            and fitted_labels is not None
+            and list(fitted_labels) == positional_labels
+        )
+
+        is_array = isinstance(X, np.ndarray)
+        X = to_dataframe(X, copy=True)
+        if not (is_array or (fitted_on_array and list(X.columns) != positional_labels)):
+            return X
+        if X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
+                f"{self.n_features_in_} features as input."
+            )
+        if fitted_labels is None or list(X.columns) == list(fitted_labels):
+            return X
+        if hasattr(self, "feature_names_in_"):
+            warnings.warn(
+                f"X does not have valid feature names, but {type(self).__name__} was fitted with feature names",
+                UserWarning,
+                stacklevel=3,
+            )
+        elif not is_array:
+            warnings.warn(
+                f"X has feature names, but {type(self).__name__} was fitted without feature names",
+                UserWarning,
+                stacklevel=3,
+            )
+        X = X.set_axis(list(fitted_labels), axis=1)
+        return X.infer_objects() if is_array else X
+
+    def _cross_fit_fold(self, X, y):
+        """Return a copy of this fit whose target-aware blocks are refit on ``(X, y)``.
+
+        Used by :class:`~pretab.CrossFittedTransformer` for its out-of-fold
+        features. Only the blocks that consume the target are refit on the fold;
+        column types, category vocabularies and every other block are shared
+        with this all-data fit, so an out-of-fold row is encoded exactly like
+        ``transform`` encodes it, except that no target-aware placement has seen
+        that row's target. Refitting the whole preprocessor per fold would
+        re-detect column types and relearn categories on fewer rows, shifting
+        integer codes and one-hot columns between the folds and ``transform``.
+        """
+        check_is_fitted(self)
+        X_ct = self._column_transformer_input(self._align_input(X))
+        column_transformer = copy.copy(self.column_transformer_)
+        column_transformer.transformers_ = [
+            (
+                name,
+                cast(Any, clone(transformer)).fit(X_ct[list(columns)], y)
+                if name != "remainder" and block_uses_target(transformer, columns)
+                else transformer,
+                columns,
+            )
+            for name, transformer, columns in self.column_transformer_.transformers_
+        ]
+        fold = copy.copy(self)
+        fold.column_transformer_ = column_transformer
+        return fold
+
     @staticmethod
     def _column_transformer_input(X):
         """Adapt a frame to what the internal ColumnTransformer expects.
@@ -1065,7 +1149,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
         for step_name, transformer, columns in self.column_transformer_.transformers_:
             name = block_name(step_name, columns)
-            last_step = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
+            last_step = representation_leaf(transformer)
             for attr in (
                 "thresholds_",
                 "knots_",
