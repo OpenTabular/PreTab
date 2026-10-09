@@ -10,7 +10,7 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 
-from ..core.validation import is_polars_frame
+from ..core.validation import is_polars_frame, polars_to_pandas
 from ..exceptions import PretabDataError, invalid_param_error
 
 __all__ = [
@@ -20,26 +20,6 @@ __all__ = [
     "to_dataframe",
     "with_string_labels",
 ]
-
-
-def _polars_to_pandas(X) -> pd.DataFrame:
-    """Convert a polars DataFrame to pandas, keeping column names, order and dtypes.
-
-    ``polars.DataFrame.to_pandas`` requires pyarrow, which neither polars nor
-    PreTab depends on, so each column goes through ``Series.to_numpy`` instead:
-    integer, unsigned, float, boolean and temporal columns keep their NumPy
-    dtype (an integer column with nulls becomes float with NaN, as in pandas),
-    while string, categorical and enum columns -- and boolean columns with nulls
-    -- become ``object`` columns. Their nulls arrive as ``None`` and are mapped
-    to ``NaN``, the missing marker the imputers and missing indicators recognize.
-    """
-    columns = {}
-    for column in X.get_columns():
-        values = column.to_numpy()
-        if values.dtype == object:
-            values = np.where(pd.isna(values), np.nan, values)
-        columns[column.name] = values
-    return pd.DataFrame(columns)
 
 
 def has_column_labels(X) -> bool:
@@ -76,7 +56,7 @@ def to_dataframe(X, *, copy: bool = False) -> pd.DataFrame:
     if isinstance(X, dict):
         X = pd.DataFrame(X)
     elif is_polars_frame(X):
-        X = _polars_to_pandas(X)
+        X = polars_to_pandas(X)
     elif not has_column_labels(X):
         X = np.asarray(X)
         if X.ndim != 2:

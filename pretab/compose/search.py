@@ -21,7 +21,7 @@ from sklearn.utils.metaestimators import available_if
 from sklearn.utils.validation import _check_method_params, check_is_fitted
 
 from ..core._typing import PredictorLike
-from ..core.validation import is_polars_frame
+from ..core.validation import is_polars_frame, polars_to_pandas
 from ..exceptions import InvalidParamError
 from ..preprocessor import Preprocessor
 
@@ -31,13 +31,11 @@ __all__ = ["RepresentationSearchCV"]
 def _row_subset(data, idx):
     """Return the rows of ``data`` at positions ``idx`` for arrays or frames.
 
-    A pandas or polars frame stays a frame, so each fold's Preprocessor detects
-    the same column types as the final refit on all of ``X``.
+    A pandas frame stays a frame, so each fold's Preprocessor detects the same
+    column types as the final refit on all of ``X``.
     """
     if hasattr(data, "iloc"):
         return data.iloc[idx]
-    if is_polars_frame(data):
-        return data[idx]
     return np.asarray(data)[idx]
 
 
@@ -160,6 +158,10 @@ class RepresentationSearchCV(BaseEstimator):
         if y is None:
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
         y_arr = np.asarray(y).ravel()
+        if is_polars_frame(X):
+            # Converted once, so every fold's rows carry the dtypes of the whole frame,
+            # as a pandas frame's do (see polars_to_pandas).
+            X = polars_to_pandas(X)
         n_samples = X.shape[0] if hasattr(X, "shape") else len(X)
         # As in scikit-learn's searches: per-sample fit params are made indexable
         # so each fold can take its training rows.

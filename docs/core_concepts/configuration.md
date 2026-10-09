@@ -53,9 +53,10 @@ overrides, rather than guessing the column order.
 
 ## Polars DataFrame input
 
-A `polars.DataFrame` is accepted wherever a pandas `DataFrame` is, so a scikit-learn
-`Pipeline` configured with `set_output(transform="polars")` can hand its polars output straight
-to the `Preprocessor`. PreTab reads the frame through pandas with the same column names, order
+A `polars.DataFrame` is accepted as input to the `Preprocessor`, `RepresentationSearchCV` and
+`CrossFittedTransformer` wherever a pandas `DataFrame` is (temporal columns are not supported),
+so a scikit-learn `Pipeline` configured with `set_output(transform="polars")` can hand its
+polars output straight to the `Preprocessor`. PreTab reads the frame through pandas with the same column names, order
 and dtypes, then detects column types as usual: `Float*` columns are numerical, `Int*` /
 `UInt*` columns follow the integer cardinality rule (an integer column with nulls becomes
 float, as in pandas), and `String`, `Categorical`, `Enum` and `Boolean` columns are

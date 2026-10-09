@@ -144,3 +144,53 @@ def test_cross_fitted_preprocessor_on_polars_matches_pandas(frames):
         np.asarray(from_polars.transform(polars_frame), dtype=float),
         np.asarray(from_pandas.transform(pandas_frame), dtype=float),
     )
+
+
+@pytest.fixture
+def frames_with_one_null_integer():
+    """An integer column with a single null, as polars and as the pandas frame it converts to."""
+    rng = np.random.default_rng(0)
+    kids = rng.integers(0, 5, 300).astype(float)
+    kids[7] = np.nan
+    x = rng.normal(size=300)
+    polars_frame = pl.DataFrame(
+        {"x": x, "kids": pl.Series([None if np.isnan(v) else int(v) for v in kids], dtype=pl.Int64)}
+    )
+    # As a whole the column converts to float (with NaN), so it is numerical.
+    pandas_frame = pd.DataFrame({"x": x, "kids": kids})
+    return pandas_frame, polars_frame, x + np.nan_to_num(kids) + rng.normal(scale=0.1, size=300)
+
+
+def test_search_converts_a_polars_frame_once(frames_with_one_null_integer):
+    """Rows of a fold without the null would convert to an int column and be
+    detected as categorical, unlike the refit on the whole frame."""
+    from sklearn.linear_model import Ridge
+    from sklearn.model_selection import KFold
+
+    from pretab import RepresentationSearchCV
+
+    pandas_frame, polars_frame, y = frames_with_one_null_integer
+
+    def search(X):
+        params = {"cv": KFold(5, shuffle=True, random_state=0), "random_state": 0}
+        return RepresentationSearchCV(Ridge(), ["minmax"], **params).fit(X, y)
+
+    assert search(polars_frame).cv_results_ == pytest.approx(search(pandas_frame).cv_results_)
+
+
+def test_cross_fitting_converts_a_polars_frame_once(frames_with_one_null_integer):
+    """The clone-and-refit path takes every fold's rows from one conversion."""
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import FunctionTransformer
+
+    from pretab import CrossFittedTransformer
+
+    pandas_frame, polars_frame, y = frames_with_one_null_integer
+
+    def cross_fit(X):
+        pipeline = make_pipeline(
+            FunctionTransformer(feature_names_out="one-to-one"), Preprocessor(numerical_method="minmax")
+        )
+        return np.asarray(CrossFittedTransformer(pipeline, n_folds=5, random_state=0).fit_transform(X, y), dtype=float)
+
+    np.testing.assert_allclose(cross_fit(polars_frame), cross_fit(pandas_frame))

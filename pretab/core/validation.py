@@ -11,11 +11,12 @@ import warnings
 from typing import Literal, cast
 
 import numpy as np
+import pandas as pd
 from sklearn.utils.validation import _check_feature_names, _check_feature_names_in, check_array
 
 from ..exceptions import DataWarning, PretabDataError, invalid_param_error
 
-__all__ = ["is_polars_frame", "resolve_input_features", "validate_2d_allow_nan"]
+__all__ = ["is_polars_frame", "polars_to_pandas", "resolve_input_features", "validate_2d_allow_nan"]
 
 
 def is_polars_frame(X) -> bool:
@@ -26,6 +27,30 @@ def is_polars_frame(X) -> bool:
     """
     polars = sys.modules.get("polars")
     return polars is not None and isinstance(X, polars.DataFrame)
+
+
+def polars_to_pandas(X) -> pd.DataFrame:
+    """Convert a polars DataFrame to pandas, keeping column names, order and dtypes.
+
+    ``polars.DataFrame.to_pandas`` requires pyarrow, which neither polars nor
+    PreTab depends on, so each column goes through ``Series.to_numpy`` instead:
+    integer, unsigned, float, boolean and temporal columns keep their NumPy
+    dtype (an integer column with nulls becomes float with NaN, as in pandas),
+    while string, categorical and enum columns -- and boolean columns with nulls
+    -- become ``object`` columns. Their nulls arrive as ``None`` and are mapped
+    to ``NaN``, the missing marker the imputers and missing indicators recognize.
+
+    Convert a frame once and take row subsets of the result: converted on its
+    own, a subset can get another dtype (an integer column with a null is float
+    as a whole, but int in a subset without the null).
+    """
+    columns = {}
+    for column in X.get_columns():
+        values = column.to_numpy()
+        if values.dtype == object:
+            values = np.where(pd.isna(values), np.nan, values)
+        columns[column.name] = values
+    return pd.DataFrame(columns)
 
 
 def resolve_input_features(estimator, input_features) -> list:
