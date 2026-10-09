@@ -20,15 +20,19 @@ trimming the candidate set to fit within ``[min_count, max_count]``.
 """
 
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from ..exceptions import IncompatibleParamsError, OptionalDependencyError
-from .knots import quantile_knots, select_knots
+from .knots import quantile_knots, select_knots, uniform_knots
 
 Task = Literal["regression", "classification"]
+
+# Magnitude bound of LightGBM's "split at zero" sentinel threshold (its
+# ``kZeroThreshold`` is 1e-35, reported as the float32 value ~1.0000000180e-35).
+_LIGHTGBM_ZERO_THRESHOLD = 1e-34
 
 
 class BaseLocationSelector(ABC):
@@ -97,11 +101,11 @@ class BaseLocationSelector(ABC):
         y_valid = y[valid_mask]
 
         if len(x_valid) < self.min_samples_floor:
-            return quantile_knots(x_valid, min_count)
+            return np.array(self._supplement([], x_valid, min_count))
 
         points, context = self._ordered_candidates(x_valid, y_valid, task)
         if len(points) == 0:
-            return quantile_knots(x_valid, min_count)
+            return np.array(self._supplement([], x_valid, min_count))
 
         locations = self._enforce_spacing(points, x_valid)
 
@@ -116,10 +120,11 @@ class BaseLocationSelector(ABC):
     def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         """Fit a model and return candidate locations plus trimming context.
 
-        The candidates must be returned in the selector's preferred order (the
-        order :meth:`_enforce_spacing` should honour): location order for a
-        single tree, gain-descending order for a boosted ensemble. ``context`` is
-        an opaque object passed straight through to :meth:`_trim_over_max`.
+        The candidates must be returned in the selector's preferred order -- the
+        order :meth:`_enforce_spacing` honours, which keeps the earlier of two
+        candidates that are too close: impurity-decrease order for a single tree,
+        gain-descending order for a boosted ensemble. ``context`` is an opaque
+        object passed straight through to :meth:`_trim_over_max`.
         """
         raise NotImplementedError
 
@@ -131,9 +136,10 @@ class BaseLocationSelector(ABC):
     def _enforce_spacing(self, split_points: list[float], x: np.ndarray) -> list[float]:
         """Drop locations closer than ``min_location_spacing`` of the range.
 
-        Compares each candidate against every already-kept location so the filter
-        is order-independent and honours both ascending (CART) and gain-descending
-        (LightGBM) ordering.
+        Compares each candidate against every already-kept location, so of two
+        candidates that are too close the one earlier in ``split_points`` -- the
+        more important one, given the importance-descending order both selectors
+        produce -- is kept.
         """
         if len(split_points) <= 1:
             return split_points
@@ -149,22 +155,44 @@ class BaseLocationSelector(ABC):
         return spaced
 
     def _supplement(self, existing: list[float], x: np.ndarray, target_count: int) -> list[float]:
-        """Top up an under-filled location set with quantile locations.
+        """Top up an under-filled location set to ``target_count`` distinct locations.
 
         Keeps every existing (selector-found) location and fills only the
-        shortfall with quantile candidates, rather than truncating the union
-        (which would preferentially drop the largest existing values).
+        shortfall, rather than truncating the union (which would preferentially
+        drop the largest existing values). Candidates lie strictly inside the
+        range of ``x`` and keep ``min_location_spacing`` from every kept location:
+        evenly spread quantile locations first, then uniform ones. On a tied or
+        discrete feature the quantiles collapse onto a few values (often the range
+        boundary), and the uniform candidates still provide distinct interior
+        locations for any feature with a positive range. Only when the requested
+        count is too dense for the spacing are the remaining uniform locations
+        added without it.
         """
         missing = target_count - len(existing)
         if missing <= 0:
             return existing
 
-        existing_set = set(existing)
-        candidates = [c for c in quantile_knots(x, target_count).tolist() if c not in existing_set]
-        combined = sorted(existing_set | set(candidates[:missing]))
-        if len(combined) > target_count:
-            combined = select_knots(np.array(combined), target_count).tolist()
-        return combined
+        x = np.asarray(x, dtype=float).ravel()
+        x_min, x_max = float(x.min()), float(x.max())
+        if x_max <= x_min:
+            # A zero-range feature has no interior; keep the historical repeated
+            # location so the requested count (and output width) still holds.
+            return sorted([*existing, *quantile_knots(x, missing).tolist()])
+
+        min_distance = self.min_location_spacing * (x_max - x_min)
+        kept = sorted(float(location) for location in existing)
+        for candidates in (quantile_knots(x, target_count), uniform_knots(x, target_count)):
+            eligible = []
+            for candidate in np.unique(candidates[(candidates > x_min) & (candidates < x_max)]):
+                if all(abs(candidate - other) >= min_distance for other in (*kept, *eligible)):
+                    eligible.append(float(candidate))
+            kept = sorted(kept + select_knots(np.array(eligible), missing).tolist())
+            missing = target_count - len(kept)
+            if missing <= 0:
+                return kept
+
+        leftovers = np.setdiff1d(uniform_knots(x, target_count), kept)
+        return sorted(kept + select_knots(leftovers, missing).tolist())
 
 
 class CARTLocationSelector(BaseLocationSelector):
@@ -172,8 +200,9 @@ class CARTLocationSelector(BaseLocationSelector):
 
     A ``DecisionTreeRegressor`` or ``DecisionTreeClassifier`` is fitted to the
     feature against the target, and its split thresholds become the candidate
-    locations. Candidates are spaced out, and if there are too many they are
-    ranked by weighted impurity decrease so the most informative splits are kept.
+    locations. Candidates are ranked by weighted impurity decrease, so the most
+    informative splits are kept both when two candidates are too close to each
+    other and when there are too many.
 
     Parameters
     ----------
@@ -222,62 +251,50 @@ class CARTLocationSelector(BaseLocationSelector):
             )
 
         tree.fit(x_valid, y_valid)
-        split_points = self._extract_split_points(tree, x_valid)
-        return split_points, tree
+        importance = self._split_importance(tree, x_valid)
+        # Most informative split first, so that when two candidates are closer
+        # than ``min_location_spacing`` the spacing filter keeps the stronger one.
+        return self._rank(importance, importance), importance
 
     def _trim_over_max(self, points: list[float], context: object, max_count: int) -> list[float]:
-        return self._select_top_locations(points, context, max_count)
+        importance = cast(dict[float, float], context)
+        return sorted(self._rank(points, importance)[:max_count])
 
-    def _extract_split_points(self, tree, x: np.ndarray) -> list[float]:
-        """Collect in-range split thresholds from a fitted decision tree."""
+    @staticmethod
+    def _rank(points, importance: dict[float, float]) -> list[float]:
+        """Order ``points`` by decreasing impurity decrease (ties by location)."""
+        return sorted(points, key=lambda point: (-importance[point], point))
+
+    def _split_importance(self, tree, x: np.ndarray) -> dict[float, float]:
+        """Map each in-range split threshold to its weighted impurity decrease.
+
+        In a single-feature tree every threshold occurs at most once: after a split
+        at ``t`` no descendant holds samples on both sides of ``t``.
+        """
         tree_structure = tree.tree_
-        split_points = []
-
         x_min, x_max = float(x.min()), float(x.max())
+        split_importance: dict[float, float] = {}
 
         for node_id in range(tree_structure.node_count):
-            is_split = tree_structure.children_left[node_id] != tree_structure.children_right[node_id]
-            if not is_split:
+            left_child = tree_structure.children_left[node_id]
+            right_child = tree_structure.children_right[node_id]
+            if left_child == right_child or tree_structure.feature[node_id] != 0:
                 continue
-            if tree_structure.feature[node_id] != 0:
-                continue
-            threshold = tree_structure.threshold[node_id]
-            if x_min < threshold < x_max:
-                split_points.append(threshold)
-
-        return sorted(set(split_points))
-
-    def _select_top_locations(self, candidates: list[float], tree, max_count: int) -> list[float]:
-        """Keep the locations whose splits reduce impurity the most."""
-        if len(candidates) <= max_count:
-            return candidates
-
-        tree_structure = tree.tree_
-        split_importance = {}
-
-        for node_id in range(tree_structure.node_count):
-            is_split = tree_structure.children_left[node_id] != tree_structure.children_right[node_id]
-            if not is_split:
-                continue
-
-            threshold = tree_structure.threshold[node_id]
-            if threshold not in candidates:
+            threshold = float(tree_structure.threshold[node_id])
+            if not x_min < threshold < x_max:
                 continue
 
             n_samples = tree_structure.n_node_samples[node_id]
             impurity = tree_structure.impurity[node_id]
-
-            left_child = tree_structure.children_left[node_id]
-            right_child = tree_structure.children_right[node_id]
             n_left = tree_structure.n_node_samples[left_child]
             n_right = tree_structure.n_node_samples[right_child]
             impurity_left = tree_structure.impurity[left_child]
             impurity_right = tree_structure.impurity[right_child]
+            split_importance[threshold] = float(
+                n_samples * impurity - (n_left * impurity_left + n_right * impurity_right)
+            )
 
-            split_importance[threshold] = n_samples * impurity - (n_left * impurity_left + n_right * impurity_right)
-
-        top = sorted(split_importance, key=lambda k: split_importance[k], reverse=True)[:max_count]
-        return sorted(top)
+        return split_importance
 
 
 class LightGBMLocationSelector(BaseLocationSelector):
@@ -338,9 +355,21 @@ class LightGBMLocationSelector(BaseLocationSelector):
     def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         lgb = self._import_lightgbm()
 
+        if task == "regression":
+            objective = {"objective": "regression", "metric": "rmse"}
+        else:
+            # LightGBM needs integer class codes: its binary objective treats every
+            # label > 0 as positive and it cannot read string labels.
+            classes, y_valid = np.unique(y_valid, return_inverse=True)
+            if len(classes) < 2:
+                return [], None
+            if len(classes) == 2:
+                objective = {"objective": "binary", "metric": "binary_logloss"}
+            else:
+                objective = {"objective": "multiclass", "metric": "multi_logloss", "num_class": len(classes)}
+
         params = {
-            "objective": "regression" if task == "regression" else "binary",
-            "metric": "rmse" if task == "regression" else "binary_logloss",
+            **objective,
             "num_leaves": 2**self.max_depth,
             "max_depth": self.max_depth,
             "learning_rate": self.learning_rate,
@@ -370,16 +399,39 @@ class LightGBMLocationSelector(BaseLocationSelector):
 
     def _extract_split_points_with_gains(self, model, x: np.ndarray) -> dict[float, float]:
         """Collect split thresholds and their cumulative gains from a model."""
+        x = np.asarray(x, dtype=float).ravel()
         x_min, x_max = float(x.min()), float(x.max())
         split_importance: dict[float, float] = {}
 
+        # LightGBM reports a split at zero as the sentinel threshold +/-1e-35
+        # rather than as a bin midpoint. Map it to the midpoint between the
+        # values the split separates, the location CART would report.
+        zero_splits = {
+            1.0: self._midpoint(x[x <= 0], x[x > 0]),
+            -1.0: self._midpoint(x[x < 0], x[x >= 0]),
+        }
+
         model_dict = model.dump_model()
         for tree_info in model_dict["tree_info"]:
-            self._traverse_tree(tree_info["tree_structure"], split_importance, x_min, x_max)
+            self._traverse_tree(tree_info["tree_structure"], split_importance, x_min, x_max, zero_splits)
 
         return split_importance
 
-    def _traverse_tree(self, node: dict, split_importance: dict, x_min: float, x_max: float):
+    @staticmethod
+    def _midpoint(left: np.ndarray, right: np.ndarray) -> float | None:
+        """Midpoint between the largest ``left`` and the smallest ``right`` value."""
+        if left.size == 0 or right.size == 0:
+            return None
+        return float((left.max() + right.min()) / 2.0)
+
+    def _traverse_tree(
+        self,
+        node: dict,
+        split_importance: dict,
+        x_min: float,
+        x_max: float,
+        zero_splits: dict[float, float | None] | None = None,
+    ):
         """Recursively accumulate split gains for the single feature."""
         if "split_feature" not in node:
             return
@@ -387,10 +439,12 @@ class LightGBMLocationSelector(BaseLocationSelector):
         if node["split_feature"] == 0:
             threshold = node["threshold"]
             gain = node.get("split_gain", 0.0)
-            if x_min < threshold < x_max:
+            if zero_splits is not None and abs(threshold) <= _LIGHTGBM_ZERO_THRESHOLD:
+                threshold = zero_splits[1.0 if threshold >= 0 else -1.0]
+            if threshold is not None and x_min < threshold < x_max:
                 split_importance[threshold] = split_importance.get(threshold, 0.0) + gain
 
         if "left_child" in node:
-            self._traverse_tree(node["left_child"], split_importance, x_min, x_max)
+            self._traverse_tree(node["left_child"], split_importance, x_min, x_max, zero_splits)
         if "right_child" in node:
-            self._traverse_tree(node["right_child"], split_importance, x_min, x_max)
+            self._traverse_tree(node["right_child"], split_importance, x_min, x_max, zero_splits)

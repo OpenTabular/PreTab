@@ -1,3 +1,5 @@
+from typing import cast
+
 import numpy as np
 import pytest
 
@@ -160,3 +162,134 @@ def test_supplement_preserves_high_end_split_end_to_end():
     locations = CARTLocationSelector().select(xs.reshape(-1, 1), ys, task="regression", min_count=6, max_count=6)
 
     assert locations.max() > 5.0, f"expected a high-end location to survive supplementing, got {locations}"
+
+
+def _single_step(seed):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(0, 10, 1000)
+    step = rng.uniform(2, 8)
+    y = np.where(x > step, 1.0, 0.0) + 0.5 * rng.normal(size=1000)
+    return x.reshape(-1, 1), y
+
+
+def test_cart_spacing_keeps_the_dominant_split_over_a_weak_neighbour():
+    """Regression guard for issue #70: candidates were spaced in ascending location
+    order, so a weak split just below the root split evicted it."""
+    from sklearn.tree import DecisionTreeRegressor
+
+    X, y = _single_step(34)
+    root = DecisionTreeRegressor(max_depth=1).fit(X, y).tree_.threshold[0]
+    locations = CARTLocationSelector().select(X, y, task="regression", min_count=6, max_count=6)
+    assert np.isclose(locations, root).any(), f"root split {root:.3f} missing from {locations}"
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_cart_keeps_the_root_split_of_a_single_step_target(seed):
+    from sklearn.tree import DecisionTreeRegressor
+
+    X, y = _single_step(seed)
+    root = DecisionTreeRegressor(max_depth=1).fit(X, y).tree_.threshold[0]
+    locations = CARTLocationSelector().select(X, y, task="regression", min_count=6, max_count=6)
+    assert np.isclose(locations, root).any()
+
+
+def test_cart_candidates_are_ordered_by_impurity_decrease(data):
+    X, y = data
+    selector = CARTLocationSelector()
+    candidates, context = selector._ordered_candidates(X, y, "regression")
+    importance = cast("dict[float, float]", context)
+    gains = [importance[c] for c in candidates]
+    assert gains == sorted(gains, reverse=True)
+
+
+# --- tied / discrete features (issue #57) ------------------------------------
+
+
+def _discrete(levels, n=300, seed=0):
+    rng = np.random.default_rng(seed)
+    x = rng.integers(0, levels, size=n).astype(float)
+    return x.reshape(-1, 1), (x >= 2) + rng.normal(0, 0.1, size=n)
+
+
+def _assert_distinct_interior(locations, X, count):
+    assert len(locations) == count
+    assert len(np.unique(locations)) == count
+    assert locations.min() > X.min() and locations.max() < X.max()
+
+
+@pytest.mark.parametrize("selector_cls", [CARTLocationSelector, LightGBMLocationSelector])
+@pytest.mark.parametrize("levels", [2, 3, 5])
+def test_selector_tops_up_tied_features_with_distinct_interior_locations(selector_cls, levels):
+    """Regression guard for issue #57: the quantile top-up collapsed onto the tied
+    values and the range boundary, returning too few / duplicate locations."""
+    if selector_cls is LightGBMLocationSelector:
+        pytest.importorskip("lightgbm")
+    X, y = _discrete(levels)
+    locations = selector_cls().select(X, y, task="regression", min_count=8, max_count=8)
+    _assert_distinct_interior(locations, X, 8)
+
+
+def test_supplement_on_tied_data_respects_spacing_and_count():
+    x = np.repeat([0.0, 1.0, 2.0], 50)
+    selector = CARTLocationSelector()
+    result = selector._supplement([0.5], x, 6)
+    assert len(result) == 6
+    assert 0.5 in result
+    assert min(np.diff(result)) >= selector.min_location_spacing * 2.0
+    assert min(result) > 0.0 and max(result) < 2.0
+
+
+def test_supplement_fills_dense_requests_beyond_the_spacing():
+    x = np.linspace(0.0, 1.0, 1000)
+    result = CARTLocationSelector()._supplement([], x, 150)
+    assert len(result) == 150
+    assert len(np.unique(result)) == 150
+
+
+def test_small_sample_fallback_on_tied_data_is_distinct_and_interior():
+    X = np.array([[0.0], [0.0], [0.0], [1.0], [1.0]])
+    locations = CARTLocationSelector().select(X, np.arange(5.0), min_count=3, max_count=3)
+    _assert_distinct_interior(locations, X, 3)
+
+
+def test_constant_feature_fallback_keeps_the_requested_count():
+    X = np.full((40, 1), 3.0)
+    locations = CARTLocationSelector().select(X, np.arange(40.0), min_count=4, max_count=4)
+    np.testing.assert_array_equal(locations, np.full(4, 3.0))
+
+
+def test_lightgbm_zero_split_sentinel_maps_to_the_bin_midpoint():
+    pytest.importorskip("lightgbm")
+    rng = np.random.default_rng(0)
+    x = rng.integers(0, 5, size=300).astype(float)
+    y = (x >= 1) + rng.normal(0, 0.1, size=300)
+    locations = LightGBMLocationSelector().select(x.reshape(-1, 1), y, min_count=4, max_count=4)
+    # The 0-vs-positive split is reported by LightGBM as threshold 1e-35.
+    assert 0.5 in locations
+    assert (np.abs(locations) > 1e-30).all()
+
+
+@pytest.mark.parametrize(
+    "make_target",
+    [
+        pytest.param(lambda x: np.where(x < 0.9, 1, 2), id="labels-1-2"),
+        pytest.param(lambda x: np.digitize(x, [0.1, 0.9]), id="three-classes"),
+        pytest.param(lambda x: np.where(x < 0.9, "no", "yes"), id="string-labels"),
+    ],
+)
+def test_lightgbm_classification_places_a_location_at_the_class_boundary(make_target):
+    """Regression guard for issue #61: the binary objective on raw labels lost the
+    supervision for non-0/1, multiclass and string targets."""
+    pytest.importorskip("lightgbm")
+    x = np.random.default_rng(0).uniform(0, 1, size=1000)
+    locations = LightGBMLocationSelector().select(
+        x.reshape(-1, 1), make_target(x), task="classification", min_count=2, max_count=2
+    )
+    assert np.abs(locations - 0.9).min() < 0.01, locations
+
+
+def test_lightgbm_classification_with_a_single_class_falls_back():
+    pytest.importorskip("lightgbm")
+    x = np.linspace(0, 1, 200).reshape(-1, 1)
+    locations = LightGBMLocationSelector().select(x, np.ones(200), task="classification", min_count=2, max_count=2)
+    assert len(locations) == 2

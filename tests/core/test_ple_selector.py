@@ -95,3 +95,15 @@ def test_lightgbm_selector_places_thresholds(data):
     t = PLETransformer(output_dim=5, task="regression", placement_strategy="lightgbm").fit(X, y)
     assert t.n_bins_per_feature_ == [5]
     assert np.all(np.diff(t.thresholds_[0]) > 0)
+
+
+@pytest.mark.parametrize("levels", [2, 3, 4, 5, 6])
+def test_ple_keeps_output_dim_and_no_constant_columns_on_discrete_features(levels):
+    """Regression guard for issue #57: thresholds on the range boundary produced a
+    constant column and a narrower-than-requested output."""
+    rng = np.random.default_rng(levels)
+    x = rng.integers(0, levels, size=400).astype(float).reshape(-1, 1)
+    y = np.sin(x[:, 0]) + rng.normal(0, 0.3, size=400)
+    out = PLETransformer(output_dim=7).fit(x, y).transform(x)
+    assert out.shape[1] == 7
+    assert (out.std(axis=0) > 0).all()

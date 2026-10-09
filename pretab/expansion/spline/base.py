@@ -23,9 +23,8 @@ from ...core.base import BasePreTabTransformer
 from ...core.knots import (
     basis_to_knots,
     generate_internal_knots,
-    quantile_knots,
     select_knots,
-    uniform_knots,
+    supplement_interior_knots,
 )
 from ...core.parameters import UNSET, validate_placement
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
@@ -195,30 +194,22 @@ class BaseSplineTransformer(BasePreTabTransformer):
     def _adjust_internal_knots(
         self, x: np.ndarray, internal_knots: np.ndarray, min_knots: int, max_knots: int
     ) -> np.ndarray:
-        """Clip, deduplicate and rebalance internal knots to the allowed count."""
-        internal_knots = np.clip(internal_knots, x.min(), x.max())
-        internal_knots = np.unique(np.sort(internal_knots))
-        if len(internal_knots) < min_knots:
-            internal_knots = self._supplement_knots(x, internal_knots, min_knots)
+        """Restrict, deduplicate and rebalance internal knots to the allowed count.
+
+        Interior knots must lie strictly inside the data range and be unique: a
+        knot on the boundary or a repeated knot collapses a basis function's
+        support to a point, giving a dead column (and, at the boundary, all-zero
+        B/M-spline rows at ``x_max``). Such knots are dropped and the set is
+        topped up to ``min_knots`` before an overfull set is trimmed.
+        """
+        internal_knots = self._supplement_knots(x, internal_knots, min_knots)
         if len(internal_knots) > max_knots:
             internal_knots = select_knots(internal_knots, max_knots)
         return internal_knots
 
     def _supplement_knots(self, x: np.ndarray, internal_knots: np.ndarray, target_count: int) -> np.ndarray:
-        """Add quantile and uniform candidates until ``target_count`` knots exist."""
-        if target_count <= len(internal_knots):
-            return internal_knots
-
-        candidates = [internal_knots]
-        if target_count > 0:
-            candidates.append(quantile_knots(x, target_count))
-            candidates.append(uniform_knots(x, target_count))
-
-        combined = np.unique(np.concatenate(candidates))
-        combined = np.sort(combined)
-        if len(combined) < target_count:
-            combined = uniform_knots(x, target_count)
-        return select_knots(np.asarray(combined), target_count)
+        """Keep the strictly interior, unique knots and top them up to ``target_count``."""
+        return supplement_interior_knots(x, internal_knots, target_count)
 
     def _column_knots(
         self,
@@ -248,15 +239,17 @@ class BaseSplineTransformer(BasePreTabTransformer):
                 )
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
         elif selector is not None:
-            selected = selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)
+            # Search exactly the window this feature needs, so the selector's own
+            # importance ranking picks the knots instead of a positional trim.
+            min_knots = min(min_knots, max_knots)
+            selected = selector.get_knot_locations(
+                x_valid.reshape(-1, 1), y_valid, task=self.task, min_knots=min_knots, max_knots=max_knots
+            )
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(selected), min_knots, max_knots)
         else:
             n_internal = self._basis_to_knots(n_basis)
             internal_knots = self._generate_knots(x_valid, n_internal, strategy)
             internal_knots = self._adjust_internal_knots(x_valid, internal_knots, min_knots, max_knots)
-
-        internal_knots = np.clip(internal_knots, x_min, x_max)
-        internal_knots = np.unique(np.sort(internal_knots))
 
         boundary_left = np.repeat(x_min, self.degree + 1)
         boundary_right = np.repeat(x_max, self.degree + 1)

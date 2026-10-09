@@ -75,45 +75,45 @@ class ISplineTransformer(BaseSplineTransformer):
     def _feature_suffix(self) -> str:
         return "is"
 
-    def _ispline_basis(self, x: np.ndarray, knots: np.ndarray, basis_idx: int) -> np.ndarray:
+    def _ispline_columns(self, x: np.ndarray, knots: np.ndarray) -> np.ndarray:
         """
-        Compute a single I-spline basis function.
+        Evaluate every I-spline basis function at ``x`` in closed form.
 
-        The M-spline is evaluated on a fine grid, integrated with the trapezoidal
-        rule to build a cumulative integral, then linearly interpolated at the
-        requested points and normalized by the full-range integral.
+        ``I_k(x)`` is the integral of the normalized M-spline ``M_k`` from the left
+        boundary, i.e. the antiderivative of the B-spline ``B_k`` divided by its
+        full-range integral ``(t_{k+p+1} - t_k) / (p + 1)``. The antiderivative of
+        a B-spline is itself a B-spline of degree ``p + 1``, so the basis is exact
+        for any knot spacing (a fixed quadrature grid cannot resolve basis
+        functions whose support is narrower than the grid step). Values below /
+        above the knot range are 0 / 1. A degenerate basis function with
+        zero-width support (only possible for a knot vector with a repeated
+        knot, e.g. one fitted before boundary knots were de-duplicated)
+        integrates to the step function at that knot, its limit as the support
+        shrinks.
         """
-        x_min_knot = knots[0]
-        x_max_knot = knots[-1]
+        n_coef = len(knots) - self.degree - 1
+        lower, upper = knots[0], knots[-1]
+        antiderivative = BSpline(knots, np.eye(n_coef), self.degree).antiderivative()
+        total = (knots[self.degree + 1 : self.degree + 1 + n_coef] - knots[:n_coef]) / (self.degree + 1)
+
+        x_clipped = np.clip(x, lower, upper)
+        values = antiderivative(x_clipped) - antiderivative(lower)
+        # Every basis function is fully integrated at the right boundary; pin it
+        # instead of evaluating there, where a repeated boundary knot would put
+        # the evaluation on a zero-width interval.
+        values = np.where(x_clipped[:, None] >= upper, total, values)
+        live = total > 0
+        values[:, live] = values[:, live] / total[live]
+        values[:, ~live] = (x_clipped[:, None] >= knots[:n_coef][~live]).astype(float)
+        return np.clip(values, 0.0, 1.0)
+
+    def _ispline_basis(self, x: np.ndarray, knots: np.ndarray, basis_idx: int) -> np.ndarray:
+        """Compute a single I-spline basis function (see :meth:`_ispline_columns`)."""
         n_coef = len(knots) - self.degree - 1
         if basis_idx >= n_coef:
             return np.zeros(len(x))
-
-        grid = np.linspace(x_min_knot, x_max_knot, 200)
-        coef = np.zeros(n_coef)
-        coef[basis_idx] = 1.0
-        spline = BSpline(knots, coef, self.degree, extrapolate=False)
-        m_values = np.nan_to_num(spline(grid), nan=0.0)
-
-        knot_span = knots[basis_idx + self.degree + 1] - knots[basis_idx]
-        if knot_span > 1e-10:
-            m_values = m_values * (self.degree + 1) / knot_span
-
-        cumulative = np.zeros(len(grid))
-        for i in range(1, len(grid)):
-            dx = grid[i] - grid[i - 1]
-            cumulative[i] = cumulative[i - 1] + 0.5 * (m_values[i - 1] + m_values[i]) * dx
-
-        ispline_values = np.interp(x, grid, cumulative, left=0.0, right=cumulative[-1])
-
-        max_integral = cumulative[-1]
-        if max_integral > 1e-10:
-            ispline_values = ispline_values / max_integral
-        return ispline_values
+        return self._ispline_columns(np.asarray(x, dtype=float), knots)[:, basis_idx]
 
     def _design_matrix(self, x: np.ndarray, knots: np.ndarray) -> np.ndarray:
-        n_coef = len(knots) - self.degree - 1
-        design = np.zeros((len(x), n_coef))
-        for i in range(n_coef):
-            design[:, i] = self._ispline_basis(x, knots, i)
+        design = self._ispline_columns(np.asarray(x, dtype=float), knots)
         return np.nan_to_num(design, nan=0.0)

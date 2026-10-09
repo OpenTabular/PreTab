@@ -6,6 +6,7 @@ Covers the single ``verbose`` entry point on :class:`~pretab.Preprocessor`
 :class:`~pretab.PretabWarning`.
 """
 
+import contextlib
 import io
 import logging
 import warnings
@@ -186,9 +187,30 @@ def test_set_verbosity_sets_logger_level():
     assert logger.level == logging.INFO
 
 
+@contextlib.contextmanager
+def _root_handlers(*handlers):
+    """Run with exactly ``handlers`` on the root logger (none: a plain Python process).
+
+    pytest adds its capture handlers to the root logger when a test body starts,
+    so this is used inside the test body; the original handlers are restored after.
+    """
+    root = logging.getLogger()
+    saved = root.handlers[:]
+    root.handlers = list(handlers)
+    try:
+        yield
+    finally:
+        root.handlers = saved
+
+
+def _own_handlers():
+    return [h for h in logging.getLogger("pretab").handlers if not isinstance(h, logging.NullHandler)]
+
+
 def test_configure_logging_attaches_stream_handler_when_none():
     logger = logging.getLogger("pretab")
-    configure_logging(1)
+    with _root_handlers():
+        configure_logging(1)
     assert any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.NullHandler) for h in logger.handlers)
     assert logger.level == logging.INFO
 
@@ -203,6 +225,55 @@ def test_configure_logging_respects_existing_handler():
     # A host that already owns a handler wins: no new handler, level untouched.
     assert logger.handlers == before
     assert logger.level == logging.CRITICAL
+
+
+def test_configure_logging_raises_the_level_on_later_calls():
+    """Regression guard for issue #67: the first call pinned the verbosity."""
+    with _root_handlers():
+        configure_logging(1)
+        configure_logging(2)
+    assert logging.getLogger("pretab").level == logging.DEBUG
+    assert len(_own_handlers()) == 1  # the handler is reused, never duplicated
+
+
+def test_fit_verbose_2_after_verbose_1_logs_the_feature_table(sample_data, capsys):
+    X, y = sample_data
+    with _root_handlers():
+        Preprocessor(numerical_method="ple", verbose=1).fit(X, y)
+        capsys.readouterr()
+        Preprocessor(numerical_method="ple", verbose=2).fit(X, y)
+    err = capsys.readouterr().err
+    assert "fit complete" in err
+    assert "pipeline" in err
+
+
+def test_get_feature_info_does_not_lower_a_debug_level(sample_data):
+    X, y = sample_data
+    pre = Preprocessor(numerical_method="ple").fit(X, y)
+    with _root_handlers():
+        configure_logging(2)
+        pre.get_feature_info(verbose=True)
+    assert logging.getLogger("pretab").level == logging.DEBUG
+
+
+def test_configure_logging_defers_to_a_root_handler(sample_data, capsys):
+    """Regression guard for issue #67: a host root handler printed every line twice."""
+    X, y = sample_data
+    stream = io.StringIO()  # a host root handler, as logging.basicConfig installs
+    with _root_handlers(logging.StreamHandler(stream)):
+        Preprocessor(numerical_method="ple", verbose=1).fit(X, y)
+        assert _own_handlers() == []
+    assert stream.getvalue().count("fit complete") == 1
+    assert "fit complete" not in capsys.readouterr().err
+
+
+def test_configure_logging_hands_over_to_a_host_configured_later():
+    with _root_handlers():
+        configure_logging(1)
+    assert len(_own_handlers()) == 1
+    with _root_handlers(logging.StreamHandler(io.StringIO())):
+        configure_logging(1)
+    assert _own_handlers() == []
 
 
 # --------------------------------------------------------------------------- #

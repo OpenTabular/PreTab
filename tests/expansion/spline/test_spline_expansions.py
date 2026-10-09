@@ -3,8 +3,10 @@ import pytest
 
 from pretab.transformers import (
     BSplineTransformer,
+    CubicRegressionSplineTransformer,
     ISplineTransformer,
     MSplineTransformer,
+    NaturalCubicSplineTransformer,
 )
 
 
@@ -116,6 +118,27 @@ def test_mspline_handles_nan():
     assert np.isfinite(Xt).all()
 
 
+@pytest.mark.parametrize("scale", [1.0, 1e-2, 1e-3, 1e-7])
+def test_mspline_basis_integrates_to_one_at_any_feature_scale(scale):
+    """Regression guard for issue #63: absolute clipping thresholds flattened the
+    basis on small-scale features and zeroed it on tiny-range ones."""
+    from scipy.integrate import trapezoid
+
+    X = np.random.default_rng(0).uniform(0, 1, (2000, 1)) * scale
+    transformer = MSplineTransformer(output_dim=8, placement_strategy="uniform").fit(X)
+    grid = np.linspace(X.min(), X.max(), 200_001)
+    integrals = trapezoid(transformer.transform(grid.reshape(-1, 1)), grid, axis=0)
+    np.testing.assert_allclose(integrals, 1.0, atol=1e-3)
+
+
+def test_mspline_basis_is_scale_equivariant():
+    X = np.random.default_rng(0).lognormal(0, 2, (2000, 1))
+    unit = MSplineTransformer(output_dim=8).fit(X).transform(X)
+    scaled = MSplineTransformer(output_dim=8).fit(X * 1e-4).transform(X * 1e-4)
+    # M-spline values scale like 1 / span, so rescaling x by c rescales M by 1 / c.
+    np.testing.assert_allclose(scaled * 1e-4, unit, rtol=1e-8)
+
+
 def test_ispline_monotonic_increasing():
     X = np.linspace(0, 10, 200).reshape(-1, 1)
     transformer = ISplineTransformer(output_dim=8, include_bias=False)
@@ -130,6 +153,42 @@ def test_ispline_bounded_unit_interval():
     Xt = ISplineTransformer(output_dim=8).fit_transform(X)
     assert np.all(Xt >= -1e-9)
     assert np.all(Xt <= 1.0 + 1e-9)
+
+
+def _exact_ispline(x, knots, degree):
+    """Reference I-spline: the normalized antiderivative of each B-spline basis function."""
+    from scipy.interpolate import BSpline
+
+    n_coef = len(knots) - degree - 1
+    columns = []
+    for i in range(n_coef):
+        antiderivative = BSpline(knots, np.eye(n_coef)[i], degree).antiderivative()
+        lower, upper = antiderivative(knots[0]), antiderivative(knots[-1])
+        columns.append((antiderivative(x) - lower) / (upper - lower))
+    return np.column_stack(columns)
+
+
+@pytest.mark.parametrize("output_dim", [6, 10, 30])
+def test_ispline_matches_exact_integral_on_tight_knots(output_dim):
+    """Regression guard for issue #53: knot spans narrower than a fixed quadrature
+    grid step produced all-zero and misplaced columns."""
+    X = np.random.default_rng(0).lognormal(0, 2, (2000, 1))
+    transformer = ISplineTransformer(output_dim=output_dim).fit(X)
+    Xt = transformer.transform(X)
+
+    exact = _exact_ispline(X[:, 0], transformer.knots_[0], transformer.degree)
+    np.testing.assert_allclose(Xt, exact, atol=1e-10)
+    assert (Xt.max(axis=0) > 0).all()
+    # Every I-spline row is ordered I_0 >= I_1 >= ... >= I_{K-1}.
+    assert (np.diff(Xt, axis=1) <= 1e-12).all()
+
+
+def test_ispline_reaches_zero_and_one_at_the_range_boundaries():
+    X = np.random.default_rng(1).exponential(size=(500, 1))
+    transformer = ISplineTransformer(output_dim=8).fit(X)
+    boundary = transformer.transform(np.array([[X.min()], [X.max()]]))
+    np.testing.assert_allclose(boundary[0], 0.0, atol=1e-12)
+    np.testing.assert_allclose(boundary[1], 1.0, atol=1e-12)
 
 
 def test_ispline_shape_multi_feature():
@@ -154,3 +213,43 @@ def test_spline_penalty_matrix_symmetric(data):
     P = transformer.get_penalty_matrix()
     assert P.shape[0] == P.shape[1]
     assert np.allclose(P, P.T, atol=1e-9)
+
+
+# --- target-aware splines search their own knot window (issue #69) ------------
+
+
+def _step_data(seed=1):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(0, 10, 1000)
+    y = np.where(x > 5.0, 1.0, 0.0) + 0.3 * rng.normal(size=1000)
+    return x.reshape(-1, 1), y
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("output_dim", [5, 6, 7])
+def test_target_aware_bmi_spline_keeps_the_dominant_split(cls, output_dim):
+    """Regression guard for issue #69: selector knots were trimmed by position, so
+    the split where the target changes was routinely discarded."""
+    X, y = _step_data()
+    transformer = cls(output_dim=output_dim, target_aware=True, placement_strategy="cart").fit(X, y)
+    interior = transformer.knots_[0][transformer.degree + 1 : -(transformer.degree + 1)]
+    assert len(interior) == output_dim - transformer.degree - 1
+    assert np.abs(interior - 5.0).min() < 0.1, interior
+
+
+@pytest.mark.parametrize("cls", [CubicRegressionSplineTransformer, NaturalCubicSplineTransformer])
+def test_target_aware_cubic_families_keep_the_dominant_split(cls):
+    X, y = _step_data()
+    knots = cls(output_dim=4, target_aware=True, placement_strategy="cart").fit(X, y).knots_[0]
+    assert np.abs(knots - 5.0).min() < 0.1, knots
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, CubicRegressionSplineTransformer, NaturalCubicSplineTransformer])
+def test_adaptive_spline_width_is_not_capped_at_the_legacy_window(cls):
+    rng = np.random.default_rng(0)
+    x = rng.uniform(0, 10, 3000)
+    y = np.sin(2 * x) * 3 + rng.normal(0, 0.3, 3000)
+    transformer = cls(
+        adaptive=True, min_output_dim=5, max_output_dim=40, target_aware=True, placement_strategy="cart"
+    ).fit(x.reshape(-1, 1), y)
+    assert 15 < transformer.total_output_dim_ <= 40

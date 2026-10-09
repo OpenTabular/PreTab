@@ -57,15 +57,16 @@ for name, y in [("simple", simple), ("wiggly", wiggly)]:
 ```
 
 ```text
-simple   -> selected width 15
-wiggly   -> selected width 15
+simple   -> selected width 20
+wiggly   -> selected width 20
 ```
 
 Both widths land inside the `[5, 20]` window without you having to guess a number up front.
-The two happen to match here because the underlying CART selector's split count is governed
-more by its own tree depth and minimum-samples settings than by how wiggly the signal looks;
-with noisier or smaller data, or a narrower window, the two searches can land on different
-widths. The bound is what you control directly, the exact count inside it is data-driven.
+Here both reach the upper bound: with 3000 samples the CART selector finds more informative
+splits than the window admits, so it keeps the most informative ones. Its split count is governed
+more by its own tree depth and minimum-samples settings than by how wiggly the signal looks; with
+smaller data or a wider window the two searches can land on different widths. The bound is what
+you control directly, the exact count inside it is data-driven.
 
 ```{note}
 Fitting a target-aware transformer directly like this, outside a `Pipeline`, normally emits a

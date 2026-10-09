@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import time
 import warnings
@@ -13,18 +14,25 @@ from sklearn.utils.validation import check_is_fitted
 
 from .compose.config import PreprocessorConfig
 from .compose.factory import build_column_transformer
-from .compose.feature_detection import detect_column_types, to_dataframe
+from .compose.feature_detection import (
+    bool_columns_as_object,
+    detect_column_types,
+    to_dataframe,
+    with_string_labels,
+)
 from .compose.inspection import (
+    block_name,
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
-    clean_feature_names,
+    feature_names_out,
     get_output_slices,
 )
 from .compose.output import (
     compute_output_report,
     format_output,
     resolve_embedding_dimensions,
+    resolve_output_format,
     to_dataframe_output,
     validate_embedding_request,
 )
@@ -91,6 +99,14 @@ _PRESET_PARAM_DEFAULTS = {
     "min_output_dim": 7,
     "max_output_dim": 10,
 }
+
+
+def _spec_json(spec: dict, **kwargs) -> str:
+    """Serialize a spec to JSON text, raising a typed error for unsupported state."""
+    try:
+        return json.dumps(spec, **kwargs)
+    except (TypeError, ValueError) as exc:
+        raise PretabSerializationError(f"The fitted state cannot be written as JSON: {exc}") from exc
 
 
 def _method_summary(features, *, is_numerical: bool, config: PreprocessorConfig) -> str:
@@ -215,10 +231,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Strategy for the ``SimpleImputer`` that runs *before* every categorical method. ``None``
         disables imputation for categorical columns.
     add_missing_indicator : bool, default=False
-        If True, append a binary missing-value indicator column for each imputed feature (via the
-        imputer's ``add_indicator``; a standalone :class:`~pretab.transformers.MissingStateIndicator`
-        is used instead when imputation is disabled for that column kind). Applies to both
-        numerical and categorical pipelines.
+        If True, append a binary (0/1) missing-value indicator column for each imputed feature
+        that has missing values at ``fit`` (scikit-learn's ``MissingIndicator``, computed on the raw
+        input next to the representation, so it never passes through the scaler or basis; a
+        standalone :class:`~pretab.transformers.MissingStateIndicator` is used instead when
+        imputation is disabled for that column kind). Applies to both numerical and categorical
+        pipelines.
     missing_policy : {"error", "propagate", "impute", "impute_with_indicator", "separate_state"} or None, default=None
         High-level missing-value strategy. ``None`` (default) keeps the explicit
         ``numerical_imputation`` / ``categorical_imputation`` / ``add_missing_indicator``
@@ -269,10 +287,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Container used for the transformed output. ``"dense"`` (the default, for
         backward compatibility) returns NumPy arrays; ``"sparse"`` returns SciPy
         CSR matrices (a single stacked CSR when ``return_array=True``, otherwise CSR
-        blocks in the output dict); ``"auto"`` selects ``"sparse"`` when the output
-        density falls below ``0.3`` and ``"dense"`` otherwise. Ignored when
+        blocks in the output dict); ``"auto"`` selects ``"sparse"`` when the density of
+        the training output falls below ``0.3`` and ``"dense"`` otherwise. The choice is
+        made once at ``fit`` (stored in ``output_format_``), so every ``transform``
+        returns the same container regardless of the batch. Ignored when
         :meth:`set_output` requests a pandas or polars DataFrame. Every ``transform``
-        records the resolved choice and its memory footprint in ``output_report_``.
+        records the format and its memory footprint in ``output_report_``.
     dtype : numpy dtype or None, default=None
         Optional dtype to cast the transformed output to (e.g. ``numpy.float32`` to
         halve memory). ``None`` keeps the native ``float64`` output.
@@ -314,6 +334,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     output_dims\_ : dict
         Per-feature expanded output-column counts, keyed by input feature name.
         The values sum to ``total_output_dim_``.
+    output_format\_ : {"dense", "sparse"}
+        The output container resolved at ``fit`` from ``output_format`` (``"auto"``
+        is decided from the training output's density).
     output_report\_ : dict
         Memory report for the most recent ``transform``, with keys ``format``
         (``"dense"`` or ``"sparse"``), ``shape``, ``density``, ``dense_bytes``,
@@ -514,6 +537,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             verbose=resolved["verbose"],
         )
 
+        fitted_on_array = isinstance(X, np.ndarray)
         X = to_dataframe(X)
 
         if self.feature_preprocessing:
@@ -580,8 +604,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
-        self.column_transformer_.fit(X, y)
+        # ColumnTransformer.fit runs fit_transform internally; keep the training
+        # output to resolve output_format="auto" once, from the training density.
+        training_output = self.column_transformer_.fit_transform(self._column_transformer_input(X), y)
+        self.output_format_ = resolve_output_format(training_output, self.output_format)
         self.n_features_in_ = X.shape[1]
+        # scikit-learn convention: feature names are recorded only for named input.
+        if not fitted_on_array and all(isinstance(label, str) for label in X.columns):
+            self.feature_names_in_ = np.asarray(X.columns, dtype=object)
+        elif hasattr(self, "feature_names_in_"):
+            del self.feature_names_in_
 
         self._enforce_output_budget(X.shape[0])
 
@@ -636,6 +668,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         check_is_fitted(self)
 
+        # Array columns are matched by position, so a different width can never be
+        # routed correctly; an extra column would silently shift or drop features.
+        if isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
+                f"{self.n_features_in_} features as input."
+            )
+
         X = to_dataframe(X, copy=True)
 
         if self.missing_policy == "error":
@@ -647,13 +687,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         output_kind = container if container in ("pandas", "polars") else ("array" if resolved_return_array else "dict")
         validate_embedding_request(embeddings, expected=self.embeddings_, output_kind=output_kind)
 
-        transformed_X = self.column_transformer_.transform(X)
+        transformed_X = self.column_transformer_.transform(self._column_transformer_input(X))
         if not sp.issparse(transformed_X):
             transformed_X = np.asarray(transformed_X)
         if self.dtype is not None:
             transformed_X = transformed_X.astype(self.dtype, copy=False)
 
-        fmt, self.output_report_ = compute_output_report(transformed_X, self.output_format)
+        # Spec files written before output_format_ existed keep the per-call choice.
+        output_format = getattr(self, "output_format_", self.output_format)
+        fmt, self.output_report_ = compute_output_report(transformed_X, output_format)
 
         if container in ("pandas", "polars"):
             return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
@@ -754,7 +796,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         input_features : array-like of str or None, default=None
-            Input feature names. Passed through to the underlying column transformer.
+            Input feature names, following scikit-learn's convention. When the
+            preprocessor was fitted on named (string-labelled) columns they must equal
+            ``feature_names_in_``. When it was fitted without feature names (a NumPy
+            array, whose columns are named ``feature_0``, ``feature_1``, ...), any
+            ``n_features_in_`` names are accepted and used in place of the fitted
+            ones, so names propagate through a ``Pipeline`` whose upstream steps
+            output arrays.
 
         Returns
         -------
@@ -763,8 +811,19 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
 
         check_is_fitted(self)
-        raw_names = self.column_transformer_.get_feature_names_out(input_features)
-        return np.array(clean_feature_names(self.column_transformer_, raw_names))
+        if input_features is not None:
+            input_features = np.asarray(input_features, dtype=object)
+            if len(input_features) != self.n_features_in_:
+                raise ValueError(
+                    f"input_features should have length equal to number of features "
+                    f"({self.n_features_in_}), got {len(input_features)}"
+                )
+            fitted_names = getattr(self, "feature_names_in_", None)
+            if fitted_names is not None:
+                if not np.array_equal(fitted_names, input_features):
+                    raise ValueError("input_features is not equal to feature_names_in_")
+                input_features = None
+        return np.array(feature_names_out(self.column_transformer_, input_features))
 
     def get_feature_lineage(self):
         """Return per-output-column provenance for the fitted preprocessor.
@@ -819,8 +878,28 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                     feature = full.split("__", 1)[-1] if "__" in full else full
                     dims[feature] = dims.get(feature, 0) + 1
             else:
-                dims[columns[0]] = width
+                dims[self._input_label(columns[0])] = width
         return dims
+
+    @staticmethod
+    def _column_transformer_input(X):
+        """Adapt a frame to what the internal ColumnTransformer expects.
+
+        Column labels become strings (scikit-learn reads integer selectors as
+        positions) and boolean columns become ``object`` columns (the categorical
+        imputer rejects ``bool``). The caller's frame is never modified.
+        """
+        return with_string_labels(bool_columns_as_object(X))
+
+    def _input_label(self, column):
+        """Map a ColumnTransformer column back to the label it has in the input.
+
+        The ColumnTransformer is fitted on the string form of every label (see
+        :func:`~pretab.compose.feature_detection.with_string_labels`), so a
+        non-string label such as ``1`` appears there as ``"1"``.
+        """
+        labels = {str(label): label for label in (*self.numerical_features_, *self.categorical_features_)}
+        return labels.get(str(column), column)
 
     def _output_itemsize(self) -> int:
         """Bytes per element of the dense transformed array.
@@ -967,9 +1046,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             embeddings=self.embeddings_,
             embedding_dimensions=self.embedding_dimensions_,
         )
+        numerical_feature_info = {self._input_label(key): info for key, info in numerical_feature_info.items()}
+        categorical_feature_info = {self._input_label(key): info for key, info in categorical_feature_info.items()}
 
         if verbose:
-            configure_logging(1)
+            # Render at INFO without lowering a more verbose level set earlier.
+            configure_logging(2 if logger.isEnabledFor(logging.DEBUG) else 1)
             for line in build_transformer_summary(
                 numerical_feature_info,
                 categorical_feature_info,
@@ -981,7 +1063,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     def _log_internal_decisions(self):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
-        for name, transformer, _columns in self.column_transformer_.transformers_:
+        for step_name, transformer, columns in self.column_transformer_.transformers_:
+            name = block_name(step_name, columns)
             last_step = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
             for attr in (
                 "thresholds_",
@@ -1018,9 +1101,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
         check_is_fitted(self)
         spec = preprocessor_to_spec(self)
+        # Serialize before opening the file, so a failure never truncates an
+        # existing spec at ``path``.
+        text = _spec_json(spec, indent=2)
         if path is not None:
             with open(path, "w", encoding="utf-8") as handle:
-                json.dump(spec, handle, indent=2)
+                handle.write(text)
         return spec
 
     @classmethod
@@ -1080,7 +1166,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         the same fitted state and configuration produce the same fingerprint.
         """
         check_is_fitted(self)
-        canonical = json.dumps(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        canonical = _spec_json(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def reproducibility_report(self) -> dict:

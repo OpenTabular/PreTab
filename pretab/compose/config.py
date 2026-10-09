@@ -175,10 +175,11 @@ class PreprocessorConfig:
         booleans and the imputer ``strategy``. When ``missing_policy`` is ``None``
         the explicit ``*_imputation`` / ``add_missing_indicator`` parameters stay
         authoritative (historical behaviour); otherwise ``missing_policy`` decides.
+        ``add_indicator`` appends a missing indicator built on the raw input next
+        to the representation (see :func:`~pretab.compose.factory.create_transformer`).
         ``add_missing_indicator=True`` with imputation disabled for this column
         kind routes through the standalone ``MissingStateIndicator`` (via
-        ``separate_state``) instead of the imputer's own indicator, since
-        ``SimpleImputer.add_indicator`` only takes effect when the imputer runs.
+        ``separate_state``) instead, preserving its one-column-per-feature output.
         """
         strategy = (
             (self.numerical_imputation or "median")
