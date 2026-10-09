@@ -31,6 +31,7 @@ from .compose.output import (
     compute_output_report,
     format_output,
     resolve_embedding_dimensions,
+    resolve_output_format,
     to_dataframe_output,
     validate_embedding_request,
 )
@@ -277,10 +278,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Container used for the transformed output. ``"dense"`` (the default, for
         backward compatibility) returns NumPy arrays; ``"sparse"`` returns SciPy
         CSR matrices (a single stacked CSR when ``return_array=True``, otherwise CSR
-        blocks in the output dict); ``"auto"`` selects ``"sparse"`` when the output
-        density falls below ``0.3`` and ``"dense"`` otherwise. Ignored when
+        blocks in the output dict); ``"auto"`` selects ``"sparse"`` when the density of
+        the training output falls below ``0.3`` and ``"dense"`` otherwise. The choice is
+        made once at ``fit`` (stored in ``output_format_``), so every ``transform``
+        returns the same container regardless of the batch. Ignored when
         :meth:`set_output` requests a pandas or polars DataFrame. Every ``transform``
-        records the resolved choice and its memory footprint in ``output_report_``.
+        records the format and its memory footprint in ``output_report_``.
     dtype : numpy dtype or None, default=None
         Optional dtype to cast the transformed output to (e.g. ``numpy.float32`` to
         halve memory). ``None`` keeps the native ``float64`` output.
@@ -322,6 +325,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     output_dims\_ : dict
         Per-feature expanded output-column counts, keyed by input feature name.
         The values sum to ``total_output_dim_``.
+    output_format\_ : {"dense", "sparse"}
+        The output container resolved at ``fit`` from ``output_format`` (``"auto"``
+        is decided from the training output's density).
     output_report\_ : dict
         Memory report for the most recent ``transform``, with keys ``format``
         (``"dense"`` or ``"sparse"``), ``shape``, ``density``, ``dense_bytes``,
@@ -589,7 +595,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
-        self.column_transformer_.fit(self._column_transformer_input(X), y)
+        # ColumnTransformer.fit runs fit_transform internally; keep the training
+        # output to resolve output_format="auto" once, from the training density.
+        training_output = self.column_transformer_.fit_transform(self._column_transformer_input(X), y)
+        self.output_format_ = resolve_output_format(training_output, self.output_format)
         self.n_features_in_ = X.shape[1]
         # scikit-learn convention: feature names are recorded only for named input.
         if not fitted_on_array and all(isinstance(label, str) for label in X.columns):
@@ -675,7 +684,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if self.dtype is not None:
             transformed_X = transformed_X.astype(self.dtype, copy=False)
 
-        fmt, self.output_report_ = compute_output_report(transformed_X, self.output_format)
+        # Spec files written before output_format_ existed keep the per-call choice.
+        output_format = getattr(self, "output_format_", self.output_format)
+        fmt, self.output_report_ = compute_output_report(transformed_X, output_format)
 
         if container in ("pandas", "polars"):
             return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
