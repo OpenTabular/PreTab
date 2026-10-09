@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ....core.knots import bspline_basis
+from ....core.knots import bspline_basis, extrapolate_bspline_rows
 from ....core.parameters import UNSET
 from ....core.policy import RepresentationPolicy, resolve_out_of_range
 from ....exceptions import InvalidParamError
@@ -165,6 +165,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         B = np.zeros((len(x), n_basis))
         for i in range(n_basis):
             B[:, i] = bspline_basis(x, knots, self.degree, i)
+        B = extrapolate_bspline_rows(B, x, knots, self.degree)
         if self.include_bias:
             B = np.hstack([np.ones((len(x), 1)), B])
         return B

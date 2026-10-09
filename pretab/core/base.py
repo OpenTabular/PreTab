@@ -58,19 +58,24 @@ class BasePreTabTransformer(
     def _resolved_policy(self) -> RepresentationPolicy:
         """Return the effective edge-case policy for this instance.
 
-        An explicit ``policy`` constructor argument, on the transformers that expose
-        one, always wins verbatim over the class-level defaults below. Otherwise, the
-        shared default policy is narrowed by this family's ``_constant_policy`` /
-        ``_out_of_range_policy`` class attributes, which record each family's
-        historical, non-configurable default behavior.
+        The shared default policy is narrowed by this family's ``_constant_policy``
+        / ``_out_of_range_policy`` class attributes, which record each family's
+        historical default behavior. An explicit ``policy`` constructor argument, on
+        the transformers that expose one, then applies on top: a mapping overrides
+        only the axes it names (so ``{"constant": "error"}`` keeps the family's
+        out-of-range handling), and a :class:`RepresentationPolicy` instance is used
+        verbatim.
         """
-        instance_policy = getattr(self, "policy", None)
-        if instance_policy is not None:
-            return RepresentationPolicy.resolve(instance_policy)
-        return self._policy.merge(
+        family_policy = self._policy.merge(
             constant=self._constant_policy,
             out_of_range=self._out_of_range_policy,
         )
+        instance_policy = getattr(self, "policy", None)
+        if instance_policy is None:
+            return family_policy
+        if isinstance(instance_policy, dict):
+            return family_policy.merge(**instance_policy)
+        return RepresentationPolicy.resolve(instance_policy)
 
     def _validate(self, X, *, reset: bool):
         """Validate ``X`` through the shared NaN-aware validator."""
