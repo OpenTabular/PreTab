@@ -322,4 +322,4 @@ def test_global_polars_output_config_is_honoured(mixed_frame):
     with sklearn.config_context(transform_output="polars"):
         out = Preprocessor(categorical_method="one-hot").fit(X, y).transform(X)
     assert isinstance(out, pl.DataFrame)
-    assert out.shape[0] == len(X)
+    assert np.asarray(out).shape[0] == len(X)

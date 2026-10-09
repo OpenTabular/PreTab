@@ -581,7 +581,7 @@ def test_array_fit_accepts_a_frame_of_the_fitted_width(mixed_named_frame):
 
 
 def test_integer_labelled_fit_matches_an_array_by_position():
-    pre = Preprocessor(numerical_method="none", scaling=None).fit(pd.DataFrame({1: [10.0, 20, 30], 0: [1.0, 2, 3]}))
+    pre = Preprocessor(numerical_method="none", scaling="none").fit(pd.DataFrame({1: [10.0, 20, 30], 0: [1.0, 2, 3]}))
     out = pre.transform(np.array([[10.0, 1.0], [30.0, 3.0]]))
     np.testing.assert_array_equal(out, [[10.0, 1.0], [30.0, 3.0]])
 

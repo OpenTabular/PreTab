@@ -5,7 +5,7 @@ import logging
 import os
 import time
 import warnings
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from scipy import sparse as sp
@@ -953,7 +953,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         column_transformer.transformers_ = [
             (
                 name,
-                clone(transformer).fit(X_ct[list(columns)], y)
+                cast(Any, clone(transformer)).fit(X_ct[list(columns)], y)
                 if name != "remainder" and block_uses_target(transformer, columns)
                 else transformer,
                 columns,

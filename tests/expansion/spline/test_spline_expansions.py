@@ -271,7 +271,8 @@ def test_knot_locations_set_the_width_regardless_of_output_dim(cls, knots):
 
 def test_knot_locations_are_kept_in_adaptive_mode():
     X = np.linspace(0, 10, 50).reshape(-1, 1)
-    transformer = BSplineTransformer(knot_locations=[2, 4, 6, 8], adaptive=True, min_output_dim=5, max_output_dim=6)
+    knots = np.array([2.0, 4.0, 6.0, 8.0])
+    transformer = BSplineTransformer(knot_locations=knots, adaptive=True, min_output_dim=5, max_output_dim=6)
     np.testing.assert_array_equal(transformer.fit(X).knots_[0][4:-4], [2, 4, 6, 8])
 
 
@@ -280,7 +281,7 @@ def test_knot_locations_outside_the_range_are_dropped_with_a_warning():
 
     X = np.linspace(0, 10, 50).reshape(-1, 1)
     with pytest.warns(DataWarning, match=r"\[-5\.0, 15\.0\] lie outside"):
-        transformer = BSplineTransformer(knot_locations=[-5, 3, 3, 15]).fit(X)
+        transformer = BSplineTransformer(knot_locations=np.array([-5.0, 3.0, 3.0, 15.0])).fit(X)
     np.testing.assert_array_equal(transformer.knots_[0][4:-4], [3.0])
 
 

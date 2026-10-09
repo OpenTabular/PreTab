@@ -7,7 +7,7 @@ warning registry de-duplicate it instead of re-firing per transformer per
 """
 
 import warnings
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 from sklearn.utils.validation import _check_feature_names, _check_feature_names_in, check_array
@@ -33,7 +33,8 @@ def resolve_input_features(estimator, input_features) -> list:
             len(input_features),
             f"must have exactly {n_features_in_} entries (one per input feature)",
         )
-    return [str(name) for name in _check_feature_names_in(estimator, input_features)]
+    names = cast(np.ndarray, _check_feature_names_in(estimator, input_features))
+    return [str(name) for name in names]
 
 
 def validate_2d_allow_nan(X, *, allow_nan: bool = True, reset: bool, estimator):
