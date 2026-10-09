@@ -437,14 +437,16 @@ def test_fit_transform_rejects_folds_with_other_dataframe_columns():
     from sklearn.compose import ColumnTransformer
     from sklearn.preprocessing import OneHotEncoder
 
-    rng = np.random.default_rng(0)
-    # "b" and "c" tie, so which one is kept as a top category depends on the fold.
-    X = pd.DataFrame({"num": rng.normal(size=90), "cat": rng.permutation(["a"] * 50 + ["b"] * 20 + ["c"] * 20)})
-    y = X["num"].to_numpy() + rng.normal(scale=0.3, size=90)
-    encoder = OneHotEncoder(max_categories=3, handle_unknown="infrequent_if_exist", sparse_output=False)
+    # Unshuffled folds: fold 0 holds out rows 0-29 (all "a"), so its training rows keep
+    # "b" as the frequent category while the all-data fit keeps "a" -- same width, other labels.
+    X = pd.DataFrame({"num": np.linspace(-1.0, 1.0, 90), "cat": ["a"] * 30 + ["b"] * 30 + ["c"] * 20 + ["a"] * 10})
+    y = X["num"].to_numpy() ** 2
+    encoder = OneHotEncoder(max_categories=2, handle_unknown="infrequent_if_exist", sparse_output=False)
     transformer = ColumnTransformer(
         [("ple", PLETransformer(output_dim=3), ["num"]), ("oh", encoder, ["cat"])]
     ).set_output(transform="pandas")
 
-    with pytest.raises(IncompatibleParamsError, match="same output columns across folds"):
-        CrossFittedTransformer(transformer, n_folds=3, random_state=0).fit_transform(X, y)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", LeakageWarning)
+        with pytest.raises(IncompatibleParamsError, match=r"same output columns across folds.*cat_a"):
+            CrossFittedTransformer(transformer, n_folds=3, shuffle=False).fit_transform(X, y)

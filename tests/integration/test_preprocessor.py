@@ -1,8 +1,12 @@
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
 from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
@@ -490,6 +494,33 @@ def test_a_list_of_rows_is_read_like_an_array():
     pre = Preprocessor(numerical_method="minmax").fit(rows)
     assert not hasattr(pre, "feature_names_in_")
     np.testing.assert_allclose(np.asarray(pre.transform(rows)), np.asarray(pre.transform(np.asarray(rows))))
+
+
+def test_a_list_of_rows_is_matched_by_position_after_a_frame_fit():
+    X = pd.DataFrame({"a": [1.0, 3.0, 4.0, 7.0], "b": [2.0, 5.0, 9.0, 1.0]})
+    pre = Preprocessor(numerical_method="minmax").fit(X)
+    with pytest.warns(UserWarning, match="valid feature names"):
+        out = pre.transform(X.to_numpy().tolist())
+    np.testing.assert_allclose(np.asarray(out), np.asarray(pre.transform(X)))
+
+
+_needs_polars = pytest.mark.skipif(importlib.util.find_spec("polars") is None, reason="polars is not installed")
+
+
+@pytest.mark.parametrize("container", ["pandas", pytest.param("polars", marks=_needs_polars)])
+def test_pipeline_set_output_hands_frames_to_the_preprocessor(container):
+    """A Pipeline configured with set_output hands its frames (pandas or polars)
+    from one step to the next, so the Preprocessor must accept both."""
+    rng = np.random.default_rng(0)
+    numeric = pd.DataFrame({"income": rng.normal(5e4, 1e4, 120), "visits": rng.integers(0, 1000, 120)})
+    pipe = Pipeline([("impute", SimpleImputer()), ("pretab", Preprocessor(numerical_method="minmax"))])
+    pipe.set_output(transform=container)
+
+    out = pipe.fit_transform(numeric, rng.normal(size=120))
+
+    assert type(out).__module__.split(".")[0] == container
+    assert list(out.columns) == ["num_income", "num_visits"]
+    np.testing.assert_allclose(np.asarray(out), np.asarray(pipe.transform(numeric)))
 
 
 # --- get_feature_names_out(input_features) (issue #65) ----------------------------

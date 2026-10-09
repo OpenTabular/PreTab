@@ -89,21 +89,6 @@ def test_polars_nulls_are_missing_values():
     assert not any("None" in name for name in names)
 
 
-@pytest.mark.parametrize("container", ["pandas", "polars"])
-def test_pipeline_set_output_hands_frames_to_the_preprocessor(frames, container):
-    pandas_frame, _, y = frames
-    numeric = pandas_frame[["income", "visits"]]
-    pipe = Pipeline([("impute", SimpleImputer()), ("pretab", Preprocessor(numerical_method="minmax"))])
-    pipe.set_output(transform=container)
-
-    out = pipe.fit_transform(numeric, y)
-
-    assert type(out).__module__.split(".")[0] == container
-    assert out.shape == (len(numeric), 2)
-    assert list(out.columns) == ["num_income", "num_visits"]
-    np.testing.assert_allclose(np.asarray(out), np.asarray(pipe.transform(numeric)))
-
-
 def test_representation_search_on_polars_matches_pandas(frames):
     """Each fold's Preprocessor gets a polars frame too, not an object array that
     would turn every column categorical (and score a different model than the

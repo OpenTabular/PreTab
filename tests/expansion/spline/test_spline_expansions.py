@@ -367,6 +367,16 @@ def test_unsupervised_bmi_spline_ignores_a_multi_output_target(cls, params):
 
 
 @pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("params", [{}, {"placement_strategy": "uniform"}])
+def test_unsupervised_bmi_spline_never_reads_y(cls, params):
+    X = np.linspace(0.0, 1.0, 50).reshape(-1, 1)
+    X[3, 0] = np.nan
+    reference = cls(**params).fit(X)
+    fitted = cls(**params).fit(X, np.zeros(10))  # a y that cannot be row-aligned with X
+    np.testing.assert_array_equal(fitted.knots_[0], reference.knots_[0])
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
 def test_bmi_spline_fits_in_a_multi_output_pipeline(cls):
     from sklearn.linear_model import Ridge
     from sklearn.pipeline import make_pipeline
