@@ -102,23 +102,24 @@ def _placement_kwargs(spec: TransformerSpec, kwargs):
     """Return the placement kwargs to inject for a method, honouring its capability.
 
     Mirrors the shared-placement contract: methods with optional target awareness
-    (feature maps and freely-placed knot splines) receive ``target_aware`` plus
-    the ``placement_strategy`` (when set); the always-target-aware ``ple`` receives
-    a supervised ``placement_strategy`` only when target-aware; the unsupervised-only
-    penalized splines receive an unsupervised ``placement_strategy`` only when not
-    target-aware. Methods without data-driven placement receive nothing.
+    (feature maps, freely-placed knot splines, and registered ``"optional"``
+    representations) always receive ``target_aware``, which decides whether they
+    use ``y`` at all, plus the ``placement_strategy`` (when set) if they declare
+    placement strategies; the always-target-aware ``ple`` receives a supervised
+    ``placement_strategy`` only when target-aware; the unsupervised-only penalized
+    splines receive an unsupervised ``placement_strategy`` only when not
+    target-aware. Other methods without data-driven placement receive nothing.
     """
-    if not spec.placement_strategies:
-        return {}
-
     target_aware = bool(kwargs.get("target_aware", False))
     placement_strategy = kwargs.get("placement_strategy")
 
     if spec.target_usage == "optional":
         out = {"target_aware": target_aware}
-        if placement_strategy is not None:
+        if placement_strategy is not None and spec.placement_strategies:
             out["placement_strategy"] = placement_strategy
         return out
+    if not spec.placement_strategies:
+        return {}
     if spec.target_usage == "required":
         if target_aware and placement_strategy in ("cart", "lightgbm"):
             return {"placement_strategy": placement_strategy}

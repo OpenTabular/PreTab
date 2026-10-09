@@ -19,6 +19,7 @@ validate their own representations so they behave like the built-ins:
 
 from __future__ import annotations
 
+import inspect
 import warnings
 
 import numpy as np
@@ -80,7 +81,9 @@ class BaseRepresentation(BasePreTabTransformer):
     supervision : {"unsupervised", "optional", "supervised"}
         How the representation uses the target ``y``. ``"supervised"`` mandates
         ``y`` at fit time; ``"optional"`` consumes it only when ``target_aware``
-        is enabled.
+        is enabled, so an optional class must take a ``target_aware`` constructor
+        parameter (:class:`~pretab.Preprocessor` sets it from its own
+        ``target_aware``).
     """
 
     representation_name: str | None = None
@@ -108,6 +111,14 @@ class BaseRepresentation(BasePreTabTransformer):
         cls._representation_scope = cls.scope
         cls._representation_supervision = cls.supervision
         cls._requires_y = cls.supervision == "supervised"
+
+
+def _accepts_target_aware(cls) -> bool:
+    """Whether ``cls`` takes a ``target_aware`` constructor parameter."""
+    try:
+        return "target_aware" in inspect.signature(cls.__init__).parameters
+    except (TypeError, ValueError):  # no introspectable signature
+        return False
 
 
 def register_representation(
@@ -145,13 +156,17 @@ def register_representation(
     scope : {"univariate", "multivariate"}, optional
         Inferred from ``cls`` when omitted.
     supervision : {"unsupervised", "optional", "supervised"}, optional
-        Inferred from ``cls`` when omitted.
+        Inferred from ``cls`` when omitted. An ``"optional"`` class must take a
+        ``target_aware`` constructor parameter: ``Preprocessor`` always passes its
+        own ``target_aware``, so the class uses ``y`` only when that is True. A
+        class without one raises ``TypeError``.
     allowed_args : iterable of str, default=()
         Constructor argument names the shared Preprocessor keyword arguments are
         filtered down to for this method.
     placement_strategies : iterable of str, default=()
         Placement strategies the method honours (empty for methods without
-        data-driven placement).
+        data-driven placement). ``Preprocessor`` passes its ``placement_strategy``
+        only to a method that declares strategies.
     supports_adaptive_resolution : bool, default=False
         Whether the method can size its output dimension from the data.
     preprocessor_compatible : bool, default=True
@@ -186,6 +201,13 @@ def register_representation(
         raise ValueError(f"scope must be one of {sorted(_VALID_SCOPES)}, got {scope!r}")
     if supervision not in _VALID_SUPERVISION:
         raise ValueError(f"supervision must be one of {sorted(_VALID_SUPERVISION)}, got {supervision!r}")
+    if supervision == "optional" and not _accepts_target_aware(cls):
+        raise TypeError(
+            f"{cls.__name__} is registered with supervision='optional' but its constructor has no "
+            "target_aware parameter. An optionally supervised representation uses y only when "
+            "target_aware=True, and Preprocessor sets it from its own target_aware: add the "
+            "parameter, or register the class as 'unsupervised' or 'supervised'."
+        )
 
     spec = TransformerSpec(
         name=name,

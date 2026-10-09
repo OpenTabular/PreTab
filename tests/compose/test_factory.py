@@ -11,7 +11,7 @@ from pretab.compose.factory import (
     get_categorical_transformer_steps,
     get_numerical_transformer_steps,
 )
-from pretab.compose.registry import get_spec
+from pretab.compose.registry import TransformerSpec, get_spec
 from pretab.exceptions import ConfigWarning, InvalidParamError
 
 
@@ -128,6 +128,14 @@ def test_placement_forbidden_uses_unsupervised_only():
 def test_placement_absent_when_method_has_no_strategies():
     spec = get_spec("standardization")  # no placement strategies
     assert _placement_kwargs(spec, {"target_aware": True, "placement_strategy": "cart"}) == {}
+
+
+def test_placement_optional_without_strategies_still_forwards_target_aware():
+    # e.g. a registered supervision="optional" representation with no placement
+    # strategies: target_aware decides whether it uses y, placement does not apply.
+    spec = TransformerSpec(name="custom", transformer_cls=object, target_usage="optional")
+    assert _placement_kwargs(spec, {"target_aware": False, "placement_strategy": "uniform"}) == {"target_aware": False}
+    assert _placement_kwargs(spec, {"target_aware": True, "placement_strategy": "cart"}) == {"target_aware": True}
 
 
 # --------------------------------------------------------------------------- #
