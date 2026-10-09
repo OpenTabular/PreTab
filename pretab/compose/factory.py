@@ -10,6 +10,7 @@ all taken from :data:`~pretab.compose.registry.TRANSFORMER_REGISTRY`.
 
 import warnings
 
+import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import MissingIndicator, SimpleImputer
 from sklearn.pipeline import FeatureUnion, Pipeline
@@ -47,6 +48,20 @@ _BMI_SPLINE_METHODS = frozenset({"bspline", "mspline", "ispline"})
 # Freely-placed knot splines built through the knot-wiring construction path
 # (B/M/I plus the legacy cubic / natural-cubic regression splines).
 _KNOT_SPLINE_METHODS = _BMI_SPLINE_METHODS | frozenset({"cubicspline", "naturalspline"})
+
+
+class _PositiveMinMaxScaler(MinMaxScaler):
+    """MinMaxScaler whose output is floored at ``feature_range[0]``.
+
+    Rescales into ``(1e-3, 1)`` ahead of Box-Cox, which requires strictly
+    positive input. Fitted on the training data, a plain MinMaxScaler maps an
+    unseen value below the training minimum to ``<= 0``; flooring only the lower
+    end makes such values transform like the training minimum while every other
+    output (including values above the training maximum) is unchanged.
+    """
+
+    def transform(self, X):
+        return np.maximum(super().transform(X), self.feature_range[0])
 
 
 def _filter_kwargs(allowed, kwargs):
@@ -154,7 +169,7 @@ def get_numerical_transformer_steps(
     placement = _placement_kwargs(spec, kwargs)
 
     if method == "box-cox":
-        steps.append(("scale_positive", MinMaxScaler(feature_range=(1e-3, 1))))
+        steps.append(("scale_positive", _PositiveMinMaxScaler(feature_range=(1e-3, 1))))
         steps.append(("boxcox", cls(method="box-cox", **filtered)))
     elif method == "yeo-johnson":
         steps.append(("yeojohnson", cls(method="yeo-johnson", **filtered)))
