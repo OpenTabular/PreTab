@@ -13,7 +13,7 @@ transformer only has to implement its own basis math.
 import numpy as np
 
 from ...core.base import BasePreTabTransformer
-from ...core.knots import generate_internal_knots, select_knots, spanning_knots
+from ...core.knots import generate_internal_knots, select_knots, spanning_knots, supplement_interior_knots
 from ...exceptions import IncompatibleParamsError, PretabDataError
 
 
@@ -84,13 +84,19 @@ class SplineBasisMixin(BasePreTabTransformer):
         window before bracketing.
         """
         x, y = self._finite_column(x, y)
+        x_min, x_max = x.min(), x.max()
         if selector is not None:
             interior = self._place_interior_knots(
                 x, y, n_basis - 2, strategy, selector, task, min_interior, max_interior
             )
-            x_min, x_max = x.min(), x.max()
             return np.concatenate([[x_min], interior, [x_max]])
-        return spanning_knots(x, n_basis, strategy)
+        knots = spanning_knots(x, n_basis, strategy)
+        if len(knots) <= 2:
+            return knots
+        # On tied data quantile knots repeat or land on the endpoints; keep the
+        # endpoints once and make the interior unique and strictly inside.
+        interior = supplement_interior_knots(x, knots[1:-1], n_basis - 2)
+        return np.concatenate([[x_min], interior, [x_max]])
 
     def _place_interior_knots(self, x, y, n_interior, strategy, selector, task, min_interior=None, max_interior=None):
         """Return the interior knots (endpoints excluded) for one feature.
@@ -106,7 +112,8 @@ class SplineBasisMixin(BasePreTabTransformer):
         On the adaptive selector path ``min_interior`` / ``max_interior`` clamp the
         data-driven count into that window instead. Without a ``selector``,
         ``n_interior`` knots are placed with
-        :func:`pretab.core.knots.generate_internal_knots`.
+        :func:`pretab.core.knots.generate_internal_knots` and made unique and
+        strictly interior (see :func:`pretab.core.knots.supplement_interior_knots`).
         """
         x, y = self._finite_column(x, y)
         if selector is not None:
@@ -121,7 +128,7 @@ class SplineBasisMixin(BasePreTabTransformer):
                 min_interior = max_interior = n_interior
             selected = self._clamp_interior_knots(x, selected, min_interior, max_interior, strategy)
             return selected
-        return generate_internal_knots(x, n_interior, strategy)
+        return supplement_interior_knots(x, generate_internal_knots(x, n_interior, strategy), n_interior)
 
     def _clamp_interior_knots(self, x, knots, min_count, max_count, strategy):
         """Clamp a data-driven set of interior knots into ``[min_count, max_count]``.
