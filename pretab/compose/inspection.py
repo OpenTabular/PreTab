@@ -16,6 +16,7 @@ from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
+from .registry import TRANSFORMER_REGISTRY
 
 logger = get_logger(__name__)
 
@@ -377,8 +378,9 @@ def _resolve_block_representation(pipeline, columns):
     """Return ``(family, component, uses_target, is_interaction)`` for a block.
 
     The representation-bearing step is the last pipeline step exposing a
-    ``get_representation_spec`` (a PreTab transformer) or a known scikit-learn
-    step name; helper steps such as imputers and float casts are skipped.
+    ``get_representation_spec`` (a PreTab transformer), a known scikit-learn
+    step name, or a registered method that consumes the target; helper steps
+    such as imputers and float casts are skipped.
     """
     steps = pipeline.steps if hasattr(pipeline, "steps") else [("_", pipeline)]
     for step_name, transformer in reversed(steps):
@@ -388,6 +390,14 @@ def _resolve_block_representation(pipeline, columns):
         if step_name in _STEP_FAMILY:
             family, component = _STEP_FAMILY[step_name]
             return family, component, False, False
+        registered = TRANSFORMER_REGISTRY.get(step_name)
+        if registered is not None and registered.target_usage != "forbidden":
+            # A registered class without a RepresentationSpec (e.g. scikit-learn's
+            # TargetEncoder): its declared supervision says whether it used y, so
+            # cross-fitting refits it per fold instead of reusing the all-data fit.
+            uses_target = registered.target_usage == "required" or bool(getattr(transformer, "target_aware", False))
+            component = "category" if registered.is_categorical else "basis"
+            return step_name, component, uses_target, registered.is_multivariate
     return "passthrough", "raw", False, False
 
 
