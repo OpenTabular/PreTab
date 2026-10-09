@@ -100,6 +100,14 @@ _PRESET_PARAM_DEFAULTS = {
 }
 
 
+def _spec_json(spec: dict, **kwargs) -> str:
+    """Serialize a spec to JSON text, raising a typed error for unsupported state."""
+    try:
+        return json.dumps(spec, **kwargs)
+    except (TypeError, ValueError) as exc:
+        raise PretabSerializationError(f"The fitted state cannot be written as JSON: {exc}") from exc
+
+
 def _method_summary(features, *, is_numerical: bool, config: PreprocessorConfig) -> str:
     """Summarize the resolved method(s) actually used across ``features``.
 
@@ -1091,9 +1099,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
         check_is_fitted(self)
         spec = preprocessor_to_spec(self)
+        # Serialize before opening the file, so a failure never truncates an
+        # existing spec at ``path``.
+        text = _spec_json(spec, indent=2)
         if path is not None:
             with open(path, "w", encoding="utf-8") as handle:
-                json.dump(spec, handle, indent=2)
+                handle.write(text)
         return spec
 
     @classmethod
@@ -1153,7 +1164,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         the same fitted state and configuration produce the same fingerprint.
         """
         check_is_fitted(self)
-        canonical = json.dumps(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        canonical = _spec_json(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def reproducibility_report(self) -> dict:

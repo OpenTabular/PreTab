@@ -274,3 +274,66 @@ def test_from_spec_refuses_dataclass_not_in_allowlist():
 def test_from_spec_rejects_bad_source_type():
     with pytest.raises(PretabSerializationError):
         Preprocessor.from_spec(12345)
+
+
+# --- object arrays and builtin dtypes (issue #66) ---------------------------------
+
+
+@pytest.fixture
+def numpy_scalar_frame():
+    rng = np.random.default_rng(0)
+    n = 80
+    income = np.where(rng.random(n) < 0.1, np.nan, rng.normal(50, 10, n))
+    frame = pd.DataFrame({"income": income, "age": rng.normal(40, 10, n)})
+    # An object column of np.bool_ / None, as produced by a row-wise apply.
+    frame["high_income"] = frame.apply(lambda r: r.income > 50 if pd.notna(r.income) else None, axis=1)
+    return frame, rng.normal(size=n)
+
+
+def test_object_arrays_of_numpy_scalars_serialize(numpy_scalar_frame, tmp_path):
+    """Regression guard for issue #66: numpy scalars in object arrays leaked into the spec."""
+    frame, y = numpy_scalar_frame
+    pre = Preprocessor(random_state=0).fit(frame, y)
+    json.dumps(pre.to_spec())
+    assert len(pre.fingerprint_) == 64
+    path = tmp_path / "spec.json"
+    pre.to_spec(path)
+    np.testing.assert_array_equal(Preprocessor.from_spec(path).transform(frame), pre.transform(frame))
+
+
+@pytest.mark.parametrize("dtype", [float, int, np.float32])
+def test_builtin_and_numpy_dtypes_round_trip(dtype):
+    frame = pd.DataFrame({"age": np.linspace(20.0, 60.0, 30)})
+    pre = Preprocessor(numerical_method="minmax", dtype=dtype).fit(frame)
+    loaded = Preprocessor.from_spec(json.loads(json.dumps(pre.to_spec())))
+    np.testing.assert_array_equal(loaded.transform(frame), pre.transform(frame))
+    assert loaded.fingerprint_ == pre.fingerprint_
+
+
+def test_failed_save_leaves_an_existing_spec_untouched(tmp_path):
+    frame = pd.DataFrame({"age": np.linspace(20.0, 60.0, 30)})
+    pre = Preprocessor(numerical_method="minmax").fit(frame)
+    path = tmp_path / "spec.json"
+    pre.to_spec(path)
+    saved = path.read_text(encoding="utf-8")
+
+    pre.unsupported_ = lambda value: value
+    with pytest.raises(PretabSerializationError):
+        pre.to_spec(path)
+    assert path.read_text(encoding="utf-8") == saved
+
+
+def test_types_a_spec_cannot_load_are_rejected_at_save_time():
+    from pretab.compose.serialize import _encode
+
+    with pytest.raises(PretabSerializationError, match="can only reference types"):
+        _encode(list)
+
+
+def test_object_arrays_written_before_element_encoding_still_load():
+    from pretab.compose.serialize import _decode
+
+    payload = {"__ndarray__": {"dtype": "|O", "shape": [2, 2], "data": [["a", None], [True, 1.5]]}}
+    decoded = _decode(payload)
+    assert decoded.dtype == object
+    assert decoded.tolist() == [["a", None], [True, 1.5]]
