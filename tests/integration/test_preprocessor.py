@@ -462,3 +462,23 @@ def test_boxcox_survives_cross_validation():
     X, y = make_regression(n_samples=500, n_features=3, noise=1.0, random_state=0)
     scores = cross_val_score(make_pipeline(Preprocessor(numerical_method="box-cox"), Ridge()), X, y, cv=5)
     assert np.isfinite(scores).all()
+
+
+# --- ndarray width check at transform (issue #72) ---------------------------------
+
+
+@pytest.mark.parametrize("width", [2, 4])
+def test_transform_rejects_an_ndarray_of_a_different_width(width):
+    """Regression guard for issue #72: an extra array column silently shifted features."""
+    rng = np.random.default_rng(0)
+    X, y = rng.normal(size=(60, 3)), rng.normal(size=60)
+    pre = Preprocessor(random_state=0).fit(X, y)
+    with pytest.raises(ValueError, match=f"X has {width} features, but Preprocessor is expecting 3"):
+        pre.transform(rng.normal(size=(5, width)))
+
+
+def test_transform_accepts_an_ndarray_of_the_fitted_width():
+    rng = np.random.default_rng(0)
+    X, y = rng.normal(size=(60, 3)), rng.normal(size=60)
+    pre = Preprocessor(random_state=0).fit(X, y)
+    assert pre.transform(X).shape[0] == 60

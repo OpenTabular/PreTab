@@ -644,6 +644,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         check_is_fitted(self)
 
+        # Array columns are matched by position, so a different width can never be
+        # routed correctly; an extra column would silently shift or drop features.
+        if isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
+                f"{self.n_features_in_} features as input."
+            )
+
         X = to_dataframe(X, copy=True)
 
         if self.missing_policy == "error":
