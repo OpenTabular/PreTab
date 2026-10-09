@@ -119,13 +119,18 @@ class SplineBasisMixin(BasePreTabTransformer):
         if selector is not None:
             if y is None:
                 raise IncompatibleParamsError("A knot selector requires y during fit for target-aware knot placement.")
-            selected = np.asarray(selector.get_knot_locations(x.reshape(-1, 1), y, task=task), dtype=float)
-            x_min, x_max = x.min(), x.max()
-            selected = np.unique(selected[(selected > x_min) & (selected < x_max)])
             if min_interior is None and max_interior is None:
                 # Fixed (non-adaptive) selector path: force exactly ``n_interior``
                 # interior knots so the width stays ``output_dim``.
                 min_interior = max_interior = n_interior
+            # Search exactly this window, so the selector's own importance ranking
+            # picks the knots instead of a positional trim afterwards.
+            selected = selector.get_knot_locations(
+                x.reshape(-1, 1), y, task=task, min_knots=min_interior, max_knots=max_interior
+            )
+            selected = np.asarray(selected, dtype=float)
+            x_min, x_max = x.min(), x.max()
+            selected = np.unique(selected[(selected > x_min) & (selected < x_max)])
             selected = self._clamp_interior_knots(x, selected, min_interior, max_interior, strategy)
             return selected
         return supplement_interior_knots(x, generate_internal_knots(x, n_interior, strategy), n_interior)
@@ -134,26 +139,16 @@ class SplineBasisMixin(BasePreTabTransformer):
         """Clamp a data-driven set of interior knots into ``[min_count, max_count]``.
 
         Down-samples with :func:`pretab.core.knots.select_knots` when there are too
-        many knots and supplements with quantile / uniform interior candidates when
-        there are too few. Endpoints are never added -- the result stays strictly
-        interior.
+        many knots and keeps every knot while topping up with quantile / uniform
+        interior candidates when there are too few. Endpoints are never added --
+        the result stays strictly interior.
         """
         x = np.asarray(x)
         knots = np.unique(np.sort(np.asarray(knots, dtype=float)))
         if max_count is not None and len(knots) > max_count:
             knots = select_knots(knots, max_count)
         if min_count is not None and len(knots) < min_count:
-            x_min, x_max = x.min(), x.max()
-            candidates = [
-                knots,
-                generate_internal_knots(x, min_count, "quantile"),
-                generate_internal_knots(x, min_count, "uniform"),
-            ]
-            combined = np.unique(np.concatenate(candidates))
-            combined = combined[(combined > x_min) & (combined < x_max)]
-            if len(combined) > min_count:
-                combined = select_knots(combined, min_count)
-            knots = combined
+            knots = supplement_interior_knots(x, knots, min_count)
         return knots
 
     def _adaptive_interior_bounds(self, output_dim, selector, *, floor, offset):

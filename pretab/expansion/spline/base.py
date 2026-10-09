@@ -239,7 +239,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
                 )
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
         elif selector is not None:
-            selected = selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)
+            # Search exactly the window this feature needs, so the selector's own
+            # importance ranking picks the knots instead of a positional trim.
+            min_knots = min(min_knots, max_knots)
+            selected = selector.get_knot_locations(
+                x_valid.reshape(-1, 1), y_valid, task=self.task, min_knots=min_knots, max_knots=max_knots
+            )
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(selected), min_knots, max_knots)
         else:
             n_internal = self._basis_to_knots(n_basis)
