@@ -317,7 +317,7 @@ def test_failed_save_leaves_an_existing_spec_untouched(tmp_path):
     pre.to_spec(path)
     saved = path.read_text(encoding="utf-8")
 
-    pre.unsupported_ = lambda value: value
+    vars(pre)["unsupported_"] = lambda value: value
     with pytest.raises(PretabSerializationError):
         pre.to_spec(path)
     assert path.read_text(encoding="utf-8") == saved
@@ -335,5 +335,6 @@ def test_object_arrays_written_before_element_encoding_still_load():
 
     payload = {"__ndarray__": {"dtype": "|O", "shape": [2, 2], "data": [["a", None], [True, 1.5]]}}
     decoded = _decode(payload)
+    assert isinstance(decoded, np.ndarray)
     assert decoded.dtype == object
     assert decoded.tolist() == [["a", None], [True, 1.5]]

@@ -6,6 +6,7 @@ validation.
 """
 
 import warnings
+from typing import cast
 
 import numpy as np
 import pytest
@@ -145,8 +146,9 @@ def test_wrapped_preprocessor_keeps_dataframe_column_types(mixed_frame):
     cross_fitted = CrossFittedTransformer(Preprocessor(output_dim=6, random_state=0), n_folds=3, random_state=0)
     out = cross_fitted.fit_transform(X, y)
 
-    assert cross_fitted.estimator_.numerical_features_ == ["num"]
-    assert cross_fitted.estimator_.categorical_features_ == ["city"]
+    wrapped = cast(Preprocessor, cross_fitted.estimator_)
+    assert wrapped.numerical_features_ == ["num"]
+    assert wrapped.categorical_features_ == ["city"]
     assert out.shape == (300, direct.total_output_dim_)
     assert list(cross_fitted.get_feature_names_out()) == list(direct.get_feature_names_out())
     assert len(np.unique(out[:, 0])) > 1  # a supervised encoding, not an "unseen category" code

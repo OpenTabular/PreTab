@@ -425,7 +425,7 @@ def test_bool_numpy_array_is_supported():
     X = np.array([[True], [False], [True], [True]])
     pre = Preprocessor().fit(X)
     assert pre.categorical_features_ == ["feature_0"]
-    assert pre.transform(X).shape == (4, 1)
+    assert np.asarray(pre.transform(X)).shape == (4, 1)
 
 
 # --- box-cox on unseen low values (issue #59) -------------------------------------
@@ -459,7 +459,8 @@ def test_boxcox_survives_cross_validation():
     from sklearn.model_selection import cross_val_score
     from sklearn.pipeline import make_pipeline
 
-    X, y = make_regression(n_samples=500, n_features=3, noise=1.0, random_state=0)
+    data = make_regression(n_samples=500, n_features=3, noise=1.0, random_state=0)
+    X, y = data[0], data[1]
     scores = cross_val_score(make_pipeline(Preprocessor(numerical_method="box-cox"), Ridge()), X, y, cv=5)
     assert np.isfinite(scores).all()
 
@@ -481,7 +482,7 @@ def test_transform_accepts_an_ndarray_of_the_fitted_width():
     rng = np.random.default_rng(0)
     X, y = rng.normal(size=(60, 3)), rng.normal(size=60)
     pre = Preprocessor(random_state=0).fit(X, y)
-    assert pre.transform(X).shape[0] == 60
+    assert np.asarray(pre.transform(X)).shape[0] == 60
 
 
 # --- get_feature_names_out(input_features) (issue #65) ----------------------------
@@ -535,4 +536,6 @@ def test_pipeline_feature_names_propagate_through_an_array_step(named_numeric):
 
     X, y = named_numeric
     pipe = make_pipeline(SimpleImputer(), Preprocessor(numerical_method="minmax")).fit(X, y)
-    assert pipe.get_feature_names_out().tolist() == ["num_age", "num_income"]
+    names = pipe.get_feature_names_out()
+    assert names is not None
+    assert names.tolist() == ["num_age", "num_income"]

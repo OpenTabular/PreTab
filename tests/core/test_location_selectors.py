@@ -1,3 +1,5 @@
+from typing import cast
+
 import numpy as np
 import pytest
 
@@ -194,7 +196,8 @@ def test_cart_keeps_the_root_split_of_a_single_step_target(seed):
 def test_cart_candidates_are_ordered_by_impurity_decrease(data):
     X, y = data
     selector = CARTLocationSelector()
-    candidates, importance = selector._ordered_candidates(X, y, "regression")
+    candidates, context = selector._ordered_candidates(X, y, "regression")
+    importance = cast("dict[float, float]", context)
     gains = [importance[c] for c in candidates]
     assert gains == sorted(gains, reverse=True)
 

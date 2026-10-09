@@ -8,6 +8,7 @@ collects per-feature preprocessing / dimension / category metadata, and
 """
 
 import copy
+from typing import Any
 
 import numpy as np
 from sklearn.pipeline import FeatureUnion, Pipeline
@@ -101,7 +102,7 @@ def feature_names_out(column_transformer, input_features=None):
     return clean_feature_names(column_transformer, raw_names, rename=rename)
 
 
-def _without_feature_names(estimator):
+def _without_feature_names(estimator) -> Any:
     """Return a shallow copy of a fitted step that accepts any input feature names.
 
     The ColumnTransformer hands each step a DataFrame column, so scikit-learn

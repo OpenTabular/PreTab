@@ -5,6 +5,8 @@ Covers ``output_format`` (dense/sparse/auto), ``dtype`` casting, the
 wrapping.
 """
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -250,7 +252,7 @@ def test_auto_format_is_fixed_at_fit_for_dense_training_output():
     """Regression guard for issue #73: low-density single rows came back sparse."""
     from sklearn.datasets import load_diabetes
 
-    X, y = load_diabetes(return_X_y=True, as_frame=True)
+    X, y = cast("tuple[pd.DataFrame, pd.Series]", load_diabetes(return_X_y=True, as_frame=True))
     pre = Preprocessor(output_format="auto", random_state=0).fit(X, y)
     assert pre.output_format_ == "dense"
     for i in range(len(X)):

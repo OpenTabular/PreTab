@@ -315,4 +315,4 @@ def test_imputer_indicator_on_categorical_integer_codes(y):
 def test_imputer_indicator_only_marks_features_with_missing_values_at_fit(clean_frame, frame_with_nan, y):
     pre = Preprocessor(numerical_method="minmax", add_missing_indicator=True).fit(clean_frame, y)
     assert not any("missing" in name for name in pre.get_feature_names_out())
-    assert pre.transform(frame_with_nan, return_array=True).shape == (6, 2)
+    assert np.asarray(pre.transform(frame_with_nan, return_array=True)).shape == (6, 2)
