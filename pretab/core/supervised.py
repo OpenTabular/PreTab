@@ -128,7 +128,7 @@ def _stack_folds(blocks, test_indices, X) -> Any:
     order[rows] = np.arange(len(rows))
     first = blocks[0]
     if all(sp.issparse(block) for block in blocks):
-        return sp.vstack(blocks, format="csr")[order].asformat(first.format)
+        return sp.vstack(blocks).tocsr()[order].asformat(first.format)
     if all(isinstance(block, pd.DataFrame) for block in blocks):
         stacked = pd.concat(blocks).iloc[order]
         index = getattr(X, "index", None)

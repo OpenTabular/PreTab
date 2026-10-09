@@ -72,7 +72,7 @@ class _SplitAtTarget(BaseRepresentation):
     def fit(self, X, y=None):
         X = self._validate(X, reset=True)
         self.used_y_ = bool(self.target_aware and y is not None)
-        self.threshold_ = X[np.argmax(y), 0] if self.used_y_ else np.median(X[:, 0])
+        self.threshold_ = X[np.argmax(np.asarray(y)), 0] if self.used_y_ else np.median(X[:, 0])
         return self
 
     def transform(self, X):
