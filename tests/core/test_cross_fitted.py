@@ -276,3 +276,61 @@ def test_cross_fitting_densifies_sparse_output_and_rejects_blocks(frame_with_rar
     blocks = Preprocessor(output_structure="blocks", random_state=0)
     with pytest.raises(IncompatibleParamsError, match="dict of blocks"):
         CrossFittedTransformer(blocks, n_folds=3, random_state=0).fit_transform(X, y)
+
+
+# --- a wrapped Preprocessor shares its missing indicators across folds --------------
+
+
+@pytest.fixture
+def frame_with_one_missing_value():
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    X.loc[7, "a"] = np.nan  # the fold holding out row 7 trains on no missing value
+    y = X["a"].fillna(0.0).to_numpy() + rng.normal(scale=0.1, size=200)
+    return X, y
+
+
+@pytest.mark.parametrize("missing", [{"add_missing_indicator": True}, {"missing_policy": "impute_with_indicator"}])
+def test_wrapped_preprocessor_keeps_its_missing_indicator_columns(frame_with_one_missing_value, missing):
+    """Each fold refit the block's MissingIndicator, which emits no column when the
+    fold's training rows contain no missing value, so the width check failed."""
+    from pretab import Preprocessor
+
+    X, y = frame_with_one_missing_value
+    wrapped = Preprocessor(numerical_method="ple", output_dim=4, random_state=0, **missing)
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=5, random_state=0)
+    out = cross_fitted.fit_transform(X, y)
+
+    assert out.shape == np.asarray(cross_fitted.transform(X)).shape
+    indicator = _split_columns(cross_fitted, "num_a__missingindicator")
+    assert len(indicator) == 1
+    np.testing.assert_array_equal(out[:, indicator[0]], X["a"].isna().to_numpy(dtype=float))
+
+
+def test_wrapped_preprocessor_refits_only_the_representation_next_to_an_indicator(frame_with_one_missing_value):
+    from pretab import Preprocessor
+
+    X, y = frame_with_one_missing_value
+
+    def cross_fit(missing_policy):
+        wrapped = Preprocessor(numerical_method="ple", output_dim=4, missing_policy=missing_policy, random_state=0)
+        cross_fitted = CrossFittedTransformer(wrapped, n_folds=5, random_state=0)
+        return cross_fitted, cross_fitted.fit_transform(X, y)
+
+    with_indicator, out = cross_fit("impute_with_indicator")
+    _, imputed_only = cross_fit("impute")
+    names = list(with_indicator.get_feature_names_out())
+    representation = [i for i, name in enumerate(names) if "missingindicator" not in name]
+    np.testing.assert_allclose(out[:, representation], imputed_only)
+
+
+def test_width_mismatch_names_the_general_cause():
+    from sklearn.preprocessing import OneHotEncoder
+
+    x = np.array(["a"] * 99 + ["b"]).reshape(-1, 1)  # the fold holding out "b" never sees it
+    y = np.arange(100.0)
+    cross_fitted = CrossFittedTransformer(OneHotEncoder(handle_unknown="ignore"), n_folds=5, random_state=0)
+    with pytest.raises(IncompatibleParamsError, match="same columns on every fold"):
+        cross_fitted.fit_transform(x, y)

@@ -72,6 +72,11 @@ held-out fold, so every training row is transformed by a model that never saw it
 `transform` on genuinely new data (a validation or test set) instead uses one model fit on all
 the training data, since there is no leakage risk there.
 
+A wrapped `Preprocessor` is not refit from scratch on each fold: every fold reuses its all-data
+fit and refits only the target-aware representations. Column types, category codes,
+missing-value indicators and the blocks that do not use `y` are shared, so the out-of-fold
+features have exactly the columns and encoding `transform` produces.
+
 ```python
 import numpy as np
 

@@ -229,8 +229,9 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
                     raise IncompatibleParamsError(
                         "Cross-fitting requires a fixed output width across folds; expected "
                         f"{width}, got {fold_out.shape[1]}. The wrapped transformer's width "
-                        "depends on the training rows (e.g. adaptive sizing); fix it, for "
-                        "example by disabling adaptive sizing."
+                        "depends on the rows it is fit on (e.g. adaptive sizing, or category / "
+                        "indicator columns learned from the data); configure it to produce the "
+                        "same columns on every fold."
                     )
                 out[test_idx] = fold_out
         finally:

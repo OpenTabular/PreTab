@@ -5,7 +5,7 @@ import logging
 import os
 import time
 import warnings
-from typing import Any, cast
+from typing import cast
 
 import numpy as np
 from scipy import sparse as sp
@@ -29,6 +29,7 @@ from .compose.inspection import (
     build_transformer_summary,
     feature_names_out,
     get_output_slices,
+    refit_block_representation,
     representation_leaf,
 )
 from .compose.output import (
@@ -939,16 +940,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return X.infer_objects() if is_array else X
 
     def _cross_fit_fold(self, X, y):
-        """Return a copy of this fit whose target-aware blocks are refit on ``(X, y)``.
+        """Return a copy of this fit whose target-aware representations are refit on ``(X, y)``.
 
         Used by :class:`~pretab.CrossFittedTransformer` for its out-of-fold
-        features. Only the blocks that consume the target are refit on the fold;
-        column types, category vocabularies and every other block are shared
-        with this all-data fit, so an out-of-fold row is encoded exactly like
-        ``transform`` encodes it, except that no target-aware placement has seen
-        that row's target. Refitting the whole preprocessor per fold would
-        re-detect column types and relearn categories on fewer rows, shifting
-        integer codes and one-hot columns between the folds and ``transform``.
+        features. Only the representations that consume the target are refit on
+        the fold; column types, category vocabularies, missing-value indicators
+        and every other block are shared with this all-data fit, so an
+        out-of-fold row is encoded exactly like ``transform`` encodes it, except
+        that no target-aware placement has seen that row's target. Refitting the
+        whole preprocessor per fold would re-detect column types and relearn
+        categories on fewer rows, shifting integer codes and one-hot columns
+        between the folds and ``transform``; refitting a block's missing
+        indicator would drop its column on a fold without missing values.
         """
         check_is_fitted(self)
         X_ct = self._column_transformer_input(self._align_input(X))
@@ -956,7 +959,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         column_transformer.transformers_ = [
             (
                 name,
-                cast(Any, clone(transformer)).fit(X_ct[list(columns)], y)
+                refit_block_representation(transformer, X_ct[list(columns)], y)
                 if name != "remainder" and block_uses_target(transformer, columns)
                 else transformer,
                 columns,
