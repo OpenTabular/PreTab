@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 
 __all__ = [
     "block_name",
+    "block_uses_target",
     "build_feature_info",
     "build_feature_lineage",
     "build_transformer_summary",
@@ -360,6 +361,17 @@ def _resolve_block_representation(pipeline, columns):
             family, component = _STEP_FAMILY[step_name]
             return family, component, False, False
     return "passthrough", "raw", False, False
+
+
+def block_uses_target(transformer, columns) -> bool:
+    """Whether a fitted per-column block's representation consumed the target ``y``.
+
+    For a separate-state / missing-indicator union the representation branch
+    decides; helper steps such as imputers and scalers never use the target.
+    """
+    separate_state = _separate_state_branches(transformer)
+    representation = separate_state[0] if separate_state is not None else transformer
+    return bool(_resolve_block_representation(representation, columns)[2])
 
 
 def _passthrough_source(columns, offset, feature_names_in):

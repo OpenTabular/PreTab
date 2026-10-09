@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import logging
@@ -22,6 +23,7 @@ from .compose.feature_detection import (
 )
 from .compose.inspection import (
     block_name,
+    block_uses_target,
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
@@ -928,6 +930,35 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             )
         X = X.set_axis(list(fitted_labels), axis=1)
         return X.infer_objects() if is_array else X
+
+    def _cross_fit_fold(self, X, y):
+        """Return a copy of this fit whose target-aware blocks are refit on ``(X, y)``.
+
+        Used by :class:`~pretab.CrossFittedTransformer` for its out-of-fold
+        features. Only the blocks that consume the target are refit on the fold;
+        column types, category vocabularies and every other block are shared
+        with this all-data fit, so an out-of-fold row is encoded exactly like
+        ``transform`` encodes it, except that no target-aware placement has seen
+        that row's target. Refitting the whole preprocessor per fold would
+        re-detect column types and relearn categories on fewer rows, shifting
+        integer codes and one-hot columns between the folds and ``transform``.
+        """
+        check_is_fitted(self)
+        X_ct = self._column_transformer_input(self._align_input(X))
+        column_transformer = copy.copy(self.column_transformer_)
+        column_transformer.transformers_ = [
+            (
+                name,
+                clone(transformer).fit(X_ct[list(columns)], y)
+                if name != "remainder" and block_uses_target(transformer, columns)
+                else transformer,
+                columns,
+            )
+            for name, transformer, columns in self.column_transformer_.transformers_
+        ]
+        fold = copy.copy(self)
+        fold.column_transformer_ = column_transformer
+        return fold
 
     @staticmethod
     def _column_transformer_input(X):

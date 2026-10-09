@@ -169,3 +169,84 @@ def test_one_dimensional_input_is_still_a_single_column():
     x = rng.normal(size=200)
     out = CrossFittedTransformer(PLETransformer(output_dim=4), n_folds=3, random_state=0).fit_transform(x, x**2)
     assert out.shape == (200, 4)
+
+
+# --- a wrapped Preprocessor keeps one encoding across folds -------------------------
+
+
+@pytest.fixture
+def frame_with_rare_category():
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(
+        {
+            "x": rng.normal(size=300),
+            "rooms": rng.integers(1, 9, 300),  # unique ratio near the default cat_cutoff
+            "city": rng.choice(["Berlin", "Paris", "Rome"], 300),
+        }
+    )
+    X.loc[7, "city"] = "Amsterdam"  # a category some folds never see
+    y = X["x"].to_numpy() ** 2 + (X["city"] == "Paris") + rng.normal(scale=0.1, size=300)
+    return X, y
+
+
+def _split_columns(cross_fitted, prefix):
+    names = list(cross_fitted.get_feature_names_out())
+    return [i for i, name in enumerate(names) if name.startswith(prefix)]
+
+
+def test_wrapped_preprocessor_out_of_fold_codes_match_transform(frame_with_rare_category):
+    """Each fold used to refit the whole Preprocessor: category codes shifted when a
+    category was missing from a fold, and column types were re-detected on fewer rows."""
+    from pretab import Preprocessor
+
+    X, y = frame_with_rare_category
+    cross_fitted = CrossFittedTransformer(Preprocessor(output_dim=4, random_state=0), n_folds=5, random_state=0)
+    out = cross_fitted.fit_transform(X, y)
+    full = np.asarray(cross_fitted.transform(X))
+
+    unsupervised = _split_columns(cross_fitted, "cat_")
+    assert unsupervised  # rooms and city are categorical on the full data
+    np.testing.assert_array_equal(out[:, unsupervised], full[:, unsupervised])
+
+
+def test_wrapped_preprocessor_target_aware_blocks_stay_out_of_fold(frame_with_rare_category):
+    from pretab import Preprocessor
+
+    X, y = frame_with_rare_category
+    cross_fitted = CrossFittedTransformer(Preprocessor(output_dim=4, random_state=0), n_folds=5, random_state=0)
+    out = cross_fitted.fit_transform(X, y)
+    supervised = _split_columns(cross_fitted, "num_x_ple")
+    assert not np.allclose(out[:, supervised], np.asarray(cross_fitted.transform(X))[:, supervised])
+
+
+def test_wrapped_preprocessor_with_one_hot_keeps_a_fixed_width(frame_with_rare_category):
+    from pretab import Preprocessor
+
+    X, y = frame_with_rare_category
+    wrapped = Preprocessor(categorical_method="one-hot", output_dim=4, random_state=0)
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=5, random_state=0)
+    out = cross_fitted.fit_transform(X, y)
+    assert out.shape == (len(X), len(cross_fitted.get_feature_names_out()))
+
+
+def test_wrapped_unsupervised_preprocessor_matches_transform(frame_with_rare_category):
+    from pretab import Preprocessor
+
+    X, y = frame_with_rare_category
+    wrapped = Preprocessor(numerical_method="minmax", target_aware=False, placement_strategy="quantile")
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=3, random_state=0)
+    np.testing.assert_array_equal(cross_fitted.fit_transform(X, y), np.asarray(cross_fitted.transform(X)))
+
+
+def test_cross_fitting_densifies_sparse_output_and_rejects_blocks(frame_with_rare_category):
+    from pretab import Preprocessor
+
+    X, y = frame_with_rare_category
+    sparse = Preprocessor(categorical_method="one-hot", output_format="sparse", random_state=0)
+    out = CrossFittedTransformer(sparse, n_folds=3, random_state=0).fit_transform(X, y)
+    assert isinstance(out, np.ndarray)
+    blocks = Preprocessor(output_structure="blocks", random_state=0)
+    with pytest.raises(IncompatibleParamsError, match="dict of blocks"):
+        CrossFittedTransformer(blocks, n_folds=3, random_state=0).fit_transform(X, y)
