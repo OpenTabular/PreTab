@@ -165,6 +165,25 @@ search.best_method_
 best_preprocessor_` and `search.best_estimator_` are refit on all the data with `bspline` and
 ready to call `.predict(X_new)`.
 
+When several rows belong to the same unit, such as repeated measurements of one patient, a
+row-level split validates each candidate on units it has already seen in training. Pass a
+group splitter as `cv` and the group labels to `fit`, so no group is on both sides of a
+train/validation split:
+
+```python
+from sklearn.model_selection import GroupKFold
+
+patient_id = np.repeat(np.arange(30), 10)  # 30 patients with 10 rows each
+
+search = RepresentationSearchCV(Ridge(), methods=["minmax", "bspline"], cv=GroupKFold(5))
+search.fit(X, y, groups=patient_id)
+```
+
+Any other keyword argument to `fit`, such as `sample_weight`, is passed to the estimator's
+`fit` on every fold (restricted to that fold's training rows) and on the final refit. The
+`Preprocessor` and the scorer do not see it, so placement and validation scores are
+unweighted.
+
 ```{note}
 This is deliberately narrow: it only searches the single `numerical_method` axis with one
 global method for every numerical column, not a per-column `feature_preprocessing` search.

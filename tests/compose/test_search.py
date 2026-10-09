@@ -9,9 +9,10 @@ here is a controlled nonlinear signal (``sin``) where an expressive basis
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.exceptions import NotFittedError
-from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.model_selection import KFold
+from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit, KFold, LeaveOneGroupOut
 
 from pretab import RepresentationSearchCV
 from pretab.exceptions import InvalidParamError
@@ -154,3 +155,84 @@ def test_regressor_search_keeps_the_regression_task(nonlinear_data):
     X, y = nonlinear_data
     search = RepresentationSearchCV(LinearRegression(), methods=["minmax"], cv=3).fit(X, y)
     assert search.best_preprocessor_.task == "regression"
+
+
+class _RowRecorder(RegressorMixin, BaseEstimator):
+    """Mean regressor whose ``fit`` records the ``row_id`` fit parameter it gets."""
+
+    def fit(self, X, y, row_id=None):
+        self.row_id_ = row_id
+        self.mean_ = float(np.mean(y))
+        return self
+
+    def predict(self, X):
+        return np.full(len(X), self.mean_)
+
+
+def _recording_scorer(fold_rows):
+    """Scorer that stores the ``row_id`` of each fold's fitted estimator."""
+
+    def score(est, x_test, y_test):
+        fold_rows.append(np.asarray(est.row_id_))
+        return 0.0
+
+    return score
+
+
+@pytest.fixture
+def grouped_data(nonlinear_data):
+    """``nonlinear_data`` with 20 groups of 10 rows (e.g. 20 patients)."""
+    X, y = nonlinear_data
+    return X, y, np.repeat(np.arange(20), 10)
+
+
+@pytest.mark.parametrize(
+    "cv",
+    [GroupKFold(n_splits=4), LeaveOneGroupOut(), GroupShuffleSplit(n_splits=3, test_size=0.25, random_state=0)],
+    ids=["group_kfold", "leave_one_group_out", "group_shuffle_split"],
+)
+def test_group_splitter_receives_groups(grouped_data, cv):
+    """Group splitters always failed: fit() took no groups and split() got none."""
+    X, y, groups = grouped_data
+    fold_rows = []
+    search = _search(_RowRecorder(), ["minmax"], cv=cv, scoring=_recording_scorer(fold_rows))
+    search.fit(X, y, groups=groups, row_id=np.arange(len(X)))
+
+    for rows, (train, test) in zip(fold_rows, cv.split(X, y, groups), strict=True):
+        np.testing.assert_array_equal(rows, train)
+        # No group is on both sides of a train/validation split.
+        assert set(groups[rows]).isdisjoint(groups[test])
+
+
+@pytest.mark.filterwarnings("ignore:The groups parameter is ignored:UserWarning")
+def test_groups_leave_non_group_splits_unchanged(grouped_data):
+    X, y, groups = grouped_data
+    plain = _search(LinearRegression(), ["standardization", "bspline"]).fit(X, y)
+    grouped = _search(LinearRegression(), ["standardization", "bspline"]).fit(X, y, groups=groups)
+    assert grouped.cv_results_ == plain.cv_results_
+
+
+def test_fit_params_are_split_per_fold_and_passed_to_the_refit(nonlinear_data):
+    X, y = nonlinear_data
+    row_id = np.arange(len(X))
+    cv = KFold(n_splits=4, shuffle=True, random_state=0)
+    fold_rows = []
+    search = _search(_RowRecorder(), ["minmax"], cv=cv, scoring=_recording_scorer(fold_rows))
+    search.fit(X, y, row_id=row_id)
+
+    # Each fold's estimator sees only its training rows; the refit sees all rows.
+    for rows, (train, _) in zip(fold_rows, cv.split(X), strict=True):
+        np.testing.assert_array_equal(rows, train)
+    np.testing.assert_array_equal(search.best_estimator_.row_id_, row_id)
+
+
+def test_sample_weight_reaches_the_estimator(nonlinear_data):
+    X, y = nonlinear_data
+    weights = np.linspace(0.1, 2.0, len(X))
+    search = _search(Ridge(), ["bspline"]).fit(X, y, sample_weight=weights)
+
+    x_all = search.best_preprocessor_.transform(X, return_array=True)
+    expected = Ridge().fit(x_all, y, sample_weight=weights)
+    np.testing.assert_allclose(search.best_estimator_.coef_, expected.coef_)
+    # The fold fits are weighted as well, so the validation scores change.
+    assert search.cv_results_ != _search(Ridge(), ["bspline"]).fit(X, y).cv_results_
