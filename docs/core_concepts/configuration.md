@@ -51,6 +51,31 @@ example `{"feature_0": "rbf"}`. Check `numerical_features_` / `categorical_featu
 overrides, rather than guessing the column order.
 ```
 
+## Polars DataFrame input
+
+A `polars.DataFrame` is accepted as input to the `Preprocessor`, `RepresentationSearchCV` and
+`CrossFittedTransformer` wherever a pandas `DataFrame` is (temporal columns are not supported),
+so a scikit-learn `Pipeline` configured with `set_output(transform="polars")` can hand its
+polars output straight to the `Preprocessor`. PreTab reads the frame through pandas with the same column names, order
+and dtypes, then detects column types as usual: `Float*` columns are numerical, `Int*` /
+`UInt*` columns follow the integer cardinality rule (an integer column with nulls becomes
+float, as in pandas), and `String`, `Categorical`, `Enum` and `Boolean` columns are
+categorical. Polars nulls become missing values, so imputation and `missing_policy` treat them
+like `NaN` in a pandas frame. The conversion does not need `pyarrow`.
+
+```python
+import polars as pl
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+
+X = pl.DataFrame({"age": [25.0, None, 47.0, 33.0], "income": [3.1e4, 5.2e4, None, 4.4e4]})
+y = [0.0, 1.0, 1.0, 0.0]
+
+pipe = Pipeline([("impute", SimpleImputer()), ("pretab", Preprocessor(numerical_method="minmax"))])
+pipe.set_output(transform="polars")
+pipe.fit_transform(X, y)   # a polars.DataFrame with columns num_age, num_income
+```
+
 ## Per-feature overrides
 
 Columns rarely want identical treatment. The `feature_preprocessing` dict assigns a strategy
@@ -119,7 +144,9 @@ regression and classification differently.
 | `"adaptive"` | task-dependent     | `"int"`              | -            | `True`     | `7`              | `15`             |
 
 `numerical_method` resolves to `"bspline"` when `task="regression"` (the default) and to
-`"ple"` when `task="classification"`, for every preset:
+`"ple"` when `task="classification"`, for every preset. `task` is matched exactly: any other
+value, such as `"Regression"`, raises an `InvalidParamError` from `fit` and
+`get_resolved_config()` instead of falling back to the classification preset.
 
 ```python
 standard_regression = Preprocessor(preset="standard", task="regression")
@@ -182,7 +209,8 @@ The resolution order is deterministic. Later layers win.
 
 ```{warning}
 Configuration is validated at `fit` time, not silently coerced. An invalid combination, such
-as a method that requires the target used with `target_aware=False`, raises a typed error.
+as a method that requires the target used with `target_aware=False`, or a `task` other than
+`"regression"` / `"classification"`, raises a typed error.
 This is intentional: it surfaces mistakes early rather than producing a quietly wrong
 representation.
 ```

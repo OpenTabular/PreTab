@@ -125,7 +125,9 @@ class ThinPlateSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimat
             if d == 1:
                 return r**3
             if d == 2:
-                return np.where(r > 0, r**2 * np.log(np.where(r > 0, r, 1.0)), 0.0)
+                # r == 0 (not r > 0) selects the zero branch, so a missing
+                # coordinate keeps its NaN distance instead of becoming 0.
+                return np.where(r == 0, 0.0, r**2 * np.log(np.where(r > 0, r, 1.0)))
             # d >= 3: biharmonic (linear) radial kernel.
             return r
 

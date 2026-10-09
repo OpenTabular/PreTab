@@ -69,6 +69,18 @@ def _filter_kwargs(allowed, kwargs):
     return {key: kwargs[key] for key in allowed if key in kwargs}
 
 
+def _imputer(strategy, add_indicator, imputer_kwargs):
+    """Build the leading :class:`~sklearn.impute.SimpleImputer` of a per-column pipeline.
+
+    A column with no observed value at fit is kept (``keep_empty_features=True``)
+    and filled with ``0``, or with ``fill_value`` for ``strategy="constant"``.
+    scikit-learn's default drops it, which leaves the rest of the pipeline an
+    input without columns: the block then fails to fit or vanishes from the output.
+    """
+    imputer_kwargs = {"keep_empty_features": True, **(imputer_kwargs or {})}
+    return SimpleImputer(strategy=strategy, add_indicator=add_indicator, **imputer_kwargs)
+
+
 def _clamp_spline_basis(output_dim):
     """Clamp a requested output dimension into the supported B/M/I spline range.
 
@@ -90,23 +102,24 @@ def _placement_kwargs(spec: TransformerSpec, kwargs):
     """Return the placement kwargs to inject for a method, honouring its capability.
 
     Mirrors the shared-placement contract: methods with optional target awareness
-    (feature maps and freely-placed knot splines) receive ``target_aware`` plus
-    the ``placement_strategy`` (when set); the always-target-aware ``ple`` receives
-    a supervised ``placement_strategy`` only when target-aware; the unsupervised-only
-    penalized splines receive an unsupervised ``placement_strategy`` only when not
-    target-aware. Methods without data-driven placement receive nothing.
+    (feature maps, freely-placed knot splines, and registered ``"optional"``
+    representations) always receive ``target_aware``, which decides whether they
+    use ``y`` at all, plus the ``placement_strategy`` (when set) if they declare
+    placement strategies; the always-target-aware ``ple`` receives a supervised
+    ``placement_strategy`` only when target-aware; the unsupervised-only penalized
+    splines receive an unsupervised ``placement_strategy`` only when not
+    target-aware. Other methods without data-driven placement receive nothing.
     """
-    if not spec.placement_strategies:
-        return {}
-
     target_aware = bool(kwargs.get("target_aware", False))
     placement_strategy = kwargs.get("placement_strategy")
 
     if spec.target_usage == "optional":
         out = {"target_aware": target_aware}
-        if placement_strategy is not None:
+        if placement_strategy is not None and spec.placement_strategies:
             out["placement_strategy"] = placement_strategy
         return out
+    if not spec.placement_strategies:
+        return {}
     if spec.target_usage == "required":
         if target_aware and placement_strategy in ("cart", "lightgbm"):
             return {"placement_strategy": placement_strategy}
@@ -131,10 +144,7 @@ def get_numerical_transformer_steps(
     steps = []
 
     if add_imputer:
-        imputer_kwargs = imputer_kwargs or {}
-        steps.append(
-            ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
-        )
+        steps.append(("imputer", _imputer(imputer_strategy, add_missing_indicator, imputer_kwargs)))
 
     # Optional scaling step, added only when it is not already the chosen method.
     scalers = {
@@ -208,10 +218,7 @@ def get_categorical_transformer_steps(
     steps = []
 
     if add_imputer:
-        imputer_kwargs = imputer_kwargs or {}
-        steps.append(
-            ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
-        )
+        steps.append(("imputer", _imputer(imputer_strategy, add_missing_indicator, imputer_kwargs)))
 
     if method not in CATEGORICAL_METHODS:
         raise invalid_param_error(

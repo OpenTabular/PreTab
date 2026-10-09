@@ -67,3 +67,38 @@ def test_registered_target_encoder_is_refit_per_fold(noise_target_data, cls, sup
     # all-data fit correlated at about 0.5.
     assert abs(np.corrcoef(out_of_fold[:, -1], y)[0, 1]) < 0.2
     assert lineage["cat_id"] is True
+
+
+class _MeanEncoderOffByDefault(_MeanEncoder):
+    """The same optional encoder, defaulting to target_aware=False."""
+
+    def __init__(self, target_aware=False):
+        super().__init__(target_aware=target_aware)
+
+
+@pytest.mark.parametrize(("target_aware", "placement_strategy"), [(True, "cart"), (False, "uniform")])
+def test_optional_class_follows_the_preprocessor_target_aware_across_folds(
+    noise_target_data, target_aware, placement_strategy
+):
+    """The Preprocessor passes its target_aware to an optional class, so a class that
+    defaults to False becomes target-aware under target_aware=True -- and must then be
+    refit on every fold, while under target_aware=False it never sees y."""
+    X, y = noise_target_data
+    register_representation(
+        "registered_encoder", _MeanEncoderOffByDefault, feature_kind="categorical", supervision="optional"
+    )
+    pre = Preprocessor(
+        numerical_method="minmax",
+        categorical_method="registered_encoder",
+        target_aware=target_aware,
+        placement_strategy=placement_strategy,
+        random_state=0,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        out_of_fold = np.asarray(CrossFittedTransformer(pre, n_folds=5, random_state=0).fit_transform(X, y))
+        lineage = {item.output_feature: item.uses_target for item in pre.fit(X, y).get_feature_lineage()}
+
+    assert abs(np.corrcoef(out_of_fold[:, -1], y)[0, 1]) < 0.2
+    assert lineage["cat_id"] is target_aware

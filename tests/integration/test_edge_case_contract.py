@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab import Preprocessor, RepresentationPolicy
+from pretab import CrossFittedTransformer, Preprocessor, RepresentationPolicy
 from pretab.exceptions import DataWarning, InsufficientSamplesError, PretabDataError
 from pretab.transformers import (
     BSplineTransformer,
@@ -84,9 +84,10 @@ CONSTANT_GRACEFUL = [
 ALL_FAMILIES = CONSTANT_RAISES + CONSTANT_GRACEFUL
 
 # Families that let missing values pass through the basis (NaN in -> NaN row out).
-# The B/M/I splines instead clip a missing value to the fitted boundary, so they
-# are intentionally excluded here.
 NAN_PROPAGATING = [
+    "BSpline",
+    "MSpline",
+    "ISpline",
     "RBF",
     "ReLU",
     "Sigmoid",
@@ -258,3 +259,173 @@ def test_preprocessor_stores_resolved_policy(rng):
         pre.fit(df, y)
     assert isinstance(pre.policy_, RepresentationPolicy)
     assert pre.policy_.constant == "warn"
+
+
+# --------------------------------------------------------------------------- #
+# Column with no observed value at fit, through the Preprocessor
+# --------------------------------------------------------------------------- #
+def _frame_with_empty_column(rng, kind, n=60):
+    """A frame whose ``empty`` column (numerical or categorical) is missing on every row."""
+    empty = np.full(n, np.nan) if kind == "numerical" else pd.Series([np.nan] * n, dtype=object)
+    return pd.DataFrame({"age": rng.normal(40, 10, n), "city": rng.choice(["a", "b", "c"], n), "empty": empty})
+
+
+def _observed(X, kind, rng):
+    """``X`` with its ``empty`` column observed on every row (as later data may be)."""
+    values = rng.normal(size=len(X)) if kind == "numerical" else rng.choice(["p", "q"], len(X))
+    return X.assign(empty=values)
+
+
+def _fit_empty(pre, X, y):
+    with pytest.warns(DataWarning, match=r"\['empty'\] with no observed"):
+        return pre.fit(X, y)
+
+
+def _assert_metadata_matches_output(pre, X, X_later):
+    """Every detected feature has a block, and every metadata view agrees with the output."""
+    out = pre.transform(X, return_array=True)
+    width = out.shape[1]
+    assert pre.n_features_in_ == 3
+    assert set(pre.output_dims_) == {"age", "city", "empty"}
+    assert pre.output_dims_["empty"] >= 1
+    assert sum(pre.output_dims_.values()) == width == pre.total_output_dim_
+    assert len(pre.get_feature_names_out()) == width
+    lineage = pre.get_feature_lineage()
+    assert len(lineage) == width
+    assert sum(record.source_features == ("empty",) for record in lineage) == pre.output_dims_["empty"]
+    blocks = pre.transform(X, return_array=False)
+    assert {name.split("_", 1)[1] for name in blocks} == {"age", "city", "empty"}
+    numerical, categorical, _ = pre.get_feature_info(verbose=False)
+    assert set(numerical) | set(categorical) == {"age", "city", "empty"}
+    info = {**numerical, **categorical}["empty"]
+    if info["dimension"] is not None:
+        assert info["dimension"] == pre.output_dims_["empty"]
+    # Data where the column is observed later is transformed with the fitted width.
+    assert pre.transform(X_later, return_array=True).shape == (len(X_later), width)
+
+
+# Numerical methods that fit a constant column, with (target_aware, placement_strategy).
+_EMPTY_NUMERICAL_CASES = [
+    (method, target_aware, "cart" if target_aware else "uniform")
+    for method in [
+        "ple",
+        "minmax",
+        "standardization",
+        "robust",
+        "quantile",
+        "yeo-johnson",
+        "rbf",
+        "relu",
+        "sigmoid",
+        "tanh",
+        "binning",
+        "fourier",
+        "polynomial",
+        "none",
+    ]
+    for target_aware in (True, False)
+    if not (method == "ple" and not target_aware)
+]
+
+
+@pytest.mark.parametrize(("method", "target_aware", "placement"), _EMPTY_NUMERICAL_CASES)
+def test_empty_numerical_column_keeps_its_block(method, target_aware, placement, rng):
+    X = _frame_with_empty_column(rng, "numerical")
+    y = rng.normal(size=len(X))
+    pre = Preprocessor(numerical_method=method, target_aware=target_aware, placement_strategy=placement)
+    _fit_empty(pre, X, y)
+    _assert_metadata_matches_output(pre, X, _observed(X, "numerical", rng))
+
+
+# The methods that cannot be fitted on a constant column (see CONSTANT_RAISES).
+@pytest.mark.parametrize(
+    "method", ["bspline", "mspline", "ispline", "pspline", "naturalspline", "cubicspline", "box-cox"]
+)
+def test_empty_numerical_column_names_the_column_when_the_method_needs_spread(method, rng):
+    X = _frame_with_empty_column(rng, "numerical")
+    y = rng.normal(size=len(X))
+    pre = Preprocessor(numerical_method=method, target_aware=False, placement_strategy="uniform")
+    with pytest.warns(DataWarning), pytest.raises(PretabDataError, match=f"Column 'empty' .* {method!r}") as info:
+        pre.fit(X, y)
+    assert info.value.__cause__ is not None  # chained to the method's own error
+
+
+@pytest.mark.parametrize(
+    ("method", "y_kind", "message"),
+    [
+        ("ple", "short", "same length"),
+        ("bspline", "strings", "could not convert string to float"),
+        ("rbf", "strings", "could not convert string to float"),
+    ],
+)
+def test_empty_column_is_not_blamed_for_an_unrelated_fit_failure(method, y_kind, message, rng):
+    """A failure the block also hits with observed values (here a bad ``y``) keeps
+    its own error instead of being attributed to the empty column."""
+    X = _frame_with_empty_column(rng, "numerical")
+    y = rng.normal(size=len(X) - 3) if y_kind == "short" else rng.choice(["p", "q"], len(X))
+    params = {"target_aware": True, "placement_strategy": "cart"} if method != "ple" else {}
+    with pytest.warns(DataWarning), pytest.raises(ValueError, match=message) as info:
+        Preprocessor(numerical_method=method, **params).fit(X, y)
+    assert "has no observed" not in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"missing_policy": "impute"},
+        {"missing_policy": "impute_with_indicator"},
+        {"missing_policy": "separate_state"},
+        {"missing_policy": "propagate"},
+        {"add_missing_indicator": True},
+        {"numerical_imputation": None},
+        {"numerical_imputation": None, "add_missing_indicator": True},
+        {"numerical_imputation": "constant"},
+    ],
+)
+def test_empty_numerical_column_under_missing_value_settings(params, rng):
+    X = _frame_with_empty_column(rng, "numerical")
+    y = rng.normal(size=len(X))
+    pre = Preprocessor(numerical_method="minmax", **params)
+    with warnings.catch_warnings():
+        # The all-NaN column reaches MinMaxScaler when imputation is disabled.
+        warnings.filterwarnings("ignore", "All-NaN slice", RuntimeWarning)
+        _fit_empty(pre, X, y)
+    _assert_metadata_matches_output(pre, X, _observed(X, "numerical", rng))
+
+
+@pytest.mark.parametrize("method", ["int", "one-hot", "none"])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"missing_policy": "impute_with_indicator"},
+        {"missing_policy": "separate_state"},
+        {"missing_policy": "propagate"},
+        {"add_missing_indicator": True},
+        {"categorical_imputation": None},
+        {"categorical_imputation": "constant"},
+    ],
+)
+def test_empty_categorical_column_keeps_its_block(method, params, rng):
+    X = _frame_with_empty_column(rng, "categorical")
+    y = rng.normal(size=len(X))
+    pre = Preprocessor(numerical_method="minmax", categorical_method=method, **params)
+    _fit_empty(pre, X, y)
+    _assert_metadata_matches_output(pre, X, _observed(X, "categorical", rng))
+
+
+def test_empty_numerical_column_counts_as_constant_for_the_policy(rng):
+    X = _frame_with_empty_column(rng, "numerical")
+    y = rng.normal(size=len(X))
+    with pytest.warns(DataWarning), pytest.raises(PretabDataError, match="constant"):
+        Preprocessor(numerical_method="minmax", policy={"constant": "error"}).fit(X, y)
+
+
+def test_column_empty_in_a_cross_fitting_fold_keeps_the_width(rng):
+    n = 60
+    X = _frame_with_empty_column(rng, "numerical", n=n)
+    X.loc[n - 6 :, "empty"] = rng.normal(size=6)  # observed only in the last fold
+    y = rng.normal(size=n)
+    cross_fitted = CrossFittedTransformer(Preprocessor(numerical_method="rbf"), n_folds=10, shuffle=False)
+    out_of_fold = np.asarray(cross_fitted.fit_transform(X, y))
+    assert out_of_fold.shape == cross_fitted.transform(X).shape

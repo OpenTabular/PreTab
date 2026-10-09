@@ -15,6 +15,7 @@ import pytest
 from sklearn.exceptions import NotFittedError
 
 from pretab import Preprocessor, PretabWarning
+from pretab.compose.registry import TRANSFORMER_REGISTRY
 from pretab.core.adaptive import AdaptiveResolutionMixin
 from pretab.core.knots import generate_internal_knots
 from pretab.exceptions import (
@@ -172,8 +173,35 @@ def test_bspline_error_is_catchable_as_pretab_error(xy):
 
 def test_ple_unsupported_task(xy):
     X, y = xy
-    with pytest.raises(InvalidParamError, match="Unsupported task"):
+    with pytest.raises(InvalidParamError, match=r"PLETransformer\.task = 'bogus' is invalid"):
         PLETransformer(output_dim=5, task="bogus").fit(X, y)  # type: ignore[arg-type]
+
+
+# Every registered method that takes a ``task`` parameter.
+_TASK_METHODS = sorted(name for name, spec in TRANSFORMER_REGISTRY.items() if "task" in spec.allowed_args)
+
+
+@pytest.mark.parametrize("method", _TASK_METHODS)
+def test_unknown_task_raises_at_fit(method):
+    """A near-miss ``task`` used to switch the knot splines to classification placement."""
+    spec = TRANSFORMER_REGISTRY[method]
+    X = np.linspace(0, 10, 200).reshape(-1, 1)
+    y = np.round(X[:, 0] ** 2)  # integer-valued regression target, so a classifier would also fit
+    params: dict[str, object] = {"task": "Regression"}
+    if spec.target_usage == "optional":
+        params.update(target_aware=True, placement_strategy="cart")
+    transformer = spec.transformer_cls(**params)  # validated at fit, not at construction
+    with pytest.raises(InvalidParamError, match=rf"{spec.transformer_cls.__name__}\.task = 'Regression' is invalid"):
+        transformer.fit(X, y)
+
+
+def test_spline_task_none_places_knots_for_regression(xy):
+    X, y = xy
+    knots = {
+        task: BSplineTransformer(target_aware=True, placement_strategy="cart", task=task).fit(X, y).knots_[0]
+        for task in (None, "regression")
+    }
+    np.testing.assert_array_equal(knots[None], knots["regression"])
 
 
 def test_ple_length_mismatch_is_data_error(xy):
@@ -218,6 +246,15 @@ def test_preprocessor_unknown_numerical_method():
     with pytest.raises(InvalidParamError) as exc:
         Preprocessor(numerical_method="bogus").fit(df, y)
     assert isinstance(exc.value, ValueError)
+
+
+@pytest.mark.parametrize("method", ["bspline", "naturalspline", "rbf", "ple", "minmax"])
+def test_preprocessor_unknown_task(method):
+    """Before, ``task="Regression"`` gave classification knots, or failed deep in scikit-learn."""
+    df = pd.DataFrame({"a": np.linspace(0, 10, 200)})
+    y = np.sin(df["a"].to_numpy())
+    with pytest.raises(InvalidParamError, match=r"Preprocessor\.task = 'Regression' is invalid"):
+        Preprocessor(numerical_method=method, task="Regression").fit(df, y)
 
 
 def test_preprocessor_unknown_categorical_method():

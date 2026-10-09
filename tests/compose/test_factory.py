@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
 from pretab.compose.factory import (
     _placement_kwargs,
@@ -10,7 +11,7 @@ from pretab.compose.factory import (
     get_categorical_transformer_steps,
     get_numerical_transformer_steps,
 )
-from pretab.compose.registry import get_spec
+from pretab.compose.registry import TransformerSpec, get_spec
 from pretab.exceptions import ConfigWarning, InvalidParamError
 
 
@@ -27,6 +28,15 @@ def test_imputer_is_first_step_by_default():
 
 def test_imputer_omitted_when_disabled():
     assert "imputer" not in _names(get_numerical_transformer_steps("standardization", add_imputer=False))
+
+
+def test_imputer_keeps_a_column_without_observed_values():
+    empty = np.full((4, 1), np.nan)
+    assert Pipeline(get_numerical_transformer_steps("minmax")).fit_transform(empty).shape == (4, 1)
+    assert Pipeline(get_categorical_transformer_steps("one-hot")).fit_transform(empty.astype(object)).shape == (4, 1)
+    # imputer_kwargs can still restore scikit-learn's default of dropping it.
+    steps = dict(get_numerical_transformer_steps("minmax", imputer_kwargs={"keep_empty_features": False}))
+    assert steps["imputer"].keep_empty_features is False
 
 
 def test_none_method_uses_noop_step():
@@ -118,6 +128,14 @@ def test_placement_forbidden_uses_unsupervised_only():
 def test_placement_absent_when_method_has_no_strategies():
     spec = get_spec("standardization")  # no placement strategies
     assert _placement_kwargs(spec, {"target_aware": True, "placement_strategy": "cart"}) == {}
+
+
+def test_placement_optional_without_strategies_still_forwards_target_aware():
+    # e.g. a registered supervision="optional" representation with no placement
+    # strategies: target_aware decides whether it uses y, placement does not apply.
+    spec = TransformerSpec(name="custom", transformer_cls=object, target_usage="optional")
+    assert _placement_kwargs(spec, {"target_aware": False, "placement_strategy": "uniform"}) == {"target_aware": False}
+    assert _placement_kwargs(spec, {"target_aware": True, "placement_strategy": "cart"}) == {"target_aware": True}
 
 
 # --------------------------------------------------------------------------- #

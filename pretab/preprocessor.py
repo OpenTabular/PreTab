@@ -18,6 +18,7 @@ from .compose.factory import build_column_transformer
 from .compose.feature_detection import (
     bool_columns_as_object,
     detect_column_types,
+    has_column_labels,
     to_dataframe,
     with_string_labels,
 )
@@ -29,6 +30,7 @@ from .compose.inspection import (
     build_transformer_summary,
     feature_names_out,
     get_output_slices,
+    refit_block_representation,
     representation_leaf,
 )
 from .compose.output import (
@@ -41,12 +43,14 @@ from .compose.output import (
 )
 from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
 from .core.logging import configure_logging, get_logger
-from .core.parameters import UNSET
+from .core.parameters import UNSET, validate_task
 from .core.policy import RepresentationPolicy, apply_constant_policy
 from .exceptions import (
     ConfigWarning,
+    DataWarning,
     FrozenRepresentationError,
     OutputBudgetError,
+    PretabConfigError,
     PretabDataError,
     PretabSerializationError,
     invalid_param_error,
@@ -86,7 +90,8 @@ def _preset_numerical_method(task) -> str:
     """Return the preset numerical method for a given ``task``.
 
     Splines (``"bspline"``) are the preset default for regression, and piecewise-linear
-    encoding (``"ple"``) remains the default for classification.
+    encoding (``"ple"``) remains the default for classification. ``task`` must already
+    be validated (see :meth:`Preprocessor._resolved_params`).
     """
     return "bspline" if task == "regression" else "ple"
 
@@ -144,7 +149,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     --------
     - Supports a wide range of preprocessing methods for numerical and categorical features.
     - Automatically detects feature types (numerical vs. categorical).
-    - Compatible with both pandas DataFrames and NumPy arrays.
+    - Compatible with pandas and polars DataFrames and NumPy arrays (a polars frame is read
+      through pandas, so it gets the same column-type detection).
     - Handles external embedding arrays for models that require learned representations.
     - Returns either a dictionary of transformed feature blocks or a single NumPy array.
     - Fully compatible with scikit-learn transformers and pipelines.
@@ -199,7 +205,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Multivariate tensor-product and thin-plate splines are available as standalone transformers.
     task : str, default="regression"
         Supervised task (``"regression"`` or ``"classification"``) used by target-aware methods to
-        place basis units / knots against ``y``. Only consulted when ``target_aware`` is True.
+        place basis units / knots against ``y``. Only consulted when ``target_aware`` is True (and
+        by ``preset`` to pick ``numerical_method``). Matched exactly: any other value, e.g.
+        ``"Regression"``, raises :class:`~pretab.exceptions.InvalidParamError` at ``fit``.
     adaptive : bool, default=False
         Whether adaptive-capable methods size each feature's output dimension from the data
         (within ``[min_output_dim, max_output_dim]``) instead of using the fixed ``output_dim``.
@@ -232,8 +240,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     numerical_imputation : str or None, default="median"
         Strategy for the ``SimpleImputer`` that runs *before* every numerical method. Accepts
         any ``sklearn`` strategy (``"median"``, ``"mean"``, ``"most_frequent"``, ``"constant"``).
-        ``None`` disables imputation, so NaNs reach the numerical transformers unchanged and the
-        finite-input methods (all numerical methods, including PLE) raise on missing values.
+        ``None`` disables imputation, so NaNs reach the numerical transformers unchanged: the
+        scalers, splines and ``rbf`` / ``relu`` / ``sigmoid`` / ``tanh`` feature maps propagate a
+        missing value as NaN in that feature's output, while the finite-input methods
+        (``"ple"``, ``"custombin"``, ``"fourier"``, ``"polynomial"``) raise.
     categorical_imputation : str or None, default="most_frequent"
         Strategy for the ``SimpleImputer`` that runs *before* every categorical method. ``None``
         disables imputation for categorical columns.
@@ -371,6 +381,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
     ``"polynomial"``, and ``"passthrough"`` -> ``"none"``.
 
+    A column with no observed value at ``fit`` keeps its block: the imputers fill it with ``0``
+    (or ``fill_value`` for ``strategy="constant"``), so it is fitted as a constant column, and
+    ``fit`` emits a :class:`~pretab.exceptions.DataWarning` naming it. A method that cannot be
+    fitted on such a column raises a :class:`~pretab.exceptions.PretabDataError` naming it.
+
     ``transform`` returns a single stacked array by default (``output_structure="matrix"``),
     or a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` when
     ``output_structure="blocks"``. Passing ``return_array`` explicitly to ``transform`` /
@@ -497,8 +512,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
-            The input features.
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
+            The input features. A frame or dict is matched by column name, an array (or a list
+            of rows) by position.
         y : array-like, default=None
             Target values (used for decision tree-based methods).
         embeddings : np.ndarray or list of np.ndarray, optional
@@ -544,7 +560,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             verbose=resolved["verbose"],
         )
 
-        fitted_on_array = isinstance(X, np.ndarray)
+        fitted_on_array = not has_column_labels(X)
         X = to_dataframe(X)
 
         if self.feature_preprocessing:
@@ -577,8 +593,24 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.policy_ = RepresentationPolicy.resolve(self.policy)
         self.numerical_features_ = list(numerical_features)
         self.categorical_features_ = list(categorical_features)
+        # A feature without any observed value (e.g. an optional field that is empty
+        # in this training window or CV fold) still gets its block, fitted on a
+        # column that is missing throughout (a single constant once imputed).
+        empty_features = list(X.columns[X.isna().to_numpy().all(axis=0)]) if len(X) else []
+        if empty_features:
+            warnings.warn(
+                f"{type(self).__name__} received column(s) {empty_features} with no observed (non-missing) "
+                "value at fit. Their blocks are kept but fitted on an entirely missing column (a single "
+                "constant value once imputed), so they carry no information until the preprocessor is "
+                "refit on data where those columns are observed.",
+                DataWarning,
+                stacklevel=2,
+            )
         if numerical_features and self.policy_.constant != "allow":
-            numeric_values = X[numerical_features].to_numpy(dtype=np.float64, na_value=np.nan)
+            numeric_values = X[numerical_features].to_numpy(dtype=np.float64, na_value=np.nan, copy=True)
+            # An empty column is represented by one constant value, so the policy
+            # treats it like any other constant column.
+            numeric_values[:, np.isnan(numeric_values).all(axis=0)] = 0.0
             apply_constant_policy(numeric_values, self.policy_, estimator=self)
 
         valid_formats = ("auto", "dense", "sparse")
@@ -619,7 +651,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.column_transformer_.set_output(transform="default")
         # ColumnTransformer.fit runs fit_transform internally; keep the training
         # output to resolve output_format="auto" once, from the training density.
-        training_output = self.column_transformer_.fit_transform(self._column_transformer_input(X), y)
+        X_ct = self._column_transformer_input(X)
+        try:
+            training_output = self.column_transformer_.fit_transform(X_ct, y)
+        except ValueError as exc:
+            if empty_features and not isinstance(exc, PretabConfigError):
+                self._raise_for_empty_features(X_ct, y, empty_features, config)
+            raise
         self.output_format_ = resolve_output_format(training_output, self.output_format)
         self.n_features_in_ = X.shape[1]
         # scikit-learn convention: feature names are recorded only for named input.
@@ -657,7 +695,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input features to transform.
         embeddings : np.ndarray or list of np.ndarray, optional
             External embeddings to attach to dictionary output. Required when
@@ -722,7 +760,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input features.
         y : array-like, optional
             Target values.
@@ -752,10 +790,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         back to the preset's value, or to their ordinary default when no
         preset supplies one. The ``preset`` key is dropped from the returned
         mapping.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``task`` or ``preset`` is invalid. ``task`` is validated before a
+            preset derives ``numerical_method`` from it.
         """
         params = self.get_params(deep=False)
         preset = params.pop("preset", None)
         resolved = {key: (_PRESET_PARAM_DEFAULTS[key] if value is UNSET else value) for key, value in params.items()}
+        validate_task(resolved["task"], type(self).__name__)
         if preset is None:
             return resolved
         if preset not in PRESETS:
@@ -787,6 +832,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         -------
         dict
             The resolved parameter mapping.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``task`` or ``preset`` is invalid, exactly as ``fit`` would raise.
         """
         return self._resolved_params()
 
@@ -889,12 +939,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     def _align_input(self, X):
         """Return ``X`` as a DataFrame whose columns line up with the fitted columns.
 
-        A NumPy array is matched by position. Once the preprocessor was fitted on
-        named columns, an array of the fitted width takes those column labels
-        (numeric columns of an object array are re-inferred), and a DataFrame
-        passed to a preprocessor fitted on an array is matched by position too --
-        both with scikit-learn's usual warning about the missing or unexpected
-        feature names. Any other DataFrame is matched by column label.
+        A NumPy array (or a list of rows) is matched by position. Once the
+        preprocessor was fitted on named columns, an array of the fitted width
+        takes those column labels (numeric columns of an object array are
+        re-inferred), and a DataFrame passed to a preprocessor fitted on an array
+        is matched by position too -- both with scikit-learn's usual warning about
+        the missing or unexpected feature names. Any other DataFrame (pandas or
+        polars) is matched by column label.
 
         Raises
         ------
@@ -910,7 +961,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             and list(fitted_labels) == positional_labels
         )
 
-        is_array = isinstance(X, np.ndarray)
+        is_array = not has_column_labels(X)
         X = to_dataframe(X, copy=True)
         if not (is_array or (fitted_on_array and list(X.columns) != positional_labels)):
             return X
@@ -937,16 +988,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return X.infer_objects() if is_array else X
 
     def _cross_fit_fold(self, X, y):
-        """Return a copy of this fit whose target-aware blocks are refit on ``(X, y)``.
+        """Return a copy of this fit whose target-aware representations are refit on ``(X, y)``.
 
         Used by :class:`~pretab.CrossFittedTransformer` for its out-of-fold
-        features. Only the blocks that consume the target are refit on the fold;
-        column types, category vocabularies and every other block are shared
-        with this all-data fit, so an out-of-fold row is encoded exactly like
-        ``transform`` encodes it, except that no target-aware placement has seen
-        that row's target. Refitting the whole preprocessor per fold would
-        re-detect column types and relearn categories on fewer rows, shifting
-        integer codes and one-hot columns between the folds and ``transform``.
+        features. Only the representations that consume the target are refit on
+        the fold; column types, category vocabularies, missing-value indicators
+        and every other block are shared with this all-data fit, so an
+        out-of-fold row is encoded exactly like ``transform`` encodes it, except
+        that no target-aware placement has seen that row's target. Refitting the
+        whole preprocessor per fold would re-detect column types and relearn
+        categories on fewer rows, shifting integer codes and one-hot columns
+        between the folds and ``transform``; refitting a block's missing
+        indicator would drop its column on a fold without missing values.
         """
         check_is_fitted(self)
         X_ct = self._column_transformer_input(self._align_input(X))
@@ -954,7 +1007,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         column_transformer.transformers_ = [
             (
                 name,
-                cast(Any, clone(transformer)).fit(X_ct[list(columns)], y)
+                refit_block_representation(transformer, X_ct[list(columns)], y)
                 if name != "remainder" and block_uses_target(transformer, columns)
                 else transformer,
                 columns,
@@ -1003,7 +1056,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input whose row count drives the estimate; not transformed.
 
         Returns
@@ -1023,7 +1076,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input whose row count drives the estimate; not transformed.
 
         Returns
@@ -1043,6 +1096,50 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 "Fix: impute the data first, or choose a different missing_policy "
                 "('propagate', 'impute', 'impute_with_indicator', 'separate_state')."
             )
+
+    def _raise_for_empty_features(self, X, y, empty_features, config) -> None:
+        """Name the empty feature behind a failed ``fit``, if one is to blame.
+
+        Called when fitting the ColumnTransformer failed. The block of each feature
+        without an observed value is refitted on its own, and the first that fails
+        raises a :class:`~pretab.exceptions.PretabDataError` naming that feature,
+        chained to the block's own error: methods that cannot be fitted on a
+        constant column (e.g. the B/M/I and cubic splines, Box-Cox) otherwise only
+        report "the feature at index 0". A block is only blamed when it fits a
+        stand-in column of distinct observed values with the same ``y``, so a
+        failure with another cause (e.g. a ``y`` of the wrong length) is not
+        attributed to the empty column. Returns without raising when no empty
+        column is to blame, so the caller re-raises the original error.
+        """
+        empty = {str(feature): feature for feature in empty_features}
+        for _name, transformer, columns in self.column_transformer_.transformers:
+            feature = empty.get(columns[0])
+            if feature is None:
+                continue
+            is_numerical = feature in self.numerical_features_
+            try:
+                cast(Any, clone(transformer)).fit(X[columns], y)
+            except PretabConfigError:
+                continue  # a configuration problem, not one of the empty column
+            except ValueError as exc:
+                stand_in = X[columns].copy()
+                stand_in[columns[0]] = (
+                    np.linspace(1.0, 2.0, len(X))
+                    if is_numerical
+                    else np.resize(np.array(["a", "b"], dtype=object), len(X))
+                )
+                try:
+                    cast(Any, clone(transformer)).fit(stand_in, y)
+                except ValueError:
+                    continue  # the block fails with observed values too: not the emptiness
+                method = config.method_for(feature, is_numerical=is_numerical)
+                raise PretabDataError(
+                    f"Column {feature!r} has no observed (non-missing) value at fit, and its {method!r} "
+                    "representation cannot be fitted on such a column (entirely missing, or a single "
+                    f"constant once imputed): {exc}\n"
+                    "Fix: drop the column, fit on data where it is observed, or select a method that "
+                    "accepts a constant column for it via feature_preprocessing."
+                ) from exc
 
     def _enforce_output_budget(self, n_rows: int) -> None:
         """Check the fitted output width against the configured output budget.

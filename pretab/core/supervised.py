@@ -16,9 +16,10 @@ import contextvars
 import sys
 import warnings
 from dataclasses import replace
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
+import pandas as pd
 from scipy import sparse as sp
 from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.model_selection import KFold, StratifiedKFold
@@ -31,7 +32,9 @@ from ..exceptions import (
     PretabDataError,
 )
 from ._typing import TransformerLike
+from .parameters import validate_task
 from .representation import RepresentationSpecMixin
+from .validation import is_polars_frame, polars_to_pandas
 
 __all__ = ["CrossFittedTransformer", "in_controlled_context", "warn_target_leakage"]
 
@@ -93,9 +96,13 @@ def _as_2d(X):
 
     A pandas DataFrame is passed through unchanged, so column names and per-column
     dtypes reach the wrapped estimator (e.g. a Preprocessor detecting numerical
-    vs categorical columns, or a name-based ColumnTransformer); any other input
-    is converted to a NumPy array, with 1D input reshaped to a single column.
+    vs categorical columns, or a name-based ColumnTransformer). A polars
+    DataFrame is converted to pandas once, so every fold's rows carry the dtypes
+    of the whole frame. Any other input is converted to a NumPy array, with 1D
+    input reshaped to a single column.
     """
+    if is_polars_frame(X):
+        return polars_to_pandas(X)
     if hasattr(X, "iloc") and getattr(X, "ndim", None) == 2:
         return X
     X = np.asarray(X)
@@ -107,6 +114,40 @@ def _take_rows(X, indices):
     return X.iloc[indices] if hasattr(X, "iloc") else X[indices]
 
 
+def _stack_folds(blocks, test_indices, X) -> Any:
+    """Stack the out-of-fold ``blocks`` and put their rows back in the order of ``X``.
+
+    ``blocks[i]`` holds the transformed rows ``test_indices[i]``. The result keeps
+    the kind of output the wrapped transformer returns: sparse blocks stay sparse
+    (in the format of the first block), pandas / polars DataFrames keep their
+    columns and dtypes, and dense blocks take their common dtype (``object`` for
+    strings left unchanged). A pandas DataFrame keeps the index of ``X`` when the
+    blocks carry it (scikit-learn's ``set_output`` copies the input index);
+    otherwise it is renumbered from 0, as ``transform`` numbers the rows of a
+    transformer that builds its own index (such as a Preprocessor).
+    """
+    rows = np.concatenate(test_indices)
+    # order[i] is the position of input row i among the stacked fold rows.
+    order = np.empty_like(rows)
+    order[rows] = np.arange(len(rows))
+    first = blocks[0]
+    if all(sp.issparse(block) for block in blocks):
+        return sp.vstack(blocks).tocsr()[order].asformat(first.format)
+    if all(isinstance(block, pd.DataFrame) for block in blocks):
+        stacked = pd.concat(blocks).iloc[order]
+        index = getattr(X, "index", None)
+        return stacked if index is not None and stacked.index.equals(index) else stacked.reset_index(drop=True)
+    if type(first).__module__.partition(".")[0] == "polars":
+        import polars as pl  # type: ignore
+
+        return pl.concat(blocks)[order]
+    dense = [block.toarray() if sp.issparse(block) else np.asarray(block) for block in blocks]
+    out = np.empty((len(rows), first.shape[1]), dtype=np.result_type(*dense))
+    for block, test_idx in zip(dense, test_indices, strict=True):
+        out[test_idx] = block
+    return out
+
+
 class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
     """Cross-fit a supervised transformer to remove target leakage on training data.
 
@@ -114,6 +155,8 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     training fold and used to transform the held-out fold, so every training row
     is encoded by a model that never saw its own target. :meth:`transform`
     (for unseen data) uses ``estimator_``, a single transformer fit on all data.
+    Both return the wrapped transformer's kind of output: a dense array of the
+    same dtype, a sparse matrix in the same format, or a DataFrame.
 
     Parameters
     ----------
@@ -166,8 +209,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
             raise IncompatibleParamsError("CrossFittedTransformer requires y at fit time; got y=None.")
         if not isinstance(self.n_folds, (int, np.integer)) or self.n_folds < 2:
             raise InvalidParamError(f"n_folds must be an integer >= 2; got {self.n_folds!r}.")
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(f"task must be 'regression' or 'classification'; got {self.task!r}.")
+        validate_task(self.task, type(self).__name__)
         X_arr = _as_2d(X)
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):
@@ -208,10 +250,20 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         return fold
 
     def fit_transform(self, X, y=None):
-        """Fit and return leakage-free out-of-fold features for the training data."""
+        """Fit and return leakage-free out-of-fold features for the training data.
+
+        Returns
+        -------
+        array-like of shape (n_samples, n_features_out)
+            The out-of-fold features, in the row order of ``X`` and in the kind of
+            output :meth:`transform` returns: a sparse matrix in the same format, a
+            DataFrame, or a dense array with the folds' dtype (``object`` when the
+            wrapped transformer leaves strings unchanged).
+        """
         X_arr, y_arr = self._fit_full(X, y)
-        width = len(self.estimator_.get_feature_names_out())
-        out = np.empty((X_arr.shape[0], width), dtype=float)
+        names = [str(name) for name in self.estimator_.get_feature_names_out()]
+        width = len(names)
+        blocks, test_indices = [], []
         splitter = self._make_splitter()
         token = _cross_fit_active.set(True)
         try:
@@ -224,18 +276,32 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
                         "wrapped transformer returned a dict of blocks. Use output_structure="
                         "'matrix' on a wrapped Preprocessor."
                     )
-                fold_out = fold_out.toarray() if sp.issparse(fold_out) else np.asarray(fold_out)
+                if not hasattr(fold_out, "shape"):
+                    fold_out = np.asarray(fold_out)
                 if fold_out.shape[1] != width:
                     raise IncompatibleParamsError(
                         "Cross-fitting requires a fixed output width across folds; expected "
                         f"{width}, got {fold_out.shape[1]}. The wrapped transformer's width "
-                        "depends on the training rows (e.g. adaptive sizing); fix it, for "
-                        "example by disabling adaptive sizing."
+                        "depends on the rows it is fit on (e.g. adaptive sizing, or category / "
+                        "indicator columns learned from the data); configure it to produce the "
+                        "same columns on every fold."
                     )
-                out[test_idx] = fold_out
+                # DataFrames are stacked by column label, so a fold that kept other
+                # columns at the same width (e.g. other top categories) cannot be aligned.
+                columns = getattr(fold_out, "columns", None)
+                if columns is not None and [str(column) for column in columns] != names:
+                    differing = sorted(set(map(str, columns)).symmetric_difference(names))
+                    raise IncompatibleParamsError(
+                        "Cross-fitting requires the same output columns across folds; a fold's "
+                        f"columns differ from the all-data fit in {differing}. The wrapped "
+                        "transformer learns its columns from the rows it is fit on; configure it "
+                        "to produce the same columns on every fold."
+                    )
+                blocks.append(fold_out)
+                test_indices.append(test_idx)
         finally:
             _cross_fit_active.reset(token)
-        return out
+        return _stack_folds(blocks, test_indices, X_arr)
 
     def get_feature_names_out(self, input_features=None):
         """Delegate output feature names to the all-data ``estimator_``."""

@@ -8,10 +8,11 @@ collects per-feature preprocessing / dimension / category metadata, and
 """
 
 import copy
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..core.logging import get_logger
@@ -29,6 +30,7 @@ __all__ = [
     "clean_feature_names",
     "feature_names_out",
     "get_output_slices",
+    "refit_block_representation",
     "representation_leaf",
 ]
 
@@ -281,8 +283,11 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
 
             elif "continuous_ordinal" in steps:
                 step = representation_pipeline.named_steps["continuous_ordinal"]
-                categories = len(step.mapping_[columns.index(feature_name)])
-                dimension = separate_state_dimension if separate_state_dimension is not None else 1
+                position = columns.index(feature_name)
+                # An encoder that received no column (a 0-width block) has no mapping.
+                has_mapping = position < len(step.mapping_)
+                categories = len(step.mapping_[position]) if has_mapping else None
+                dimension = separate_state_dimension if separate_state_dimension is not None else int(has_mapping)
                 categorical_feature_info[feature_name] = {
                     "preprocessing": preprocessing_type,
                     "dimension": dimension,
@@ -410,6 +415,26 @@ def block_uses_target(transformer, columns) -> bool:
     separate_state = _separate_state_branches(transformer)
     representation = separate_state[0] if separate_state is not None else transformer
     return bool(_resolve_block_representation(representation, columns)[2])
+
+
+def refit_block_representation(transformer, X, y):
+    """Return a copy of a fitted per-column block whose representation is refit on ``(X, y)``.
+
+    For a separate-state / missing-indicator union only the representation
+    branch is refit; the fitted missing branch is kept, since it never uses the
+    target and a ``MissingIndicator`` refit on rows without missing values would
+    drop its column (and so change the block's width). Any other block is cloned
+    and refit as a whole. The fitted ``transformer`` itself is left untouched.
+    """
+    separate_state = _separate_state_branches(transformer)
+    if separate_state is None:
+        return cast(Any, clone(transformer)).fit(X, y)
+    representation = cast(Any, clone(separate_state[0])).fit(X, y)
+    union = copy.copy(transformer)
+    union.transformer_list = [
+        (name, representation if name == "representation" else branch) for name, branch in transformer.transformer_list
+    ]
+    return union
 
 
 def _passthrough_source(columns, offset, feature_names_in):

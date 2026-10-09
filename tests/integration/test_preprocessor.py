@@ -1,8 +1,12 @@
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
 from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
@@ -485,6 +489,40 @@ def test_transform_accepts_an_ndarray_of_the_fitted_width():
     assert np.asarray(pre.transform(X)).shape[0] == 60
 
 
+def test_a_list_of_rows_is_read_like_an_array():
+    rows = [[1.0, 2.0], [3.0, 5.0], [4.0, 9.0]]
+    pre = Preprocessor(numerical_method="minmax").fit(rows)
+    assert not hasattr(pre, "feature_names_in_")
+    np.testing.assert_allclose(np.asarray(pre.transform(rows)), np.asarray(pre.transform(np.asarray(rows))))
+
+
+def test_a_list_of_rows_is_matched_by_position_after_a_frame_fit():
+    X = pd.DataFrame({"a": [1.0, 3.0, 4.0, 7.0], "b": [2.0, 5.0, 9.0, 1.0]})
+    pre = Preprocessor(numerical_method="minmax").fit(X)
+    with pytest.warns(UserWarning, match="valid feature names"):
+        out = pre.transform(X.to_numpy().tolist())
+    np.testing.assert_allclose(np.asarray(out), np.asarray(pre.transform(X)))
+
+
+_needs_polars = pytest.mark.skipif(importlib.util.find_spec("polars") is None, reason="polars is not installed")
+
+
+@pytest.mark.parametrize("container", ["pandas", pytest.param("polars", marks=_needs_polars)])
+def test_pipeline_set_output_hands_frames_to_the_preprocessor(container):
+    """A Pipeline configured with set_output hands its frames (pandas or polars)
+    from one step to the next, so the Preprocessor must accept both."""
+    rng = np.random.default_rng(0)
+    numeric = pd.DataFrame({"income": rng.normal(5e4, 1e4, 120), "visits": rng.integers(0, 1000, 120)})
+    pipe = Pipeline([("impute", SimpleImputer()), ("pretab", Preprocessor(numerical_method="minmax"))])
+    pipe.set_output(transform=container)
+
+    out = pipe.fit_transform(numeric, rng.normal(size=120))
+
+    assert type(out).__module__.split(".")[0] == container
+    assert list(out.columns) == ["num_income", "num_visits"]
+    np.testing.assert_allclose(np.asarray(out), np.asarray(pipe.transform(numeric)))
+
+
 # --- get_feature_names_out(input_features) (issue #65) ----------------------------
 
 
@@ -595,3 +633,30 @@ def test_positional_input_of_the_wrong_width_is_rejected(mixed_named_frame):
     array_fit = Preprocessor(numerical_method="minmax").fit(numeric.to_numpy(), y)
     with pytest.raises(PretabDataError, match="X has 1 features"):
         array_fit.transform(X[["age"]])
+
+
+@pytest.mark.parametrize("method", ["bspline", "mspline", "ispline", "pspline", "naturalspline", "rbf"])
+def test_unsupervised_numerical_method_accepts_a_multi_output_target(method):
+    """The B/M/I splines flattened y even when target_aware=False, so a 2-D target
+    raised an IndexError in fit while the other methods ignored it."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+    options = {"numerical_method": method, "target_aware": False, "placement_strategy": "uniform"}
+    reference = Preprocessor(**options).fit(frame).transform(frame)
+    np.testing.assert_array_equal(Preprocessor(**options).fit(frame, Y).transform(frame), reference)
+
+
+@pytest.mark.parametrize("method", ["bspline", "naturalspline", "rbf", "ple"])
+def test_target_aware_numerical_method_rejects_a_multi_output_target(method):
+    """Target-aware placement fits one model on one target. A 2-D target was
+    flattened into twice as many values and failed with an unrelated IndexError /
+    broadcasting error; it now raises a clear error pointing to target_aware=False."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+
+    with pytest.raises(IncompatibleParamsError, match=r"single target, but y has shape \(200, 2\)"):
+        Preprocessor(numerical_method=method).fit(frame, Y)
+    # A column vector is a single target.
+    Preprocessor(numerical_method=method).fit(frame, Y[:, :1])

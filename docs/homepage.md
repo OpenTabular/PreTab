@@ -34,8 +34,8 @@ compose standalone representations with scikit-learn transformers and estimators
 :::
 
 :::{grid-item-card} 🧠 Smart defaults
-Automatic feature-type detection (numerical vs. categorical) with support for both
-`pandas.DataFrame` and `numpy.ndarray` inputs.
+Automatic feature-type detection (numerical vs. categorical) with support for
+`pandas.DataFrame`, `polars.DataFrame` and `numpy.ndarray` inputs.
 :::
 
 ::::

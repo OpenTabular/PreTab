@@ -70,7 +70,14 @@ this for the training features specifically. It splits the training data into fo
 fresh copy of the transformer on all folds _except_ one, and uses that copy to transform the
 held-out fold, so every training row is transformed by a model that never saw its own target.
 `transform` on genuinely new data (a validation or test set) instead uses one model fit on all
-the training data, since there is no leakage risk there.
+the training data, since there is no leakage risk there. Both return the same kind of output,
+the one the wrapped transformer produces: a dense array of the same dtype, a sparse matrix in
+the same format, or a DataFrame.
+
+A wrapped `Preprocessor` is not refit from scratch on each fold: every fold reuses its all-data
+fit and refits only the target-aware representations. Column types, category codes,
+missing-value indicators and the blocks that do not use `y` are shared, so the out-of-fold
+features have exactly the columns and encoding `transform` produces.
 
 ```python
 import numpy as np
@@ -157,6 +164,31 @@ search.best_method_
 `bspline` scored highest across the 5 folds for this sine-shaped signal, so `search.
 best_preprocessor_` and `search.best_estimator_` are refit on all the data with `bspline` and
 ready to call `.predict(X_new)`.
+
+When several rows belong to the same unit, such as repeated measurements of one patient, a
+row-level split validates each candidate on units it has already seen in training. Pass a
+group splitter as `cv` and the group labels to `fit`, so no group is on both sides of a
+train/validation split:
+
+```python
+from sklearn.model_selection import GroupKFold
+
+patient_id = np.repeat(np.arange(30), 10)  # 30 patients with 10 rows each
+
+search = RepresentationSearchCV(Ridge(), methods=["minmax", "bspline"], cv=GroupKFold(5))
+search.fit(X, y, groups=patient_id)
+```
+
+Any other keyword argument to `fit`, such as `sample_weight`, is passed to the estimator's
+`fit` on every fold (restricted to that fold's training rows) and on the final refit. The
+`Preprocessor` and the scorer do not see it, so placement and validation scores are
+unweighted.
+
+The search takes the estimator type of the estimator it wraps. Around a classifier it is a
+classifier itself and delegates `classes_`, `predict_proba`, `predict_log_proba` and
+`decision_function` (whichever the estimator provides) to the refit `best_estimator_`. It can
+therefore be evaluated as a whole in an outer, stratified cross-validation, for example with
+`cross_val_score(search, X, y_class, scoring="roc_auc")`.
 
 ```{note}
 This is deliberately narrow: it only searches the single `numerical_method` axis with one

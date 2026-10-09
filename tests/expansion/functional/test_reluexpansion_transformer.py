@@ -55,7 +55,7 @@ def test_relu_invalid_strategy():
 
 
 def test_relu_invalid_task():
-    with pytest.raises(ValueError, match="Invalid task"):
+    with pytest.raises(ValueError, match=r"ReLUExpansionTransformer\.task = 'nonsense' is invalid"):
         ReLUExpansionTransformer(task="nonsense").fit(np.random.rand(5, 1))
 
 

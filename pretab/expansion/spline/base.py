@@ -27,7 +27,7 @@ from ...core.knots import (
     select_knots,
     supplement_interior_knots,
 )
-from ...core.parameters import UNSET, validate_placement
+from ...core.parameters import UNSET, validate_placement, validate_task
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...core.supervised import warn_target_leakage
 from ...exceptions import (
@@ -74,7 +74,8 @@ class BaseSplineTransformer(BasePreTabTransformer):
     target_aware : bool, default=False
         If True, knots are placed by a target-aware selector built from
         ``placement_strategy`` (requires ``y`` during fit). If False, knots are
-        placed by the unsupervised ``placement_strategy`` spacing.
+        placed by the unsupervised ``placement_strategy`` spacing and ``y`` is
+        ignored (as it is with explicit ``knot_locations``).
 
     placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, default="quantile"
         When ``target_aware=True``, the selector: ``"cart"`` or ``"lightgbm"``.
@@ -82,7 +83,9 @@ class BaseSplineTransformer(BasePreTabTransformer):
         evenly across the range, ``"quantile"`` places them at data quantiles.
 
     task : {"regression", "classification"} or None, default=None
-        Task passed to the target-aware selector when ``target_aware=True``.
+        Task passed to the target-aware selector when ``target_aware=True``. ``None`` is
+        treated as ``"regression"``; any other value raises
+        :class:`~pretab.exceptions.InvalidParamError` at ``fit``.
 
     adaptive : bool, default=False
         If True, the per-feature output dimension may vary within
@@ -130,6 +133,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
     precedence over target-aware ``placement_strategy`` selection, which in turn
     takes precedence over the automatic ``output_dim`` strategy. Multi-column input
     is expanded column by column and stacked horizontally.
+
+    Missing values are ignored for knot placement; at transform time a missing value
+    expands to a row of NaN in its feature's basis block (an optional bias column
+    stays 1), as in the other spline families.
 
     Examples
     --------
@@ -294,6 +301,7 @@ class BaseSplineTransformer(BasePreTabTransformer):
         """Determine per-feature knot vectors."""
         warn_target_leakage(self, y)
         validate_placement(self.target_aware, self.placement_strategy)
+        validate_task(self.task, type(self).__name__, allow_none=True)
         n_basis = self._resolve_param("output_dim", default=6)
         min_basis_req = self._resolve_param("min_output_dim", default=None)
         max_basis_req = self._resolve_param("max_output_dim", default=None)
@@ -306,8 +314,6 @@ class BaseSplineTransformer(BasePreTabTransformer):
             raise InvalidParamError(f"output_dim should be <= 50, got {n_basis}")
 
         X = self._validate(X, reset=True)
-
-        y_arr = None if y is None else np.asarray(y).ravel()
 
         # Knot placement priority: explicit knot_locations win, then a target-aware
         # selector built from placement_strategy, then the automatic (unsupervised)
@@ -323,6 +329,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
         else:
             selector = None
             strategy = self.placement_strategy if not self.target_aware else "quantile"
+        # Only the target-aware selector reads y; the unsupervised and explicit-knot
+        # paths ignore it, so any target shape (e.g. multi-output) can pass through
+        # a Pipeline. For the selector, y is sliced by rows like X, not flattened.
+        y_arr = None if y is None or selector is None else np.asarray(y)
 
         self.knots_ = []
         for i in range(X.shape[1]):
@@ -354,7 +364,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
         for i in range(X.shape[1]):
             knots = self.knots_[i]
             xi = resolve_out_of_range(X[:, i], knots[0], knots[-1], self._resolved_policy(), estimator=self)
-            design = self._design_matrix(xi, knots)
+            # A missing value has no position on the basis: only the observed rows
+            # are evaluated and the missing ones stay NaN (the "propagate" contract
+            # of the other spline families) instead of becoming a finite basis row.
+            observed = ~np.isnan(xi)
+            design = np.full((len(xi), self.n_basis_[i]), np.nan)
+            design[observed] = self._design_matrix(xi[observed], knots)
             if self.include_bias:
                 design = np.hstack([np.ones((design.shape[0], 1)), design])
             transformed.append(design)
@@ -366,7 +381,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
         return self.fit(X, y).transform(X)
 
     def _design_matrix(self, x: np.ndarray, knots: np.ndarray) -> np.ndarray:
-        """Return the basis matrix for a single feature (without the bias column)."""
+        """Return the basis matrix for a single feature (without the bias column).
+
+        ``x`` holds only the observed (non-missing) values, already resolved
+        against the out-of-range policy; :meth:`transform` fills the rows of
+        missing values with NaN.
+        """
         raise NotImplementedError
 
     def _feature_suffix(self) -> str:

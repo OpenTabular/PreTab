@@ -8,7 +8,7 @@ from pretab.core.selectors import (
     CARTLocationSelector,
     LightGBMLocationSelector,
 )
-from pretab.exceptions import IncompatibleParamsError
+from pretab.exceptions import IncompatibleParamsError, InvalidParamError
 from pretab.placement.adapters import SplinePlacementAdapter
 
 
@@ -45,6 +45,23 @@ def test_cart_requires_y(data):
     X, _ = data
     with pytest.raises(IncompatibleParamsError, match="requires y"):
         CARTLocationSelector().select(X, None, min_count=2, max_count=5)
+
+
+@pytest.mark.parametrize("selector_cls", [CARTLocationSelector, LightGBMLocationSelector])
+@pytest.mark.parametrize("task", ["Regression", "regresion", "", 1])
+def test_selectors_reject_an_unknown_task(data, selector_cls, task):
+    """Any task other than "regression" used to fall through to a classifier."""
+    X, y = data
+    with pytest.raises(InvalidParamError, match="task"):
+        selector_cls().select(X, y, task=task, min_count=2, max_count=10)
+
+
+def test_cart_task_none_means_regression(data):
+    X, y = data
+    np.testing.assert_array_equal(
+        CARTLocationSelector().select(X, y, task=None, min_count=2, max_count=10),
+        CARTLocationSelector().select(X, y, task="regression", min_count=2, max_count=10),
+    )
 
 
 def test_cart_reproducible(data):
