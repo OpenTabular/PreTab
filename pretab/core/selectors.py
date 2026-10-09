@@ -355,9 +355,21 @@ class LightGBMLocationSelector(BaseLocationSelector):
     def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         lgb = self._import_lightgbm()
 
+        if task == "regression":
+            objective = {"objective": "regression", "metric": "rmse"}
+        else:
+            # LightGBM needs integer class codes: its binary objective treats every
+            # label > 0 as positive and it cannot read string labels.
+            classes, y_valid = np.unique(y_valid, return_inverse=True)
+            if len(classes) < 2:
+                return [], None
+            if len(classes) == 2:
+                objective = {"objective": "binary", "metric": "binary_logloss"}
+            else:
+                objective = {"objective": "multiclass", "metric": "multi_logloss", "num_class": len(classes)}
+
         params = {
-            "objective": "regression" if task == "regression" else "binary",
-            "metric": "rmse" if task == "regression" else "binary_logloss",
+            **objective,
             "num_leaves": 2**self.max_depth,
             "max_depth": self.max_depth,
             "learning_rate": self.learning_rate,
