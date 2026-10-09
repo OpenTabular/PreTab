@@ -7,8 +7,10 @@ collects per-feature preprocessing / dimension / category metadata, and
 :func:`build_transformer_summary` renders that metadata as an aligned table.
 """
 
+import copy
+
 import numpy as np
-from sklearn.pipeline import FeatureUnion
+from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
@@ -21,6 +23,7 @@ __all__ = [
     "build_feature_lineage",
     "build_transformer_summary",
     "clean_feature_names",
+    "feature_names_out",
     "get_output_slices",
 ]
 
@@ -69,7 +72,59 @@ def get_output_slices(column_transformer):
     return slices
 
 
-def clean_feature_names(column_transformer, names):
+def feature_names_out(column_transformer, input_features=None):
+    """Return the cleaned output feature names of a fitted ColumnTransformer.
+
+    ``input_features`` -- one name per input column, in input order -- replaces the
+    column labels the ColumnTransformer was fitted on (e.g. the synthetic
+    ``feature_i`` labels of an array input), following scikit-learn's contract
+    for an estimator fitted without feature names. Each step's names are rebuilt
+    from its fitted transformer with the new labels, so names that embed a label
+    anywhere (e.g. polynomial terms) are renamed consistently.
+    """
+    fitted_labels = getattr(column_transformer, "feature_names_in_", None)
+    if input_features is None or fitted_labels is None:
+        raw_names = column_transformer.get_feature_names_out(input_features)
+        return clean_feature_names(column_transformer, [str(name) for name in raw_names])
+
+    rename = {str(label): str(name) for label, name in zip(fitted_labels, input_features, strict=True)}
+    raw_names = []
+    for name, transformer, columns in column_transformer.transformers_:
+        if transformer == "drop" or len(columns) == 0:
+            continue
+        labels = [rename[str(column)] for column in columns]
+        if transformer == "passthrough":
+            inner = labels
+        else:
+            inner = _without_feature_names(transformer).get_feature_names_out(labels)
+        raw_names.extend(f"{name}__{inner_name}" for inner_name in inner)
+    return clean_feature_names(column_transformer, raw_names, rename=rename)
+
+
+def _without_feature_names(estimator):
+    """Return a shallow copy of a fitted step that accepts any input feature names.
+
+    The ColumnTransformer hands each step a DataFrame column, so scikit-learn
+    estimators inside it record ``feature_names_in_`` and only accept those exact
+    names in ``get_feature_names_out``. Dropping the attribute on a shallow copy
+    (and on copies of any nested pipeline / union steps) makes them fall back to
+    the length check scikit-learn applies to estimators fitted without feature
+    names, while the fitted step itself is left untouched.
+    """
+    if not hasattr(estimator, "get_params"):
+        return estimator
+    stripped = copy.copy(estimator)
+    stripped.__dict__.pop("feature_names_in_", None)
+    if isinstance(stripped, Pipeline):
+        stripped.steps = [(name, _without_feature_names(step)) for name, step in stripped.steps]
+    elif isinstance(stripped, FeatureUnion):
+        stripped.transformer_list = [
+            (name, _without_feature_names(transformer)) for name, transformer in stripped.transformer_list
+        ]
+    return stripped
+
+
+def clean_feature_names(column_transformer, names, *, rename=None):
     """Collapse the per-feature name that sklearn's ColumnTransformer duplicates.
 
     Each per-column step is a ``num_*`` / ``cat_*`` block for one feature (see
@@ -78,10 +133,13 @@ def clean_feature_names(column_transformer, names):
     column, so sklearn's default ``f"{step}__{inner}"`` naming doubles it, e.g.
     ``"num_age__age_bs0"``. This collapses that back to ``"num_age_bs0"``. Other
     names of a block keep the public block name as their prefix, and
-    passthrough/remainder columns are left unchanged.
+    passthrough/remainder columns are left unchanged. ``rename`` maps fitted
+    column labels to the names ``names`` were built from (see
+    :func:`feature_names_out`).
     """
+    rename = rename or {}
     step_to_columns = {
-        name: columns
+        name: [rename.get(str(column), column) for column in columns]
         for name, _transformer, columns in column_transformer.transformers_
         if name != "remainder" and len(columns) == 1
     }

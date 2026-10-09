@@ -24,7 +24,7 @@ from .compose.inspection import (
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
-    clean_feature_names,
+    feature_names_out,
     get_output_slices,
 )
 from .compose.output import (
@@ -522,6 +522,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             verbose=resolved["verbose"],
         )
 
+        fitted_on_array = isinstance(X, np.ndarray)
         X = to_dataframe(X)
 
         if self.feature_preprocessing:
@@ -590,6 +591,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         )
         self.column_transformer_.fit(self._column_transformer_input(X), y)
         self.n_features_in_ = X.shape[1]
+        # scikit-learn convention: feature names are recorded only for named input.
+        if not fitted_on_array and all(isinstance(label, str) for label in X.columns):
+            self.feature_names_in_ = np.asarray(X.columns, dtype=object)
+        elif hasattr(self, "feature_names_in_"):
+            del self.feature_names_in_
 
         self._enforce_output_budget(X.shape[0])
 
@@ -770,7 +776,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         input_features : array-like of str or None, default=None
-            Input feature names. Passed through to the underlying column transformer.
+            Input feature names, following scikit-learn's convention. When the
+            preprocessor was fitted on named (string-labelled) columns they must equal
+            ``feature_names_in_``. When it was fitted without feature names (a NumPy
+            array, whose columns are named ``feature_0``, ``feature_1``, ...), any
+            ``n_features_in_`` names are accepted and used in place of the fitted
+            ones, so names propagate through a ``Pipeline`` whose upstream steps
+            output arrays.
 
         Returns
         -------
@@ -779,8 +791,19 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
 
         check_is_fitted(self)
-        raw_names = self.column_transformer_.get_feature_names_out(input_features)
-        return np.array(clean_feature_names(self.column_transformer_, raw_names))
+        if input_features is not None:
+            input_features = np.asarray(input_features, dtype=object)
+            if len(input_features) != self.n_features_in_:
+                raise ValueError(
+                    f"input_features should have length equal to number of features "
+                    f"({self.n_features_in_}), got {len(input_features)}"
+                )
+            fitted_names = getattr(self, "feature_names_in_", None)
+            if fitted_names is not None:
+                if not np.array_equal(fitted_names, input_features):
+                    raise ValueError("input_features is not equal to feature_names_in_")
+                input_features = None
+        return np.array(feature_names_out(self.column_transformer_, input_features))
 
     def get_feature_lineage(self):
         """Return per-output-column provenance for the fitted preprocessor.
