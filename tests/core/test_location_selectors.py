@@ -160,3 +160,40 @@ def test_supplement_preserves_high_end_split_end_to_end():
     locations = CARTLocationSelector().select(xs.reshape(-1, 1), ys, task="regression", min_count=6, max_count=6)
 
     assert locations.max() > 5.0, f"expected a high-end location to survive supplementing, got {locations}"
+
+
+def _single_step(seed):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(0, 10, 1000)
+    step = rng.uniform(2, 8)
+    y = np.where(x > step, 1.0, 0.0) + 0.5 * rng.normal(size=1000)
+    return x.reshape(-1, 1), y
+
+
+def test_cart_spacing_keeps_the_dominant_split_over_a_weak_neighbour():
+    """Regression guard for issue #70: candidates were spaced in ascending location
+    order, so a weak split just below the root split evicted it."""
+    from sklearn.tree import DecisionTreeRegressor
+
+    X, y = _single_step(34)
+    root = DecisionTreeRegressor(max_depth=1).fit(X, y).tree_.threshold[0]
+    locations = CARTLocationSelector().select(X, y, task="regression", min_count=6, max_count=6)
+    assert np.isclose(locations, root).any(), f"root split {root:.3f} missing from {locations}"
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_cart_keeps_the_root_split_of_a_single_step_target(seed):
+    from sklearn.tree import DecisionTreeRegressor
+
+    X, y = _single_step(seed)
+    root = DecisionTreeRegressor(max_depth=1).fit(X, y).tree_.threshold[0]
+    locations = CARTLocationSelector().select(X, y, task="regression", min_count=6, max_count=6)
+    assert np.isclose(locations, root).any()
+
+
+def test_cart_candidates_are_ordered_by_impurity_decrease(data):
+    X, y = data
+    selector = CARTLocationSelector()
+    candidates, importance = selector._ordered_candidates(X, y, "regression")
+    gains = [importance[c] for c in candidates]
+    assert gains == sorted(gains, reverse=True)
