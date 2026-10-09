@@ -215,3 +215,44 @@ def test_rbf_adapter_unsupervised_matches_inline(data):
     assert np.allclose(centers, np.percentile(x, np.linspace(0, 100, 6)))
     centers_u = RBFPlacementAdapter(target_aware=False, placement_strategy="uniform").get_centers(x, None, 6, 6)
     assert np.allclose(centers_u, np.linspace(x.min(), x.max(), 6))
+
+
+# --- quantile placement on tied data ------------------------------------------------
+
+
+def _tied_features():
+    rng = np.random.default_rng(0)
+    return {
+        "zero-inflated": np.where(rng.random(1000) < 0.6, 0.0, rng.exponential(5.0, 1000)),
+        "discrete": rng.integers(0, 5, 1000).astype(float),
+        "top-coded": np.minimum(rng.uniform(0, 160, 1000), 100.0),
+    }
+
+
+@pytest.mark.parametrize("name", ["zero-inflated", "discrete", "top-coded"])
+@pytest.mark.parametrize("include_endpoints", [True, False])
+def test_quantile_placement_returns_distinct_locations_on_tied_data(name, include_endpoints):
+    """Coinciding quantiles repeated feature-map centers, duplicating output columns."""
+    x = _tied_features()[name]
+    locations = QuantilePlacement(8, include_endpoints=include_endpoints).fit(x).locations_
+    assert len(locations) == 8
+    assert len(np.unique(locations)) == 8
+    if include_endpoints:
+        assert locations[0] == x.min() and locations[-1] == x.max()
+    else:
+        assert locations.min() > x.min() and locations.max() < x.max()
+
+
+def test_quantile_placement_is_unchanged_on_untied_data():
+    x = np.random.default_rng(1).normal(size=500)
+    np.testing.assert_array_equal(
+        QuantilePlacement(7, include_endpoints=True).fit(x).locations_, np.quantile(x, np.linspace(0, 1, 7))
+    )
+
+
+def test_quantile_feature_map_has_no_duplicate_columns_on_tied_data():
+    from pretab.transformers import RBFExpansionTransformer
+
+    X = _tied_features()["zero-inflated"].reshape(-1, 1)
+    out = RBFExpansionTransformer(output_dim=8, placement_strategy="quantile").fit(X).transform(X)
+    assert len(np.unique(out.round(10), axis=1).T) == 8
