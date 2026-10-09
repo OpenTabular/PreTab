@@ -276,7 +276,7 @@ class PLETransformer(
         if len(thresholds) == 0:
             lower, upper = edges[0], edges[-1]
             width = upper - lower
-            if width > 1e-10:
+            if width > 0:
                 values = np.clip((feature - lower) / width, 0.0, 1.0)
             else:
                 values = np.full(n_samples, 0.5)
@@ -297,7 +297,7 @@ class PLETransformer(
             upper_edge = edges[bin_idx + 1]
             bin_width = upper_edge - lower_edge
 
-            if bin_width > 1e-10:
+            if bin_width > 0:
                 ple_encoded[mask, bin_idx] = np.clip((values - lower_edge) / bin_width, 0.0, 1.0)
             else:
                 ple_encoded[mask, bin_idx] = 0.5
