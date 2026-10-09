@@ -266,13 +266,10 @@ def test_wrapped_unsupervised_preprocessor_matches_transform(frame_with_rare_cat
     np.testing.assert_array_equal(cross_fitted.fit_transform(X, y), np.asarray(cross_fitted.transform(X)))
 
 
-def test_cross_fitting_densifies_sparse_output_and_rejects_blocks(frame_with_rare_category):
+def test_cross_fitting_rejects_blocks(frame_with_rare_category):
     from pretab import Preprocessor
 
     X, y = frame_with_rare_category
-    sparse = Preprocessor(categorical_method="one-hot", output_format="sparse", random_state=0)
-    out = CrossFittedTransformer(sparse, n_folds=3, random_state=0).fit_transform(X, y)
-    assert isinstance(out, np.ndarray)
     blocks = Preprocessor(output_structure="blocks", random_state=0)
     with pytest.raises(IncompatibleParamsError, match="dict of blocks"):
         CrossFittedTransformer(blocks, n_folds=3, random_state=0).fit_transform(X, y)
@@ -334,3 +331,120 @@ def test_width_mismatch_names_the_general_cause():
     cross_fitted = CrossFittedTransformer(OneHotEncoder(handle_unknown="ignore"), n_folds=5, random_state=0)
     with pytest.raises(IncompatibleParamsError, match="same columns on every fold"):
         cross_fitted.fit_transform(x, y)
+
+
+# --- fit_transform returns the kind of output transform returns ---------------------
+
+
+def _cross_fit(wrapped, X, y):
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=3, random_state=0)
+    return cross_fitted, cross_fitted.fit_transform(X, y)
+
+
+def test_fit_transform_keeps_strings_left_unchanged(frame_with_rare_category):
+    """The out-of-fold rows were written into a float buffer, so categorical_method=None
+    (strings passed through unchanged) raised in fit_transform but not in transform."""
+    from pretab import Preprocessor
+
+    X, y = frame_with_rare_category
+    cross_fitted, out = _cross_fit(Preprocessor(categorical_method=None, output_dim=4, random_state=0), X, y)
+    _, encoded = _cross_fit(Preprocessor(output_dim=4, random_state=0), X, y)
+
+    assert out.dtype == cross_fitted.transform(X).dtype == object
+    np.testing.assert_array_equal(out[:, _split_columns(cross_fitted, "cat_city")[0]], X["city"].to_numpy())
+    supervised = _split_columns(cross_fitted, "num_x_ple")
+    np.testing.assert_allclose(out[:, supervised].astype(float), encoded[:, supervised])
+
+
+def test_fit_transform_keeps_sparse_output(frame_with_rare_category):
+    """Sparse fold output was densified, while transform returned a CSR matrix."""
+    from scipy import sparse as sp
+
+    from pretab import Preprocessor
+
+    X, y = frame_with_rare_category
+    params = {"categorical_method": "one-hot", "output_dim": 4, "random_state": 0}
+    cross_fitted, out = _cross_fit(Preprocessor(output_format="sparse", **params), X, y)
+    _, dense = _cross_fit(Preprocessor(**params), X, y)
+
+    assert sp.issparse(out)
+    assert out.format == cross_fitted.transform(X).format == "csr"
+    np.testing.assert_allclose(out.toarray(), dense)
+
+
+def test_fit_transform_keeps_the_configured_dtype(frame_with_rare_category):
+    from pretab import Preprocessor
+
+    X, y = frame_with_rare_category
+    cross_fitted, out = _cross_fit(Preprocessor(dtype=np.float32, output_dim=4, random_state=0), X, y)
+    _, native = _cross_fit(Preprocessor(output_dim=4, random_state=0), X, y)
+
+    assert out.dtype == cross_fitted.transform(X).dtype == np.float32
+    np.testing.assert_allclose(out, native, rtol=1e-6)
+
+
+def test_fit_transform_returns_the_dataframe_transform_returns(mixed_frame):
+    import pandas as pd
+
+    from pretab import Preprocessor
+
+    X, y = mixed_frame
+    cross_fitted, out = _cross_fit(Preprocessor(output_dim=4, random_state=0).set_output(transform="pandas"), X, y)
+    full = cross_fitted.transform(X)
+    _, array = _cross_fit(Preprocessor(output_dim=4, random_state=0), X, y)
+
+    assert isinstance(out, pd.DataFrame)
+    pd.testing.assert_index_equal(out.columns, full.columns)
+    pd.testing.assert_index_equal(out.index, full.index)  # the Preprocessor numbers its rows
+    np.testing.assert_allclose(out.to_numpy(), array)
+
+
+def test_fit_transform_keeps_the_index_of_scikit_learn_dataframe_output(mixed_frame):
+    import pandas as pd
+    from sklearn.compose import ColumnTransformer
+
+    X, y = mixed_frame
+
+    def ple_columns(output):
+        return ColumnTransformer([("ple", PLETransformer(output_dim=4), ["num"])]).set_output(transform=output)
+
+    _, out = _cross_fit(ple_columns("pandas"), X, y)
+    _, array = _cross_fit(ple_columns("default"), X, y)
+
+    assert isinstance(out, pd.DataFrame)
+    pd.testing.assert_index_equal(out.index, X.index)
+    np.testing.assert_allclose(out.to_numpy(), array)
+
+
+def test_fit_transform_returns_polars_like_transform(mixed_frame):
+    pl = pytest.importorskip("polars")
+    from pretab import Preprocessor
+
+    X, y = mixed_frame
+    cross_fitted, out = _cross_fit(Preprocessor(output_dim=4, random_state=0).set_output(transform="polars"), X, y)
+    _, array = _cross_fit(Preprocessor(output_dim=4, random_state=0), X, y)
+
+    assert isinstance(out, pl.DataFrame)
+    assert out.columns == cross_fitted.transform(X).columns
+    np.testing.assert_allclose(out.to_numpy(), array)
+
+
+def test_fit_transform_rejects_folds_with_other_dataframe_columns():
+    """Frames are stacked by column label: a fold that keeps other columns at the
+    same width (here another top category) must raise, not widen the result with
+    NaN-padded columns."""
+    import pandas as pd
+    from sklearn.compose import ColumnTransformer
+    from sklearn.preprocessing import OneHotEncoder
+
+    rng = np.random.default_rng(0)
+    # "b" and "c" tie, so which one is kept as a top category depends on the fold.
+    X = pd.DataFrame({"num": rng.normal(size=90), "cat": rng.permutation(["a"] * 50 + ["b"] * 20 + ["c"] * 20)})
+    y = X["num"].to_numpy() + rng.normal(scale=0.3, size=90)
+    encoder = OneHotEncoder(max_categories=3, handle_unknown="infrequent_if_exist", sparse_output=False)
+    transformer = ColumnTransformer(
+        [("ple", PLETransformer(output_dim=3), ["num"]), ("oh", encoder, ["cat"])]
+    ).set_output(transform="pandas")
+
+    with pytest.raises(IncompatibleParamsError, match="same output columns across folds"):
+        CrossFittedTransformer(transformer, n_folds=3, random_state=0).fit_transform(X, y)

@@ -70,7 +70,9 @@ this for the training features specifically. It splits the training data into fo
 fresh copy of the transformer on all folds _except_ one, and uses that copy to transform the
 held-out fold, so every training row is transformed by a model that never saw its own target.
 `transform` on genuinely new data (a validation or test set) instead uses one model fit on all
-the training data, since there is no leakage risk there.
+the training data, since there is no leakage risk there. Both return the same kind of output,
+the one the wrapped transformer produces: a dense array of the same dtype, a sparse matrix in
+the same format, or a DataFrame.
 
 A wrapped `Preprocessor` is not refit from scratch on each fold: every fold reuses its all-data
 fit and refits only the target-aware representations. Column types, category codes,
