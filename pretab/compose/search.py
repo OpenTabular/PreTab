@@ -9,12 +9,15 @@ native array output so no target leaks across the train/validation split.
 """
 
 from collections.abc import Callable
+from copy import deepcopy
 from typing import cast
 
 import numpy as np
 from sklearn.base import BaseEstimator, clone, is_classifier
 from sklearn.metrics import check_scoring
 from sklearn.model_selection import BaseCrossValidator, check_cv
+from sklearn.utils import get_tags
+from sklearn.utils.metaestimators import available_if
 from sklearn.utils.validation import _check_method_params, check_is_fitted
 
 from ..core._typing import PredictorLike
@@ -31,8 +34,29 @@ def _row_subset(data, idx):
     return np.asarray(data)[idx]
 
 
+def _estimator_has(attr):
+    """Check whether ``attr`` can be delegated to the downstream estimator.
+
+    As in scikit-learn's search estimators, the refit ``best_estimator_`` is
+    checked after fit and the unfitted ``estimator`` before, so ``hasattr`` on an
+    unfitted search already reflects the estimator it wraps.
+    """
+
+    def check(self):
+        # getattr raises AttributeError when the estimator does not provide attr.
+        getattr(self.best_estimator_ if hasattr(self, "best_estimator_") else self.estimator, attr)
+        return True
+
+    return check
+
+
 class RepresentationSearchCV(BaseEstimator):
     """Select the best numerical representation by cross-validation.
+
+    The search takes the estimator type of ``estimator``: wrapping a classifier
+    makes it a classifier (``is_classifier``, stratified outer cross-validation),
+    and ``predict_proba``, ``predict_log_proba`` and ``decision_function`` are
+    available whenever ``estimator`` provides them.
 
     Parameters
     ----------
@@ -67,6 +91,13 @@ class RepresentationSearchCV(BaseEstimator):
         Preprocessor for ``best_method_`` refit on all data.
     best_estimator_ : estimator
         Estimator refit on the best representation of all data.
+    classes_ : ndarray of shape (n_classes,)
+        Class labels of ``best_estimator_``. Only available for a classifier.
+    n_features_in_ : int
+        Number of features seen during :meth:`fit`.
+    feature_names_in_ : ndarray of shape (n_features_in_,)
+        Names of the features seen during :meth:`fit`. Only defined when ``X`` has
+        string column names.
     """
 
     def __init__(self, estimator, methods, *, cv=5, scoring=None, preprocessor_params=None, random_state=None):
@@ -157,17 +188,66 @@ class RepresentationSearchCV(BaseEstimator):
         self.best_preprocessor_ = self._make_preprocessor(best_method)
         x_all = self.best_preprocessor_.fit_transform(X, y_arr, return_array=True)
         self.best_estimator_ = cast(PredictorLike, clone(self.estimator)).fit(x_all, y_arr, **fit_params)
+        self.n_features_in_ = self.best_preprocessor_.n_features_in_
+        if hasattr(self.best_preprocessor_, "feature_names_in_"):
+            self.feature_names_in_ = self.best_preprocessor_.feature_names_in_
+        elif hasattr(self, "feature_names_in_"):
+            del self.feature_names_in_
         return self
+
+    @property
+    def classes_(self):
+        """Class labels of the refit ``best_estimator_``, for a classifier."""
+        return self.best_estimator_.classes_
+
+    def _best_representation(self, X):
+        """Transform ``X`` with the refit ``best_preprocessor_``."""
+        check_is_fitted(self, "best_estimator_")
+        return self.best_preprocessor_.transform(X, return_array=True)
 
     def predict(self, X):
         """Predict with the best refit estimator on the best representation."""
-        check_is_fitted(self, "best_estimator_")
-        x = self.best_preprocessor_.transform(X, return_array=True)
+        x = self._best_representation(X)
         return self.best_estimator_.predict(x)
+
+    @available_if(_estimator_has("predict_proba"))
+    def predict_proba(self, X):
+        """Predict class probabilities with the best refit estimator.
+
+        Only available when ``estimator`` implements ``predict_proba``.
+        """
+        x = self._best_representation(X)
+        return self.best_estimator_.predict_proba(x)
+
+    @available_if(_estimator_has("predict_log_proba"))
+    def predict_log_proba(self, X):
+        """Predict class log-probabilities with the best refit estimator.
+
+        Only available when ``estimator`` implements ``predict_log_proba``.
+        """
+        x = self._best_representation(X)
+        return self.best_estimator_.predict_log_proba(x)
+
+    @available_if(_estimator_has("decision_function"))
+    def decision_function(self, X):
+        """Compute the decision function of the best refit estimator.
+
+        Only available when ``estimator`` implements ``decision_function``.
+        """
+        x = self._best_representation(X)
+        return self.best_estimator_.decision_function(x)
 
     def score(self, X, y):
         """Score the best refit estimator on ``(X, y)``."""
-        check_is_fitted(self, "best_estimator_")
-        x = self.best_preprocessor_.transform(X, return_array=True)
+        x = self._best_representation(X)
         scorer = cast("Callable[..., float]", check_scoring(self.best_estimator_, scoring=self.scoring))
         return scorer(self.best_estimator_, x, np.asarray(y).ravel())
+
+    def __sklearn_tags__(self):
+        """Take the estimator type and classifier / regressor tags of ``estimator``."""
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
+        estimator_tags = get_tags(self.estimator)
+        tags.estimator_type = estimator_tags.estimator_type
+        tags.classifier_tags = deepcopy(estimator_tags.classifier_tags)
+        tags.regressor_tags = deepcopy(estimator_tags.regressor_tags)
+        return tags
