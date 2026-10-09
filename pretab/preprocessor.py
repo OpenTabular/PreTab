@@ -13,8 +13,9 @@ from sklearn.utils.validation import check_is_fitted
 
 from .compose.config import PreprocessorConfig
 from .compose.factory import build_column_transformer
-from .compose.feature_detection import detect_column_types, to_dataframe
+from .compose.feature_detection import detect_column_types, to_dataframe, with_string_labels
 from .compose.inspection import (
+    block_name,
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
@@ -580,7 +581,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
-        self.column_transformer_.fit(X, y)
+        self.column_transformer_.fit(with_string_labels(X), y)
         self.n_features_in_ = X.shape[1]
 
         self._enforce_output_budget(X.shape[0])
@@ -647,7 +648,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         output_kind = container if container in ("pandas", "polars") else ("array" if resolved_return_array else "dict")
         validate_embedding_request(embeddings, expected=self.embeddings_, output_kind=output_kind)
 
-        transformed_X = self.column_transformer_.transform(X)
+        transformed_X = self.column_transformer_.transform(with_string_labels(X))
         if not sp.issparse(transformed_X):
             transformed_X = np.asarray(transformed_X)
         if self.dtype is not None:
@@ -819,8 +820,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                     feature = full.split("__", 1)[-1] if "__" in full else full
                     dims[feature] = dims.get(feature, 0) + 1
             else:
-                dims[columns[0]] = width
+                dims[self._input_label(columns[0])] = width
         return dims
+
+    def _input_label(self, column):
+        """Map a ColumnTransformer column back to the label it has in the input.
+
+        The ColumnTransformer is fitted on the string form of every label (see
+        :func:`~pretab.compose.feature_detection.with_string_labels`), so a
+        non-string label such as ``1`` appears there as ``"1"``.
+        """
+        labels = {str(label): label for label in (*self.numerical_features_, *self.categorical_features_)}
+        return labels.get(str(column), column)
 
     def _output_itemsize(self) -> int:
         """Bytes per element of the dense transformed array.
@@ -967,6 +978,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             embeddings=self.embeddings_,
             embedding_dimensions=self.embedding_dimensions_,
         )
+        numerical_feature_info = {self._input_label(key): info for key, info in numerical_feature_info.items()}
+        categorical_feature_info = {self._input_label(key): info for key, info in categorical_feature_info.items()}
 
         if verbose:
             configure_logging(1)
@@ -981,7 +994,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     def _log_internal_decisions(self):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
-        for name, transformer, _columns in self.column_transformer_.transformers_:
+        for step_name, transformer, columns in self.column_transformer_.transformers_:
+            name = block_name(step_name, columns)
             last_step = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
             for attr in (
                 "thresholds_",

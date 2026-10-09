@@ -305,6 +305,31 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
     return pipeline
 
 
+def _step_names(blocks) -> list[str]:
+    """Return one valid, unique ColumnTransformer step name per ``(kind, feature)`` block.
+
+    A step is named ``f"{kind}_{feature}"`` whenever scikit-learn accepts that
+    name. A label that would put scikit-learn's ``__`` parameter separator into it
+    (one starting with ``_`` or containing ``__``) gets a positional
+    ``f"{kind}_col{i}"`` name instead, made unique against every other step. The
+    public block / feature names never use these internal names: they are derived
+    from the step's kind and its column label (see :mod:`pretab.compose.inspection`).
+    """
+    natural = [f"{kind}_{feature}" for kind, feature in blocks]
+    taken = {name for name in natural if "__" not in name}
+    names = []
+    for position, name in enumerate(natural):
+        if "__" in name:
+            kind = blocks[position][0]
+            name, suffix = f"{kind}_col{position}", 0
+            while name in taken:
+                suffix += 1
+                name = f"{kind}_col{position}_{suffix}"
+            taken.add(name)
+        names.append(name)
+    return names
+
+
 def build_column_transformer(
     config: PreprocessorConfig,
     numerical_features,
@@ -314,19 +339,22 @@ def build_column_transformer(
 ) -> ColumnTransformer:
     """Assemble the per-column pipelines into the final ColumnTransformer.
 
-    Numerical features are prefixed ``num_`` and categorical features ``cat_`` to
-    match the transformer names the Preprocessor exposes; untransformed columns
-    pass through via ``remainder="passthrough"``.
+    Numerical steps are prefixed ``num_`` and categorical steps ``cat_`` to match
+    the block names the Preprocessor exposes (see :func:`_step_names` for labels
+    that cannot be embedded in a step name); untransformed columns pass through via
+    ``remainder="passthrough"``. Each step selects its column by the label's
+    string form: scikit-learn reads an integer selector as a *position*, so the
+    Preprocessor fits and transforms the ColumnTransformer on a frame whose labels
+    are strings (see :func:`~pretab.compose.feature_detection.with_string_labels`).
     """
+    blocks = [("num", feature) for feature in numerical_features]
+    blocks += [("cat", feature) for feature in categorical_features]
     transformers = []
-    for feature in numerical_features:
-        method = config.method_for(feature, is_numerical=True)
-        pipeline = create_transformer(method, is_numerical=True, config=config)
-        transformers.append((f"num_{feature}", pipeline, [feature]))
-    for feature in categorical_features:
-        method = config.method_for(feature, is_numerical=False)
-        pipeline = create_transformer(method, is_numerical=False, config=config)
-        transformers.append((f"cat_{feature}", pipeline, [feature]))
+    for (kind, feature), name in zip(blocks, _step_names(blocks), strict=True):
+        is_numerical = kind == "num"
+        method = config.method_for(feature, is_numerical=is_numerical)
+        pipeline = create_transformer(method, is_numerical=is_numerical, config=config)
+        transformers.append((name, pipeline, [str(feature)]))
     return ColumnTransformer(
         transformers=transformers,
         remainder="passthrough",
