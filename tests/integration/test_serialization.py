@@ -7,6 +7,8 @@ policy preservation, and the security allow-list that keeps loading a spec safe
 """
 
 import json
+import math
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -381,8 +383,11 @@ def test_non_finite_floats_round_trip():
     assert isinstance(decoded, np.ndarray)
     np.testing.assert_array_equal(decoded, array)
     assert decoded.dtype == array.dtype
-    scalars = [_decode(_strict_loads(json.dumps(_encode(value), allow_nan=False))) for value in (np.nan, -np.inf)]
-    assert np.isnan(scalars[0]) and scalars[1] == -np.inf
+    nan, neg_inf = (
+        float(cast(float, _decode(_strict_loads(json.dumps(_encode(value), allow_nan=False)))))
+        for value in (np.nan, -np.inf)
+    )
+    assert math.isnan(nan) and neg_inf == -math.inf
 
 
 def test_specs_with_bare_nan_tokens_still_load(frame_with_missing):
