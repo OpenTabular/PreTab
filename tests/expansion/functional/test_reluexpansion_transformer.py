@@ -70,3 +70,22 @@ def test_relu_feature_mismatch(X_multi_feature, y_regression):
     transformer.fit(X_multi_feature[:, :2], y_regression)
     with pytest.raises(ValueError, match="is expecting"):
         transformer.transform(X_multi_feature)
+
+
+@pytest.mark.parametrize("placement_strategy", ["uniform", "quantile"])
+def test_unsupervised_relu_has_no_dead_column(placement_strategy):
+    """The last center sat at the training maximum, so max(0, x - c) was identically
+    zero on the training data and only output_dim - 1 columns carried signal."""
+    X = np.random.default_rng(0).uniform(0, 10, (500, 1))
+    transformer = ReLUExpansionTransformer(output_dim=6, placement_strategy=placement_strategy).fit(X)
+    out = transformer.transform(X)
+    assert out.shape == (500, 6)
+    assert (out.max(axis=0) > 0).all()
+    assert np.linalg.matrix_rank(out) == 6
+    assert transformer.centers_[0][0] == X.min()
+    assert transformer.centers_[0][-1] < X.max()
+
+
+def test_unsupervised_relu_keeps_its_width_on_a_constant_feature():
+    X = np.full((20, 1), 3.0)
+    assert ReLUExpansionTransformer(output_dim=4).fit(X).transform(X).shape == (20, 4)
