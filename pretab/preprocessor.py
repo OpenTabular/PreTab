@@ -5,7 +5,7 @@ import logging
 import os
 import time
 import warnings
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from scipy import sparse as sp
@@ -47,8 +47,10 @@ from .core.parameters import UNSET, validate_task
 from .core.policy import RepresentationPolicy, apply_constant_policy
 from .exceptions import (
     ConfigWarning,
+    DataWarning,
     FrozenRepresentationError,
     OutputBudgetError,
+    PretabConfigError,
     PretabDataError,
     PretabSerializationError,
     invalid_param_error,
@@ -379,6 +381,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
     ``"polynomial"``, and ``"passthrough"`` -> ``"none"``.
 
+    A column with no observed value at ``fit`` keeps its block: the imputers fill it with ``0``
+    (or ``fill_value`` for ``strategy="constant"``), so it is fitted as a constant column, and
+    ``fit`` emits a :class:`~pretab.exceptions.DataWarning` naming it. A method that cannot be
+    fitted on such a column raises a :class:`~pretab.exceptions.PretabDataError` naming it.
+
     ``transform`` returns a single stacked array by default (``output_structure="matrix"``),
     or a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` when
     ``output_structure="blocks"``. Passing ``return_array`` explicitly to ``transform`` /
@@ -586,8 +593,24 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.policy_ = RepresentationPolicy.resolve(self.policy)
         self.numerical_features_ = list(numerical_features)
         self.categorical_features_ = list(categorical_features)
+        # A feature without any observed value (e.g. an optional field that is empty
+        # in this training window or CV fold) still gets its block, fitted on a
+        # column that is missing throughout (a single constant once imputed).
+        empty_features = list(X.columns[X.isna().to_numpy().all(axis=0)]) if len(X) else []
+        if empty_features:
+            warnings.warn(
+                f"{type(self).__name__} received column(s) {empty_features} with no observed (non-missing) "
+                "value at fit. Their blocks are kept but fitted on an entirely missing column (a single "
+                "constant value once imputed), so they carry no information until the preprocessor is "
+                "refit on data where those columns are observed.",
+                DataWarning,
+                stacklevel=2,
+            )
         if numerical_features and self.policy_.constant != "allow":
-            numeric_values = X[numerical_features].to_numpy(dtype=np.float64, na_value=np.nan)
+            numeric_values = X[numerical_features].to_numpy(dtype=np.float64, na_value=np.nan, copy=True)
+            # An empty column is represented by one constant value, so the policy
+            # treats it like any other constant column.
+            numeric_values[:, np.isnan(numeric_values).all(axis=0)] = 0.0
             apply_constant_policy(numeric_values, self.policy_, estimator=self)
 
         valid_formats = ("auto", "dense", "sparse")
@@ -628,7 +651,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.column_transformer_.set_output(transform="default")
         # ColumnTransformer.fit runs fit_transform internally; keep the training
         # output to resolve output_format="auto" once, from the training density.
-        training_output = self.column_transformer_.fit_transform(self._column_transformer_input(X), y)
+        X_ct = self._column_transformer_input(X)
+        try:
+            training_output = self.column_transformer_.fit_transform(X_ct, y)
+        except ValueError as exc:
+            if empty_features and not isinstance(exc, PretabConfigError):
+                self._raise_for_empty_features(X_ct, y, empty_features, config)
+            raise
         self.output_format_ = resolve_output_format(training_output, self.output_format)
         self.n_features_in_ = X.shape[1]
         # scikit-learn convention: feature names are recorded only for named input.
@@ -1067,6 +1096,50 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 "Fix: impute the data first, or choose a different missing_policy "
                 "('propagate', 'impute', 'impute_with_indicator', 'separate_state')."
             )
+
+    def _raise_for_empty_features(self, X, y, empty_features, config) -> None:
+        """Name the empty feature behind a failed ``fit``, if one is to blame.
+
+        Called when fitting the ColumnTransformer failed. The block of each feature
+        without an observed value is refitted on its own, and the first that fails
+        raises a :class:`~pretab.exceptions.PretabDataError` naming that feature,
+        chained to the block's own error: methods that cannot be fitted on a
+        constant column (e.g. the B/M/I and cubic splines, Box-Cox) otherwise only
+        report "the feature at index 0". A block is only blamed when it fits a
+        stand-in column of distinct observed values with the same ``y``, so a
+        failure with another cause (e.g. a ``y`` of the wrong length) is not
+        attributed to the empty column. Returns without raising when no empty
+        column is to blame, so the caller re-raises the original error.
+        """
+        empty = {str(feature): feature for feature in empty_features}
+        for _name, transformer, columns in self.column_transformer_.transformers:
+            feature = empty.get(columns[0])
+            if feature is None:
+                continue
+            is_numerical = feature in self.numerical_features_
+            try:
+                cast(Any, clone(transformer)).fit(X[columns], y)
+            except PretabConfigError:
+                continue  # a configuration problem, not one of the empty column
+            except ValueError as exc:
+                stand_in = X[columns].copy()
+                stand_in[columns[0]] = (
+                    np.linspace(1.0, 2.0, len(X))
+                    if is_numerical
+                    else np.resize(np.array(["a", "b"], dtype=object), len(X))
+                )
+                try:
+                    cast(Any, clone(transformer)).fit(stand_in, y)
+                except ValueError:
+                    continue  # the block fails with observed values too: not the emptiness
+                method = config.method_for(feature, is_numerical=is_numerical)
+                raise PretabDataError(
+                    f"Column {feature!r} has no observed (non-missing) value at fit, and its {method!r} "
+                    "representation cannot be fitted on such a column (entirely missing, or a single "
+                    f"constant once imputed): {exc}\n"
+                    "Fix: drop the column, fit on data where it is observed, or select a method that "
+                    "accepts a constant column for it via feature_preprocessing."
+                ) from exc
 
     def _enforce_output_budget(self, n_rows: int) -> None:
         """Check the fitted output width against the configured output budget.

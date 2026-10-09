@@ -36,6 +36,15 @@ unchanged at `transform`. PreTab never drops a row for missing values: every inp
 produces an output row.
 ```
 
+```{note}
+A column with no observed value at `fit` (for example an optional field that is empty in a
+training window or a cross-validation fold) still keeps its block, so the output layout does not
+depend on which rows were seen. The imputers fill it with `0` (or `fill_value` for
+`strategy="constant"`), which makes it a constant column, and `fit` emits a `DataWarning`
+naming it. See [Edge-case behaviour](../representations/choosing_a_method.md) for the methods
+that cannot be fitted on a constant column.
+```
+
 ## The `missing_policy` control
 
 For finer control, `missing_policy` selects one of five behaviours for the whole

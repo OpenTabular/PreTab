@@ -282,8 +282,11 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
 
             elif "continuous_ordinal" in steps:
                 step = representation_pipeline.named_steps["continuous_ordinal"]
-                categories = len(step.mapping_[columns.index(feature_name)])
-                dimension = separate_state_dimension if separate_state_dimension is not None else 1
+                position = columns.index(feature_name)
+                # An encoder that received no column (a 0-width block) has no mapping.
+                has_mapping = position < len(step.mapping_)
+                categories = len(step.mapping_[position]) if has_mapping else None
+                dimension = separate_state_dimension if separate_state_dimension is not None else int(has_mapping)
                 categorical_feature_info[feature_name] = {
                     "preprocessing": preprocessing_type,
                     "dimension": dimension,

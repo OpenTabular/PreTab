@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 
 from pretab import Preprocessor, PretabWarning, configure_logging, set_verbosity
-from pretab.exceptions import ConfigWarning
+from pretab.exceptions import ConfigWarning, DataWarning
 
 
 @pytest.fixture
@@ -109,6 +109,16 @@ def test_verbose_2_logs_feature_table(sample_data, caplog):
     debug_text = "\n".join(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
     assert "feature" in debug_text  # table header
     assert "pipeline" in debug_text
+
+
+def test_verbose_2_lists_a_column_without_observed_values(sample_data, caplog):
+    X, y = sample_data
+    X = X.assign(empty=pd.Series([np.nan] * len(X), dtype=object))
+    caplog.set_level(logging.DEBUG, logger="pretab")
+    with pytest.warns(DataWarning, match="no observed"):
+        Preprocessor(numerical_method="ple", verbose=2).fit(X, y)
+    rows = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any(row.startswith("empty ") for row in rows)
 
 
 def test_verbose_3_logs_internal_decisions(sample_data, caplog):

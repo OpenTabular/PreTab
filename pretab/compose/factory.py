@@ -69,6 +69,18 @@ def _filter_kwargs(allowed, kwargs):
     return {key: kwargs[key] for key in allowed if key in kwargs}
 
 
+def _imputer(strategy, add_indicator, imputer_kwargs):
+    """Build the leading :class:`~sklearn.impute.SimpleImputer` of a per-column pipeline.
+
+    A column with no observed value at fit is kept (``keep_empty_features=True``)
+    and filled with ``0``, or with ``fill_value`` for ``strategy="constant"``.
+    scikit-learn's default drops it, which leaves the rest of the pipeline an
+    input without columns: the block then fails to fit or vanishes from the output.
+    """
+    imputer_kwargs = {"keep_empty_features": True, **(imputer_kwargs or {})}
+    return SimpleImputer(strategy=strategy, add_indicator=add_indicator, **imputer_kwargs)
+
+
 def _clamp_spline_basis(output_dim):
     """Clamp a requested output dimension into the supported B/M/I spline range.
 
@@ -131,10 +143,7 @@ def get_numerical_transformer_steps(
     steps = []
 
     if add_imputer:
-        imputer_kwargs = imputer_kwargs or {}
-        steps.append(
-            ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
-        )
+        steps.append(("imputer", _imputer(imputer_strategy, add_missing_indicator, imputer_kwargs)))
 
     # Optional scaling step, added only when it is not already the chosen method.
     scalers = {
@@ -208,10 +217,7 @@ def get_categorical_transformer_steps(
     steps = []
 
     if add_imputer:
-        imputer_kwargs = imputer_kwargs or {}
-        steps.append(
-            ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
-        )
+        steps.append(("imputer", _imputer(imputer_strategy, add_missing_indicator, imputer_kwargs)))
 
     if method not in CATEGORICAL_METHODS:
         raise invalid_param_error(

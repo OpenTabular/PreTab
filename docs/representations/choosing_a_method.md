@@ -98,6 +98,13 @@ PreTab is explicit about degenerate inputs rather than failing silently.
   row for it.
 - **NaN into a finite-only method**: raises a typed error unless imputation is configured. See
   [Missing values](../core_concepts/missing_values.md).
+- **Column with no observed value at fit** (missing on every row, e.g. an optional field that is
+  empty in a training window or a cross-validation fold): `Preprocessor` keeps the column's
+  block and emits a `DataWarning` naming it. The imputers fill it with `0` (or `fill_value`
+  for `strategy="constant"`), so it is fitted as a constant column; with imputation disabled
+  it stays missing. A method that cannot be fitted on such a column (the splines above, or
+  Box-Cox) raises a typed error naming the column, and `policy={"constant": "error"}` rejects an
+  empty numerical column like any other constant one.
 
 ## Non-goals
 

@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
 from pretab.compose.factory import (
     _placement_kwargs,
@@ -27,6 +28,15 @@ def test_imputer_is_first_step_by_default():
 
 def test_imputer_omitted_when_disabled():
     assert "imputer" not in _names(get_numerical_transformer_steps("standardization", add_imputer=False))
+
+
+def test_imputer_keeps_a_column_without_observed_values():
+    empty = np.full((4, 1), np.nan)
+    assert Pipeline(get_numerical_transformer_steps("minmax")).fit_transform(empty).shape == (4, 1)
+    assert Pipeline(get_categorical_transformer_steps("one-hot")).fit_transform(empty.astype(object)).shape == (4, 1)
+    # imputer_kwargs can still restore scikit-learn's default of dropping it.
+    steps = dict(get_numerical_transformer_steps("minmax", imputer_kwargs={"keep_empty_features": False}))
+    assert steps["imputer"].keep_empty_features is False
 
 
 def test_none_method_uses_noop_step():
