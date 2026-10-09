@@ -350,12 +350,12 @@ def build_feature_lineage(column_transformer):
 
         separate_state = _separate_state_branches(transformer)
         if separate_state is not None:
-            representation_pipeline, _missing_indicator = separate_state
-            union_names = [str(value) for value in transformer.get_feature_names_out(list(columns))]
-            representation_width = sum(value.startswith("representation__") for value in union_names)
-            missing_width = sum(value.startswith("missing__") for value in union_names)
-            if representation_width + missing_width != width:
-                representation_width = width - missing_width
+            representation_pipeline, missing_indicator = separate_state
+            # The missing branch comes last in the union; read its width from the
+            # fitted indicator, which may emit no column (MissingIndicator only
+            # marks features that had missing values at fit).
+            missing_width = len(missing_indicator.get_feature_names_out([str(column) for column in columns]))
+            representation_width = width - missing_width
 
             family, component, uses_target, is_interaction = _resolve_block_representation(
                 representation_pipeline, columns

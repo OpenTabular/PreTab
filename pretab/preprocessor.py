@@ -221,10 +221,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Strategy for the ``SimpleImputer`` that runs *before* every categorical method. ``None``
         disables imputation for categorical columns.
     add_missing_indicator : bool, default=False
-        If True, append a binary missing-value indicator column for each imputed feature (via the
-        imputer's ``add_indicator``; a standalone :class:`~pretab.transformers.MissingStateIndicator`
-        is used instead when imputation is disabled for that column kind). Applies to both
-        numerical and categorical pipelines.
+        If True, append a binary (0/1) missing-value indicator column for each imputed feature
+        that has missing values at ``fit`` (scikit-learn's ``MissingIndicator``, computed on the raw
+        input next to the representation, so it never passes through the scaler or basis; a
+        standalone :class:`~pretab.transformers.MissingStateIndicator` is used instead when
+        imputation is disabled for that column kind). Applies to both numerical and categorical
+        pipelines.
     missing_policy : {"error", "propagate", "impute", "impute_with_indicator", "separate_state"} or None, default=None
         High-level missing-value strategy. ``None`` (default) keeps the explicit
         ``numerical_imputation`` / ``categorical_imputation`` / ``add_missing_indicator``
