@@ -10,12 +10,13 @@ from typing import ClassVar, Literal
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array, check_is_fitted
+from sklearn.utils.validation import _check_feature_names, check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.parameters import UNSET, AliasResolverMixin
 from ...core.representation import RepresentationSpecMixin
 from ...core.supervised import warn_target_leakage
+from ...core.validation import resolve_input_features
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -161,6 +162,7 @@ class PLETransformer(
                 "PLETransformer is always target-aware and requires y at fit time; got y=None."
             )
 
+        _check_feature_names(self, X, reset=True)
         X = check_array(
             X,
             dtype=np.float64,  # type: ignore
@@ -230,6 +232,7 @@ class PLETransformer(
         """
         check_is_fitted(self, ["thresholds_", "n_features_in_"])
 
+        _check_feature_names(self, X, reset=False)
         X = check_array(
             X,
             dtype=np.float64,  # type: ignore
@@ -326,9 +329,7 @@ class PLETransformer(
             One name per output column, formatted ``{name}_ple{j}``.
         """
         check_is_fitted(self, ["thresholds_", "n_features_in_"])
-
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        input_features = resolve_input_features(self, input_features)
 
         feature_names_out = []
         for name, n_bins in zip(input_features, self.n_bins_per_feature_, strict=False):
