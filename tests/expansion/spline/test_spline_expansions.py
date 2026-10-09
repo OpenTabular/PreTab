@@ -132,6 +132,42 @@ def test_ispline_bounded_unit_interval():
     assert np.all(Xt <= 1.0 + 1e-9)
 
 
+def _exact_ispline(x, knots, degree):
+    """Reference I-spline: the normalized antiderivative of each B-spline basis function."""
+    from scipy.interpolate import BSpline
+
+    n_coef = len(knots) - degree - 1
+    columns = []
+    for i in range(n_coef):
+        antiderivative = BSpline(knots, np.eye(n_coef)[i], degree).antiderivative()
+        lower, upper = antiderivative(knots[0]), antiderivative(knots[-1])
+        columns.append((antiderivative(x) - lower) / (upper - lower))
+    return np.column_stack(columns)
+
+
+@pytest.mark.parametrize("output_dim", [6, 10, 30])
+def test_ispline_matches_exact_integral_on_tight_knots(output_dim):
+    """Regression guard for issue #53: knot spans narrower than a fixed quadrature
+    grid step produced all-zero and misplaced columns."""
+    X = np.random.default_rng(0).lognormal(0, 2, (2000, 1))
+    transformer = ISplineTransformer(output_dim=output_dim).fit(X)
+    Xt = transformer.transform(X)
+
+    exact = _exact_ispline(X[:, 0], transformer.knots_[0], transformer.degree)
+    np.testing.assert_allclose(Xt, exact, atol=1e-10)
+    assert (Xt.max(axis=0) > 0).all()
+    # Every I-spline row is ordered I_0 >= I_1 >= ... >= I_{K-1}.
+    assert (np.diff(Xt, axis=1) <= 1e-12).all()
+
+
+def test_ispline_reaches_zero_and_one_at_the_range_boundaries():
+    X = np.random.default_rng(1).exponential(size=(500, 1))
+    transformer = ISplineTransformer(output_dim=8).fit(X)
+    boundary = transformer.transform(np.array([[X.min()], [X.max()]]))
+    np.testing.assert_allclose(boundary[0], 0.0, atol=1e-12)
+    np.testing.assert_allclose(boundary[1], 1.0, atol=1e-12)
+
+
 def test_ispline_shape_multi_feature():
     rng = np.random.RandomState(2)
     X = rng.uniform(0, 5, size=(100, 2))
