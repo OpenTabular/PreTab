@@ -49,8 +49,10 @@ t.fit_transform(X).shape
 ```
 
 Constructor highlights: `output_dim`, `degree=3`, `include_bias=False`, `knot_locations=None`
-(pass explicit knots to override placement), `target_aware=False`, `placement_strategy="quantile"`,
-`adaptive`, `random_state`.
+(pass explicit interior knots to override placement and `output_dim`: each feature then gets
+`len(knot_locations) + degree + 1` columns, and knots on or outside its fitted range are dropped
+with a warning), `target_aware=False`, `placement_strategy="quantile"`, `adaptive`,
+`random_state`.
 
 **Parameter impact.**
 
