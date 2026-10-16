@@ -21,6 +21,7 @@ __all__ = [
     "build_transformer_summary",
     "clean_feature_names",
     "get_output_slices",
+    "representation_leaf",
 ]
 
 
@@ -84,6 +85,19 @@ def _separate_state_branches(transformer):
     if "representation" not in branches or "missing" not in branches:
         return None
     return branches["representation"], branches["missing"]
+
+
+def representation_leaf(transformer):
+    """Return the last step of a fitted per-column block's representation.
+
+    For a separate-state / missing-indicator union this is the last step of its
+    ``"representation"`` pipeline (the raw missing indicator beside it is not
+    part of the representation); for a pipeline it is the last step, and any
+    other block is returned unchanged.
+    """
+    separate_state = _separate_state_branches(transformer)
+    representation = transformer if separate_state is None else separate_state[0]
+    return representation.steps[-1][1] if hasattr(representation, "steps") else representation
 
 
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
@@ -318,12 +332,12 @@ def build_feature_lineage(column_transformer):
 
         separate_state = _separate_state_branches(transformer)
         if separate_state is not None:
-            representation_pipeline, _missing_indicator = separate_state
-            union_names = [str(value) for value in transformer.get_feature_names_out(list(columns))]
-            representation_width = sum(value.startswith("representation__") for value in union_names)
-            missing_width = sum(value.startswith("missing__") for value in union_names)
-            if representation_width + missing_width != width:
-                representation_width = width - missing_width
+            representation_pipeline, missing_indicator = separate_state
+            # The missing branch comes last in the union; read its width from the
+            # fitted indicator, which may emit no column (MissingIndicator only
+            # marks features that had missing values at fit).
+            missing_width = len(missing_indicator.get_feature_names_out([str(column) for column in columns]))
+            representation_width = width - missing_width
 
             family, component, uses_target, is_interaction = _resolve_block_representation(
                 representation_pipeline, columns
