@@ -145,7 +145,13 @@ def register_representation(
     scope : {"univariate", "multivariate"}, optional
         Inferred from ``cls`` when omitted.
     supervision : {"unsupervised", "optional", "supervised"}, optional
-        Inferred from ``cls`` when omitted.
+        Inferred from ``cls`` when omitted. For a class without a
+        ``get_representation_spec`` (a plain scikit-learn transformer such as
+        ``TargetEncoder``), this declaration decides whether a fitted block used
+        ``y``: ``"supervised"``, or ``"optional"`` with ``target_aware`` set on the
+        instance, counts as target-aware. The feature lineage then reports
+        ``uses_target``, and :class:`~pretab.CrossFittedTransformer` refits the
+        block on every fold of a wrapped :class:`~pretab.Preprocessor`.
     allowed_args : iterable of str, default=()
         Constructor argument names the shared Preprocessor keyword arguments are
         filtered down to for this method.
