@@ -5,6 +5,7 @@ from sklearn.utils.validation import check_is_fitted
 from ....core.knots import bspline_basis
 from ....core.parameters import UNSET
 from ....core.policy import RepresentationPolicy, resolve_out_of_range
+from ....core.validation import resolve_input_features
 from ....exceptions import InvalidParamError
 from ..mixins import SplineBasisMixin
 
@@ -98,6 +99,11 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     n_features_in_ : int
         Number of input features seen during ``fit``.
+
+    feature_names_in_ : ndarray of str
+        Names of the input columns seen during ``fit``. Defined only when ``X``
+        was a DataFrame with string column names; ``transform`` then requires
+        the same columns in the same order.
 
     total_output_dim_ : int
         Total number of output columns (fitted); equals
@@ -244,10 +250,30 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         return design
 
     def get_feature_names_out(self, input_features=None):
-        """Return names for the interaction basis as ``tp_{feat0 i}_{feat1 j}...``."""
+        """Return names for the interaction basis as ``tp_{feat0 i}_{feat1 j}...``.
+
+        Parameters
+        ----------
+        input_features : array-like of str or None, default=None
+            Input feature names. ``None`` uses ``feature_names_in_`` when the
+            transformer was fitted on a DataFrame, else ``x0, x1, ...``. Explicit
+            names need one entry per input feature and, after a DataFrame fit,
+            must equal ``feature_names_in_``.
+
+        Returns
+        -------
+        feature_names_out : ndarray of str
+            One name per tensor-product basis column.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``input_features`` does not have one entry per input feature.
+        ValueError
+            If ``input_features`` differs from ``feature_names_in_``.
+        """
         check_is_fitted(self, "marginal_sizes_")
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        input_features = resolve_input_features(self, input_features)
         sizes = self.marginal_sizes_
         names = []
         for multi_index in np.ndindex(*sizes):

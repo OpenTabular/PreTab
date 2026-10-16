@@ -1,6 +1,7 @@
 """Tests for the public ``BaseRepresentation`` extension base (P10.1)."""
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn.utils.validation import check_is_fitted
 
@@ -60,6 +61,14 @@ def test_representation_spec_reflects_declaration():
     assert isinstance(spec, RepresentationSpec)
     assert spec.scope == "univariate"
     assert spec.output_dim == 1
+
+
+def test_representation_spec_after_a_dataframe_fit_names_the_columns():
+    X = pd.DataFrame({"length": np.linspace(0.0, 1.0, 20), "width": np.linspace(1.0, 2.0, 20)})
+    est = _Square().fit(X)
+    spec = est.get_representation_spec()
+    assert spec.input_features == ("length", "width")
+    assert spec.output_features == tuple(est.get_feature_names_out())
 
 
 def test_invalid_scope_rejected():

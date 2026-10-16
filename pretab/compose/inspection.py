@@ -8,6 +8,7 @@ collects per-feature preprocessing / dimension / category metadata, and
 """
 
 import numpy as np
+import pandas as pd
 from sklearn.pipeline import FeatureUnion
 
 from ..core.logging import get_logger
@@ -86,6 +87,19 @@ def _separate_state_branches(transformer):
     return branches["representation"], branches["missing"]
 
 
+def _probe_input(step, value):
+    """Return a one-row probe input for measuring a fitted step's output width.
+
+    A step fitted directly on the ColumnTransformer's DataFrame column records
+    ``feature_names_in_`` and, like scikit-learn, warns on input without feature
+    names, so its probe is a DataFrame carrying the fitted names.
+    """
+    names = getattr(step, "feature_names_in_", None)
+    if names is None:
+        return np.full((1, 1), value)
+    return pd.DataFrame(np.full((1, len(names)), value), columns=names)
+
+
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
     """Collect per-feature metadata (preprocessing, dimension, categories).
 
@@ -139,7 +153,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
             ):
                 last_step = representation_pipeline.steps[-1][1]
                 if hasattr(last_step, "transform"):
-                    dummy_input = np.zeros((1, 1)) + 1e-05
+                    dummy_input = _probe_input(last_step, 1e-05)
                     try:
                         transformed_feature = last_step.transform(dummy_input)
                         dimension = transformed_feature.shape[1]
@@ -184,7 +198,7 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
             else:
                 last_step = representation_pipeline.steps[-1][1]
                 if hasattr(last_step, "transform"):
-                    dummy_input = np.zeros((1, 1))
+                    dummy_input = _probe_input(last_step, 0.0)
                     try:
                         transformed_feature = last_step.transform(dummy_input)
                         dimension = transformed_feature.shape[1]
@@ -263,7 +277,11 @@ def _resolve_block_representation(pipeline, columns):
     steps = pipeline.steps if hasattr(pipeline, "steps") else [("_", pipeline)]
     for step_name, transformer in reversed(steps):
         if hasattr(transformer, "get_representation_spec"):
-            spec = transformer.get_representation_spec(input_features=list(columns))
+            # A step fitted on more inputs than the block has columns (behind the
+            # imputer's built-in missing indicator) names its own inputs; its
+            # get_feature_names_out rejects the block's shorter column list.
+            fits_block = getattr(transformer, "n_features_in_", len(columns)) == len(columns)
+            spec = transformer.get_representation_spec(input_features=list(columns) if fits_block else None)
             return spec.family, spec.component_kind, spec.uses_target, spec.is_interaction
         if step_name in _STEP_FAMILY:
             family, component = _STEP_FAMILY[step_name]

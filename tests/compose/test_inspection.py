@@ -1,5 +1,7 @@
 """Unit tests for :mod:`pretab.compose.inspection`."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -54,6 +56,23 @@ def test_build_feature_info_does_not_infer_kind_from_cat_in_feature_name(make_co
 
     assert feature in numerical
     assert feature not in categorical
+
+
+@pytest.mark.parametrize(("method", "dimension"), [("rbf", 3), ("standardization", 1)])
+def test_build_feature_info_probes_a_step_fitted_on_the_frame_without_warning(
+    make_config, sample_frame, method, dimension
+):
+    """Without an imputer the representation is fitted on the DataFrame column and
+    records ``feature_names_in_``; probing it with a bare array warned that X does
+    not have valid feature names."""
+    config = make_config(numerical_method=method, numerical_imputation=None, output_dim=3)
+    ct = build_column_transformer(config, ["age"], ["city"]).fit(sample_frame)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        numerical, _, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert numerical["age"]["dimension"] == dimension
 
 
 def test_build_transformer_summary_has_header_and_rows():

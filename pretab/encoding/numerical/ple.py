@@ -10,12 +10,13 @@ from typing import ClassVar, Literal
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array, check_is_fitted
+from sklearn.utils.validation import _check_feature_names, check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.parameters import UNSET, AliasResolverMixin
 from ...core.representation import RepresentationSpecMixin
 from ...core.supervised import warn_target_leakage
+from ...core.validation import resolve_input_features
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -76,6 +77,10 @@ class PLETransformer(
         to ``[0, 1]``.
     n_features_in_ : int
         Number of features seen during ``fit``.
+    feature_names_in_ : ndarray of str
+        Names of the input columns seen during ``fit``. Defined only when ``X``
+        was a DataFrame with string column names; ``transform`` then requires
+        the same columns in the same order.
     n_bins_per_feature_ : list of int
         Number of output bins produced for each feature (``len(thresholds) + 1``).
     total_output_dim_ : int
@@ -161,6 +166,7 @@ class PLETransformer(
                 "PLETransformer is always target-aware and requires y at fit time; got y=None."
             )
 
+        _check_feature_names(self, X, reset=True)
         X = check_array(
             X,
             dtype=np.float64,  # type: ignore
@@ -230,6 +236,7 @@ class PLETransformer(
         """
         check_is_fitted(self, ["thresholds_", "n_features_in_"])
 
+        _check_feature_names(self, X, reset=False)
         X = check_array(
             X,
             dtype=np.float64,  # type: ignore
@@ -318,17 +325,25 @@ class PLETransformer(
         Parameters
         ----------
         input_features : array-like of str or None, default=None
-            Input feature names. If None, generic names ``x0``, ``x1`` ... are used.
+            Input feature names. ``None`` uses ``feature_names_in_`` when the
+            transformer was fitted on a DataFrame, else ``x0, x1, ...``. Explicit
+            names need one entry per input feature and, after a DataFrame fit,
+            must equal ``feature_names_in_``.
 
         Returns
         -------
         feature_names_out : ndarray of str
             One name per output column, formatted ``{name}_ple{j}``.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``input_features`` does not have one entry per input feature.
+        ValueError
+            If ``input_features`` differs from ``feature_names_in_``.
         """
         check_is_fitted(self, ["thresholds_", "n_features_in_"])
-
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        input_features = resolve_input_features(self, input_features)
 
         feature_names_out = []
         for name, n_bins in zip(input_features, self.n_bins_per_feature_, strict=False):

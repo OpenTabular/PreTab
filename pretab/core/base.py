@@ -10,12 +10,11 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ..exceptions import invalid_param_error
 from .adaptive import AdaptiveResolutionMixin
 from .parameters import AliasResolverMixin
 from .policy import RepresentationPolicy, apply_constant_policy
 from .representation import RepresentationSpecMixin
-from .validation import validate_2d_allow_nan
+from .validation import resolve_input_features, validate_2d_allow_nan
 
 __all__ = ["BasePreTabTransformer"]
 
@@ -37,6 +36,11 @@ class BasePreTabTransformer(
     means "inherit the shared policy"); :meth:`_resolved_policy` merges them.
     Transformers that expose their own ``policy`` constructor parameter let a
     caller override those defaults per-instance; see :meth:`_resolved_policy`.
+
+    Like scikit-learn's transformers, a transformer fitted on a DataFrame with
+    string column names records ``feature_names_in_``, names its outputs after the
+    columns, and checks the columns at ``transform``: renamed or reordered columns
+    raise a ``ValueError``, and input without column names warns.
     """
 
     _allow_nan: bool = True
@@ -88,17 +92,30 @@ class BasePreTabTransformer(
         raise NotImplementedError
 
     def get_feature_names_out(self, input_features=None):
-        """Return output feature names of the form ``{feature}_{suffix}{j}``."""
+        """Return output feature names of the form ``{feature}_{suffix}{j}``.
+
+        Parameters
+        ----------
+        input_features : array-like of str or None, default=None
+            Input feature names. ``None`` uses ``feature_names_in_`` when the
+            transformer was fitted on a DataFrame, else ``x0, x1, ...``. Explicit
+            names need one entry per input feature and, after a DataFrame fit,
+            must equal ``feature_names_in_``.
+
+        Returns
+        -------
+        feature_names_out : ndarray of str
+            One name per output column.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``input_features`` does not have one entry per input feature.
+        ValueError
+            If ``input_features`` differs from ``feature_names_in_``.
+        """
         check_is_fitted(self, "n_features_in_")
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
-        elif len(input_features) != self.n_features_in_:
-            raise invalid_param_error(
-                type(self).__name__,
-                "get_feature_names_out.input_features",
-                len(input_features),
-                f"must have exactly {self.n_features_in_} entries (one per input feature)",
-            )
+        input_features = resolve_input_features(self, input_features)
         suffix = self._feature_suffix()
         names = []
         for feature, n_cols in zip(input_features, self._output_sizes(), strict=False):
