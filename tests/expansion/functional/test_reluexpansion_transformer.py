@@ -1,9 +1,11 @@
 import warnings
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn.utils.validation import check_is_fitted
 
+from pretab import Preprocessor
 from pretab.transformers import ReLUExpansionTransformer
 
 
@@ -70,3 +72,37 @@ def test_relu_feature_mismatch(X_multi_feature, y_regression):
     transformer.fit(X_multi_feature[:, :2], y_regression)
     with pytest.raises(ValueError, match="is expecting"):
         transformer.transform(X_multi_feature)
+
+
+@pytest.mark.parametrize("placement_strategy", ["uniform", "quantile"])
+def test_unsupervised_relu_has_no_dead_column(placement_strategy):
+    """The last center sat at the training maximum, so max(0, x - c) was identically
+    zero on the training data and only output_dim - 1 columns carried signal."""
+    X = np.random.default_rng(0).uniform(0, 10, (500, 1))
+    transformer = ReLUExpansionTransformer(output_dim=6, placement_strategy=placement_strategy).fit(X)
+    out = transformer.transform(X)
+    assert out.shape == (500, 6)
+    assert (out.max(axis=0) > 0).all()
+    assert np.linalg.matrix_rank(out) == 6
+    assert transformer.centers_[0][0] == X.min()
+    assert transformer.centers_[0][-1] < X.max()
+    # A zero-range feature has no interior: it keeps output_dim (equal) centers.
+    X_const = np.full((20, 1), 3.0)
+    constant = ReLUExpansionTransformer(output_dim=4, placement_strategy=placement_strategy).fit(X_const)
+    np.testing.assert_array_equal(constant.centers_[0], np.full(4, 3.0))
+
+
+def test_unsupervised_relu_uniform_centers_drop_the_right_endpoint():
+    X = np.random.default_rng(0).uniform(0, 10, (500, 1))
+    transformer = ReLUExpansionTransformer(output_dim=6, placement_strategy="uniform").fit(X)
+    np.testing.assert_allclose(transformer.centers_[0], np.linspace(X.min(), X.max(), 7)[:-1])
+
+
+@pytest.mark.parametrize("placement_strategy", ["uniform", "quantile"])
+def test_preprocessor_relu_has_no_constant_column(placement_strategy):
+    X = pd.DataFrame({"a": np.random.default_rng(0).uniform(0, 10, 500)})
+    pre = Preprocessor(numerical_method="relu", target_aware=False, placement_strategy=placement_strategy, output_dim=7)
+    out = np.asarray(pre.fit_transform(X), dtype=float)
+    assert out.shape == (500, 7)
+    assert (out.std(axis=0) > 0).all()
+    assert np.linalg.matrix_rank(out) == 7
