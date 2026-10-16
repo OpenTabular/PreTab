@@ -104,3 +104,17 @@ def test_invalid_task_rejected(data):
     X, y = data
     with pytest.raises(InvalidParamError, match="task"):
         CrossFittedTransformer(PLETransformer(), task="classificaton").fit_transform(X, y)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_cross_fitting_a_discrete_feature_keeps_a_fixed_width(seed):
+    """Regression guard for issue #57: tied features gave fold-dependent widths."""
+    from pretab.transformers import RBFExpansionTransformer
+
+    rng = np.random.default_rng(seed)
+    x = rng.integers(0, 6, size=200).astype(float).reshape(-1, 1)
+    y = np.sin(x[:, 0]) + rng.normal(0, 0.5, size=200)
+    out = CrossFittedTransformer(
+        RBFExpansionTransformer(output_dim=10, target_aware=True), n_folds=5, random_state=0
+    ).fit_transform(x, y)
+    assert out.shape == (200, 10)
