@@ -4,7 +4,7 @@ import json
 import os
 import time
 import warnings
-from typing import Any, cast
+from typing import cast
 
 import numpy as np
 from scipy import sparse as sp
@@ -23,6 +23,7 @@ from .compose.inspection import (
     build_transformer_summary,
     clean_feature_names,
     get_output_slices,
+    refit_block_representation,
 )
 from .compose.output import (
     compute_output_report,
@@ -875,16 +876,19 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return int(n_rows * n_cols * self._output_itemsize())
 
     def _cross_fit_fold(self, X, y):
-        """Return a copy of this fit whose target-aware blocks are refit on ``(X, y)``.
+        """Return a copy of this fit whose target-aware representations are refit on ``(X, y)``.
 
         Used by :class:`~pretab.CrossFittedTransformer` for its out-of-fold
-        features. Only the blocks that consume the target are refit on the fold;
-        column types, category vocabularies and every other block are shared
-        with this all-data fit, so an out-of-fold row is encoded exactly like
+        features. Only the representations that consume the target are refit on
+        the fold; column types, category vocabularies, imputers with their
+        missing-value indicators, scalers and every other block are shared with
+        this all-data fit, so an out-of-fold row is encoded exactly like
         ``transform`` encodes it, except that no target-aware placement has seen
         that row's target. Refitting the whole preprocessor per fold would
         re-detect column types and relearn categories on fewer rows, shifting
-        integer codes and one-hot columns between the folds and ``transform``.
+        integer codes and one-hot columns between the folds and ``transform``;
+        refitting a block's missing indicator would drop its column on a fold
+        without missing values.
         """
         check_is_fitted(self)
         # Each block sees the fold rows exactly as the internal ColumnTransformer
@@ -894,7 +898,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         column_transformer.transformers_ = [
             (
                 name,
-                cast(Any, clone(transformer)).fit(_safe_indexing(X, columns, axis=1), y)
+                refit_block_representation(transformer, _safe_indexing(X, columns, axis=1), y)
                 if name != "remainder" and block_uses_target(transformer)
                 else transformer,
                 columns,

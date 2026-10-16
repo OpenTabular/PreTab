@@ -73,9 +73,9 @@ held-out fold, so every training row is transformed by a model that never saw it
 the training data, since there is no leakage risk there.
 
 A wrapped `Preprocessor` is not refit from scratch on each fold: every fold reuses its all-data
-fit and refits only the target-aware representations. Column types, category codes and the
-blocks that do not use `y` are shared, so the out-of-fold features have exactly the columns and
-encoding `transform` produces.
+fit and refits only the target-aware representations. Column types, category codes, imputers
+with their missing-value indicators, scalers and the blocks that do not use `y` are shared, so
+the out-of-fold features have exactly the columns and encoding `transform` produces.
 
 ```python
 import numpy as np

@@ -6,14 +6,14 @@ validation.
 """
 
 import warnings
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pytest
 from sklearn.model_selection import KFold
 
 from pretab import CrossFittedTransformer, LeakageWarning
-from pretab.exceptions import IncompatibleParamsError, InvalidParamError
+from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
 from pretab.transformers import PLETransformer
 
 
@@ -146,10 +146,32 @@ def test_wrapped_preprocessor_out_of_fold_codes_match_transform(array_with_rare_
     np.testing.assert_array_equal(np.unique(out[:, unsupervised[1]]), [1.0, 2.0, 3.0, 4.0])
 
 
-def test_wrapped_preprocessor_target_aware_blocks_stay_out_of_fold(array_with_rare_category):
-    """Only the target-aware block is refit, on each fold's training rows."""
-    import pandas as pd
+def _refit_representation_per_fold(pipeline, column, y):
+    """Expected out-of-fold rows of a fitted block pipeline whose last step is its
+    target-aware representation: the helper steps before it keep their all-data fit."""
     from sklearn.base import clone
+
+    helpers, representation = pipeline[:-1], pipeline[-1]
+    blocks = {}
+    for train_idx, test_idx in KFold(n_splits=5, shuffle=True, random_state=0).split(column):
+        fold = cast(Any, clone(representation)).fit(helpers.transform(column.iloc[train_idx]), y[train_idx])
+        blocks[tuple(test_idx)] = fold.transform(helpers.transform(column.iloc[test_idx]))
+    out = np.empty((len(column), next(iter(blocks.values())).shape[1]))
+    for test_idx, rows in blocks.items():
+        out[list(test_idx)] = rows
+    return out
+
+
+def _fitted_block(cross_fitted, name):
+    from pretab import Preprocessor
+
+    return cast(Preprocessor, cross_fitted.estimator_).column_transformer_.named_transformers_[name]
+
+
+def test_wrapped_preprocessor_target_aware_blocks_stay_out_of_fold(array_with_rare_category):
+    """Only the target-aware representation is refit, on each fold's training rows; the
+    helper steps before it (imputer, scaler) keep their all-data fit."""
+    import pandas as pd
 
     from pretab import Preprocessor
 
@@ -159,12 +181,10 @@ def test_wrapped_preprocessor_target_aware_blocks_stay_out_of_fold(array_with_ra
     supervised = _split_columns(cross_fitted, "num_feature_0_ple")
     assert len(supervised) == 4
 
-    wrapped = cast(Preprocessor, cross_fitted.estimator_)
-    block = wrapped.column_transformer_.named_transformers_["num_feature_0"]
-    column = pd.DataFrame({"feature_0": X[:, 0]})
-    for train_idx, test_idx in KFold(n_splits=5, shuffle=True, random_state=0).split(X):
-        fold_block = clone(block).fit(column.iloc[train_idx], y[train_idx])
-        np.testing.assert_allclose(out[np.ix_(test_idx, supervised)], fold_block.transform(column.iloc[test_idx]))
+    block = _fitted_block(cross_fitted, "num_feature_0")
+    assert [name for name, _ in block.steps] == ["imputer", "minmax", "ple"]
+    expected = _refit_representation_per_fold(block, pd.DataFrame({"feature_0": X[:, 0]}), y)
+    np.testing.assert_array_equal(out[:, supervised], expected)
     assert not np.allclose(out[:, supervised], np.asarray(cross_fitted.transform(X))[:, supervised])
 
 
@@ -260,7 +280,7 @@ def test_wrapped_preprocessor_reads_the_target_use_of_an_indicator_block():
     assert not np.allclose(out, full)  # refit on every fold
 
 
-def test_width_mismatch_message_does_not_blame_adaptive_sizing_only():
+def test_width_mismatch_names_the_general_cause():
     from sklearn.preprocessing import OneHotEncoder
 
     x = np.array(["a"] * 99 + ["b"]).reshape(-1, 1)  # the fold holding out "b" never sees it
@@ -268,5 +288,105 @@ def test_width_mismatch_message_does_not_blame_adaptive_sizing_only():
     cross_fitted = CrossFittedTransformer(
         OneHotEncoder(handle_unknown="ignore", sparse_output=False), n_folds=5, random_state=0
     )
-    with pytest.raises(IncompatibleParamsError, match="depends on the training rows"):
+    with pytest.raises(IncompatibleParamsError, match="same columns on every fold"):
         cross_fitted.fit_transform(x, y)
+
+
+# --- a wrapped Preprocessor shares its missing indicators across folds (issue #89) --
+
+
+@pytest.fixture
+def array_with_one_missing_value():
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(200, 2))
+    X[7, 0] = np.nan  # the fold holding out row 7 trains on no missing value
+    y = np.nan_to_num(X[:, 0]) + rng.normal(scale=0.1, size=200)
+    return X, y
+
+
+@pytest.mark.parametrize(
+    ("method", "missing"),
+    [
+        ("ple", {"add_missing_indicator": True}),
+        ("ple", {"missing_policy": "impute_with_indicator"}),
+        ("rbf", {"add_missing_indicator": True}),
+        ("relu", {"add_missing_indicator": True}),
+        ("sigmoid", {"add_missing_indicator": True}),
+        ("tanh", {"add_missing_indicator": True}),
+    ],
+)
+def test_wrapped_preprocessor_keeps_its_missing_indicator_columns(array_with_one_missing_value, method, missing):
+    """Each fold refit the block's imputer, whose missing indicator emits no column when
+    the fold's training rows contain no missing value, so the width check failed."""
+    from pretab import Preprocessor
+
+    X, y = array_with_one_missing_value
+
+    def cross_fit(**missing_config):
+        wrapped = Preprocessor(numerical_method=method, output_dim=4, random_state=0, **missing_config)
+        cross_fitted = CrossFittedTransformer(wrapped, n_folds=5, random_state=0)
+        return cross_fitted, cross_fitted.fit_transform(X, y)
+
+    with_indicator, out = cross_fit(**missing)
+    _, imputed_only = cross_fit(missing_policy="impute")
+    names = [str(name) for name in with_indicator.get_feature_names_out()]
+    indicator = [i for i, name in enumerate(names) if "missingindicator" in name]
+
+    assert out.shape == np.asarray(with_indicator.transform(X)).shape
+    assert indicator  # the indicator columns of the all-data fit are kept on every fold
+    # The value's out-of-fold representation is the one cross-fitting gives without an indicator.
+    np.testing.assert_array_equal(np.delete(out, indicator, axis=1), imputed_only)
+
+
+def test_wrapped_preprocessor_refits_only_the_representation_after_the_imputer(array_with_one_missing_value):
+    """The all-data imputer (with its indicator) and scaler encode every fold; only the
+    PLE is refit, on the imputed value and the indicator of the fold's training rows."""
+    import pandas as pd
+
+    from pretab import Preprocessor
+
+    X, y = array_with_one_missing_value
+    wrapped = Preprocessor(numerical_method="ple", output_dim=4, add_missing_indicator=True, random_state=0)
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=5, random_state=0)
+    out = cross_fitted.fit_transform(X, y)
+
+    block = _fitted_block(cross_fitted, "num_feature_0")
+    assert [name for name, _ in block.steps] == ["imputer", "minmax", "ple"]
+    columns = _split_columns(cross_fitted, "num_feature_0")
+    assert len(columns) == 8  # the imputer feeds the value and its indicator to the PLE
+    expected = _refit_representation_per_fold(block, pd.DataFrame({"feature_0": X[:, 0]}), y)
+    np.testing.assert_array_equal(out[:, columns], expected)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=PretabDataError,
+    reason="Until #62 keeps the imputer's indicator out of the representation, a spline basis "
+    "is also fitted on the indicator, which is constant on a fold without missing values.",
+)
+def test_wrapped_preprocessor_keeps_the_indicator_next_to_a_target_aware_spline(array_with_one_missing_value):
+    from pretab import Preprocessor
+
+    X, y = array_with_one_missing_value
+    wrapped = Preprocessor(numerical_method="bspline", add_missing_indicator=True, random_state=0)
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=5, random_state=0)
+    assert cross_fitted.fit_transform(X, y).shape == np.asarray(cross_fitted.transform(X)).shape
+
+
+def test_wrapped_preprocessor_keeps_the_separate_state_missing_branch(array_with_one_missing_value):
+    """A separate-state block refits only its representation branch: the imputer imputes
+    the held-out missing value with the all-data median, as transform does."""
+    import pandas as pd
+
+    from pretab import Preprocessor
+
+    X, y = array_with_one_missing_value
+    wrapped = Preprocessor(numerical_method="ple", output_dim=4, missing_policy="separate_state", random_state=0)
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=5, random_state=0)
+    out = cross_fitted.fit_transform(X, y)
+
+    representation = dict(_fitted_block(cross_fitted, "num_feature_0").transformer_list)["representation"]
+    expected = _refit_representation_per_fold(representation, pd.DataFrame({"feature_0": X[:, 0]}), y)
+    np.testing.assert_array_equal(out[:, _split_columns(cross_fitted, "num_feature_0__representation")], expected)
+    missing = _split_columns(cross_fitted, "num_feature_0__missing")
+    np.testing.assert_array_equal(out[:, missing].ravel(), np.isnan(X[:, 0]).astype(float))
