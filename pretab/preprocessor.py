@@ -13,7 +13,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from .compose.config import PreprocessorConfig
 from .compose.factory import build_column_transformer
-from .compose.feature_detection import detect_column_types, to_dataframe
+from .compose.feature_detection import bool_columns_as_object, detect_column_types, to_dataframe
 from .compose.inspection import (
     build_feature_info,
     build_feature_lineage,
@@ -341,6 +341,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
     ``"polynomial"``, and ``"passthrough"`` -> ``"none"``.
 
+    Boolean columns (``bool`` and pandas' nullable ``boolean``) are categorical and are encoded
+    like any other binary categorical column, with the categories ``False`` and ``True``; a
+    missing value of the nullable ``boolean`` dtype is treated as missing (``NaN``).
+
     ``transform`` returns a single stacked array by default (``output_structure="matrix"``),
     or a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` when
     ``output_structure="blocks"``. Passing ``return_array`` explicitly to ``transform`` /
@@ -580,7 +584,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
-        self.column_transformer_.fit(X, y)
+        self.column_transformer_.fit(self._column_transformer_input(X), y)
         self.n_features_in_ = X.shape[1]
 
         self._enforce_output_budget(X.shape[0])
@@ -647,7 +651,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         output_kind = container if container in ("pandas", "polars") else ("array" if resolved_return_array else "dict")
         validate_embedding_request(embeddings, expected=self.embeddings_, output_kind=output_kind)
 
-        transformed_X = self.column_transformer_.transform(X)
+        transformed_X = self.column_transformer_.transform(self._column_transformer_input(X))
         if not sp.issparse(transformed_X):
             transformed_X = np.asarray(transformed_X)
         if self.dtype is not None:
@@ -821,6 +825,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             else:
                 dims[columns[0]] = width
         return dims
+
+    @staticmethod
+    def _column_transformer_input(X):
+        """Adapt a frame to what the internal ColumnTransformer expects.
+
+        Boolean columns become ``object`` columns, because the categorical
+        imputer rejects ``bool`` (see
+        :func:`~pretab.compose.feature_detection.bool_columns_as_object`). The
+        caller's frame is never modified.
+        """
+        return bool_columns_as_object(X)
 
     def _output_itemsize(self) -> int:
         """Bytes per element of the dense transformed array.
