@@ -632,9 +632,24 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             (or ``return_array=False``); a SciPy CSR matrix (or CSR blocks) when
             ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
             when configured via :meth:`set_output`.
+
+        Raises
+        ------
+        PretabDataError
+            If ``X`` is a NumPy array whose number of columns differs from
+            ``n_features_in_``. Array columns are matched by position, so such an
+            array can never be routed correctly.
         """
 
         check_is_fitted(self)
+
+        # Array columns are matched by position, so a different width can never be
+        # routed correctly; an extra column would silently shift or drop features.
+        if isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
+                f"{self.n_features_in_} features as input."
+            )
 
         X = to_dataframe(X, copy=True)
 
