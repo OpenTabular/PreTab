@@ -23,8 +23,8 @@ pre = Preprocessor(
 
 ```{note}
 Disabling imputation lets `NaN` reach the transformer directly. Scalers, splines, and the
-feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) tolerate it, so an affected row's output is
-itself undefined; finite-only methods (PLE, numeric binning, periodic encoding, Fourier
+feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) propagate it: the affected row's output columns
+for that feature are `NaN` (a spline's optional bias column stays `1`); finite-only methods (PLE, numeric binning, periodic encoding, Fourier
 features, `rff`, `nystroem`) raise a typed error instead, since expanding an undefined value
 has no meaning for them. `add_missing_indicator=True` still works with imputation disabled: it
 routes through the same `__missing` branch `missing_policy="separate_state"` uses below.
