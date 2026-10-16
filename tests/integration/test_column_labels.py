@@ -103,4 +103,3 @@ def test_get_feature_names_out_accepts_the_integer_labels_seen_at_fit():
     X = pd.DataFrame(np.random.default_rng(0).normal(size=(40, 2)))
     pre = Preprocessor(numerical_method="minmax").fit(X)
     np.testing.assert_array_equal(pre.get_feature_names_out([0, 1]), pre.get_feature_names_out())
-
