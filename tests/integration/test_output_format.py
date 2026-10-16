@@ -5,6 +5,8 @@ Covers ``output_format`` (dense/sparse/auto), ``dtype`` casting, the
 wrapping.
 """
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -241,3 +243,36 @@ def test_invalid_output_format_raises(frame, y):
 
     with pytest.raises(InvalidParamError):
         _bspline(output_format="nope").fit(frame, y)
+
+
+# --- "auto" is resolved once per fit (issue #73) ----------------------------------
+
+
+def test_auto_format_is_fixed_at_fit_for_dense_training_output():
+    """Regression guard for issue #73: low-density single rows came back sparse."""
+    from sklearn.datasets import load_diabetes
+
+    X, y = cast("tuple[pd.DataFrame, pd.Series]", load_diabetes(return_X_y=True, as_frame=True))
+    pre = Preprocessor(output_format="auto", random_state=0).fit(X, y)
+    assert pre.output_format_ == "dense"
+    for i in range(len(X)):
+        assert isinstance(pre.transform(X.iloc[[i]]), np.ndarray)
+    # The report still describes each call's own density.
+    pre.transform(X.iloc[[0]])
+    assert pre.output_report_["format"] == "dense"
+    assert pre.output_report_["shape"] == (1, pre.total_output_dim_)
+
+
+def test_auto_format_is_fixed_at_fit_for_sparse_training_output():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"city": rng.choice([f"c{i}" for i in range(20)], 200)})
+    pre = Preprocessor(categorical_method="one-hot", output_format="auto").fit(frame)
+    assert pre.output_format_ == "sparse"
+    assert sp.issparse(pre.transform(frame.iloc[:1]))
+    assert sp.issparse(pre.transform(frame))
+
+
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+def test_explicit_formats_are_stored_as_resolved(frame, y, output_format):
+    pre = Preprocessor(numerical_method="minmax", output_format=output_format).fit(frame, y)
+    assert pre.output_format_ == output_format
