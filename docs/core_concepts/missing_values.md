@@ -21,6 +21,11 @@ pre = Preprocessor(
 )
 ```
 
+With imputation enabled, the indicator (also used by `missing_policy="impute_with_indicator"`)
+is a raw `0`/`1` column computed on the input before imputation and placed next to the
+feature's representation. It is never scaled or expanded by the numerical or categorical
+method, and it is added only for features that had missing values at `fit`.
+
 ```{note}
 Disabling imputation lets `NaN` reach the transformer directly. Scalers, splines, and the
 feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) tolerate it, so an affected row's output is

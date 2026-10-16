@@ -20,6 +20,7 @@ from .compose.inspection import (
     build_transformer_summary,
     clean_feature_names,
     get_output_slices,
+    representation_leaf,
 )
 from .compose.output import (
     compute_output_report,
@@ -215,10 +216,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Strategy for the ``SimpleImputer`` that runs *before* every categorical method. ``None``
         disables imputation for categorical columns.
     add_missing_indicator : bool, default=False
-        If True, append a binary missing-value indicator column for each imputed feature (via the
-        imputer's ``add_indicator``; a standalone :class:`~pretab.transformers.MissingStateIndicator`
-        is used instead when imputation is disabled for that column kind). Applies to both
-        numerical and categorical pipelines.
+        If True, append a binary (0/1) missing-value indicator column for each imputed feature
+        that has missing values at ``fit`` (scikit-learn's ``MissingIndicator``, computed on the raw
+        input next to the representation, so it never passes through the scaler or basis; a
+        standalone :class:`~pretab.transformers.MissingStateIndicator` is used instead when
+        imputation is disabled for that column kind). Applies to both numerical and categorical
+        pipelines.
     missing_policy : {"error", "propagate", "impute", "impute_with_indicator", "separate_state"} or None, default=None
         High-level missing-value strategy. ``None`` (default) keeps the explicit
         ``numerical_imputation`` / ``categorical_imputation`` / ``add_missing_indicator``
@@ -229,7 +232,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         - ``"propagate"`` -- disable imputation so NaNs reach the transformers unchanged
           (each family applies its own missing-value contract).
         - ``"impute"`` -- impute with the configured strategy (no indicator).
-        - ``"impute_with_indicator"`` -- impute and append a missing indicator column.
+        - ``"impute_with_indicator"`` -- impute and append a raw 0/1 missing indicator column,
+          as ``add_missing_indicator=True`` does.
         - ``"separate_state"`` -- impute for the representation *and* emit a dedicated
           ``__missing`` column per feature that stays outside the ordinary basis, so a
           downstream model can learn a separate response to missingness.
@@ -982,7 +986,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     def _log_internal_decisions(self):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
         for name, transformer, _columns in self.column_transformer_.transformers_:
-            last_step = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
+            last_step = representation_leaf(transformer)
             for attr in (
                 "thresholds_",
                 "knots_",
