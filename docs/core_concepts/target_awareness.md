@@ -125,7 +125,9 @@ selection, and doing it carelessly (for example scoring each candidate on the sa
 to fit it) leaks information the same way an unguarded supervised transformer does.
 `RepresentationSearchCV` cross-validates a downstream estimator over a set of candidate
 `numerical_method` values, refits the best one on all the data, and keeps every candidate's
-scoring honest by fitting a fresh `Preprocessor` per fold.
+scoring honest by fitting a fresh `Preprocessor` per fold. With a classifier as the estimator,
+every `Preprocessor` uses `task="classification"`, so target-aware methods place against the
+class labels; a `task` set in `preprocessor_params` takes precedence.
 
 ```python
 import numpy as np
