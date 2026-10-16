@@ -119,6 +119,17 @@ def test_verbose_3_logs_internal_decisions(sample_data, caplog):
     assert "thresholds_" in debug_text or "total_output_dim_" in debug_text
 
 
+def test_verbose_3_logs_internal_decisions_under_the_block_name(caplog):
+    """Issue #71: a label that cannot be part of a step name is logged by its block name."""
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"_score": rng.normal(size=60)})
+    caplog.set_level(logging.DEBUG, logger="pretab")
+    Preprocessor(numerical_method="ple", verbose=3).fit(X, rng.normal(size=60))
+    debug_text = "\n".join(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
+    assert "num__score.total_output_dim_" in debug_text
+    assert "num_col0" not in debug_text
+
+
 def test_verbose_true_behaves_like_level_1(sample_data, caplog):
     X, y = sample_data
     caplog.set_level(logging.DEBUG, logger="pretab")
