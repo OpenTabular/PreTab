@@ -99,11 +99,12 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     ----------
     transformer : estimator
         A supervised (target-aware) PreTab transformer to cross-fit. For a
-        :class:`~pretab.Preprocessor`, only its target-aware blocks are refit per
-        fold: column types, category codes and the blocks that do not use ``y``
-        come from the all-data fit, so the out-of-fold features use exactly the
-        encoding of :meth:`transform`. Any other estimator is cloned and refit
-        from scratch on each fold.
+        :class:`~pretab.Preprocessor`, only its target-aware representations are
+        refit per fold: column types, category codes, imputers with their
+        missing-value indicators, scalers and the blocks that do not use ``y``
+        come from the all-data fit, so the out-of-fold features have exactly the
+        columns and encoding of :meth:`transform`. Any other estimator is cloned
+        and refit from scratch on each fold.
     n_folds : int, default=5
         Number of cross-fitting folds. Must be at least 2.
     task : {"regression", "classification"}, default="regression"
@@ -205,8 +206,9 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
                     raise IncompatibleParamsError(
                         "Cross-fitting requires a fixed output width across folds; expected "
                         f"{width}, got {fold_out.shape[1]}. The wrapped transformer's width "
-                        "depends on the training rows (e.g. adaptive sizing); fix it, for "
-                        "example by disabling adaptive sizing."
+                        "depends on the rows it is fit on (e.g. adaptive sizing, or category / "
+                        "indicator columns learned from the data); configure it to produce the "
+                        "same columns on every fold."
                     )
                 out[test_idx] = fold_out
         finally:

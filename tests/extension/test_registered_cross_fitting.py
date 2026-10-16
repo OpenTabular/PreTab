@@ -67,3 +67,24 @@ def test_registered_target_encoder_is_refit_per_fold(noise_target_data, cls, sup
     # all-data fit correlated at about 0.5.
     assert abs(np.corrcoef(out_of_fold[:, -1], y)[0, 1]) < 0.2
     assert lineage["cat_id"] is True
+
+
+def test_registered_target_encoder_keeps_its_missing_indicator():
+    """The registered encoder is refit per fold on the imputed value and the imputer's
+    indicator; the indicator column stays although a fold trains on no missing value."""
+    rng = np.random.default_rng(0)
+    X = rng.choice(["a", "b", "c"], (200, 1)).astype(object)
+    X[7, 0] = np.nan
+    y = rng.normal(size=200)
+    register_representation("registered_encoder", TargetEncoder, feature_kind="categorical", supervision="supervised")
+    pre = Preprocessor(categorical_method="registered_encoder", add_missing_indicator=True, random_state=0)
+
+    cross_fitted = CrossFittedTransformer(pre, n_folds=5, random_state=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        out = np.asarray(cross_fitted.fit_transform(X, y))
+        full = np.asarray(cross_fitted.transform(X))
+
+    assert list(cross_fitted.get_feature_names_out()) == ["cat_feature_0", "cat_feature_0__missingindicator_feature_0"]
+    assert out.shape == full.shape == (200, 2)
+    assert not np.allclose(out, full)  # refit on every fold
