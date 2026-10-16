@@ -98,6 +98,21 @@ def test_propagate_lets_nan_through(frame_with_nan, y):
     assert np.isnan(out).any()
 
 
+@pytest.mark.parametrize("method", ["bspline", "mspline", "ispline"])
+def test_propagate_expands_a_missing_value_to_a_nan_basis_row(method):
+    """The B/M/I splines encoded a missing value as a finite all-zero row, which for
+    the I-spline is exactly the row of the smallest observed value."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"x": rng.uniform(0, 10, 300)})
+    frame.loc[0, "x"] = np.nan
+    pre = Preprocessor(
+        numerical_method=method, missing_policy="propagate", target_aware=False, placement_strategy="uniform"
+    ).fit(frame, rng.normal(size=300))
+    out = np.asarray(pre.transform(frame, return_array=True))
+    assert np.isnan(out[0]).all()
+    assert np.isfinite(out[1:]).all()
+
+
 # --- impute --------------------------------------------------------------------
 
 
