@@ -241,3 +241,44 @@ def test_invalid_output_format_raises(frame, y):
 
     with pytest.raises(InvalidParamError):
         _bspline(output_format="nope").fit(frame, y)
+
+
+# --- global scikit-learn output config ----------------------------------------------
+
+
+@pytest.fixture
+def mixed_frame():
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=40)
+    a[:4] = np.nan
+    return pd.DataFrame({"a": a, "color": rng.choice(["red", "green", "blue"], 40)}), rng.normal(size=40)
+
+
+@pytest.mark.parametrize("options", [{"categorical_method": "one-hot"}, {"preset": "expanded"}])
+def test_one_hot_works_under_a_global_pandas_output_config(mixed_frame, options):
+    """The global transform_output reached the inner sparse OneHotEncoder, which refused it."""
+    import sklearn
+
+    X, y = mixed_frame
+    expected = np.asarray(Preprocessor(**options).fit(X, y).transform(X))
+    with sklearn.config_context(transform_output="pandas"):
+        pre = Preprocessor(**options).fit(X, y)
+        out = pre.transform(X)
+    assert isinstance(out, pd.DataFrame)
+    assert list(out.columns) == list(pre.get_feature_names_out())
+    assert set(map(str, out.dtypes)) == {"float64"}
+    np.testing.assert_allclose(out.to_numpy(), expected)
+
+
+def test_global_polars_output_config_is_honoured(mixed_frame):
+    import sklearn
+
+    pl = pytest.importorskip("polars")
+    X, y = mixed_frame
+    expected = np.asarray(Preprocessor(categorical_method="one-hot").fit(X, y).transform(X))
+    with sklearn.config_context(transform_output="polars"):
+        pre = Preprocessor(categorical_method="one-hot").fit(X, y)
+        out = pre.transform(X)
+    assert isinstance(out, pl.DataFrame)
+    assert out.columns == list(pre.get_feature_names_out())  # type: ignore
+    np.testing.assert_allclose(np.asarray(out), expected)
