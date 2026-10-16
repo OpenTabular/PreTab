@@ -613,7 +613,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         X : pandas.DataFrame, numpy.ndarray, or dict
-            Input features to transform.
+            Input features to transform. A DataFrame or dict is matched to the fitted
+            columns by name. A NumPy array is matched by position: after a fit on named
+            columns it takes those names (numeric columns of an object array are
+            re-inferred), with scikit-learn's usual warning that ``X`` does not have
+            valid feature names. Likewise, a DataFrame passed after a fit on an array
+            is matched by position, with a warning that ``X`` has feature names.
         embeddings : np.ndarray or list of np.ndarray, optional
             External embeddings to attach to dictionary output. Required when
             embeddings were supplied during ``fit`` and unsupported when the
@@ -632,11 +637,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             (or ``return_array=False``); a SciPy CSR matrix (or CSR blocks) when
             ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
             when configured via :meth:`set_output`.
+
+        Raises
+        ------
+        PretabDataError
+            If input matched by position has a different number of columns than
+            ``n_features_in_``: it could never be routed correctly.
         """
 
         check_is_fitted(self)
 
-        X = to_dataframe(X, copy=True)
+        X = self._align_input(X)
 
         if self.missing_policy == "error":
             self._reject_missing(X)
@@ -821,6 +832,47 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             else:
                 dims[columns[0]] = width
         return dims
+
+    def _align_input(self, X):
+        """Return ``X`` as a DataFrame whose columns line up with the fitted columns.
+
+        A NumPy array is matched by position. Once the preprocessor was fitted on
+        named columns, an array of the fitted width takes those column labels
+        (numeric columns of an object array are re-inferred), and a DataFrame
+        passed to a preprocessor fitted on an array is matched by position too --
+        both with scikit-learn's usual warning about the missing or unexpected
+        feature names. Any other DataFrame is matched by column label.
+
+        Raises
+        ------
+        PretabDataError
+            If array-like input matched by position has a different number of
+            columns than seen during ``fit``: it could never be routed correctly.
+        """
+        # The ColumnTransformer records the labels it was fitted on whenever they are
+        # all strings; an array fit shows up as the synthetic positional labels.
+        fitted_labels = getattr(self.column_transformer_, "feature_names_in_", None)
+        positional_labels = [f"feature_{i}" for i in range(self.n_features_in_)]
+        fitted_on_array = fitted_labels is not None and list(fitted_labels) == positional_labels
+
+        is_array = isinstance(X, np.ndarray)
+        X = to_dataframe(X, copy=True)
+        if not (is_array or (fitted_on_array and list(X.columns) != positional_labels)):
+            return X
+        if X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
+                f"{self.n_features_in_} features as input."
+            )
+        if fitted_labels is None or list(X.columns) == list(fitted_labels):
+            return X
+        if fitted_on_array:
+            message = f"X has feature names, but {type(self).__name__} was fitted without feature names"
+        else:
+            message = f"X does not have valid feature names, but {type(self).__name__} was fitted with feature names"
+        warnings.warn(message, UserWarning, stacklevel=3)
+        X = X.set_axis(list(fitted_labels), axis=1)
+        return X.infer_objects() if is_array else X
 
     def _output_itemsize(self) -> int:
         """Bytes per element of the dense transformed array.
