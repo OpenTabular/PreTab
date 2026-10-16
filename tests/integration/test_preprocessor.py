@@ -377,3 +377,52 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
     X, y = sample_data
     with pytest.raises(InvalidParamError, match="feature_preprocessing"):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
+
+
+# --- positional input after a named fit (and vice versa) (issue #78) ---------------
+
+
+@pytest.fixture
+def mixed_named_frame():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {
+            "age": rng.normal(40, 10, 100),
+            "income": rng.normal(50, 10, 100),
+            "city": rng.choice(["a", "b", "c"], 100),
+        }
+    )
+    return frame, rng.normal(size=100)
+
+
+def test_frame_fit_accepts_an_array_of_the_fitted_width(mixed_named_frame):
+    """Regression guard for issue #78: a DataFrame-fitted preprocessor rejected the same
+    data as an array ('columns are missing'), breaking NumPy-based serving and explainers."""
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+
+    X, y = mixed_named_frame
+    pipe = make_pipeline(Preprocessor(random_state=0), Ridge()).fit(X, y)
+    with pytest.warns(UserWarning, match="does not have valid feature names"):
+        from_array = pipe.predict(X.to_numpy())
+    np.testing.assert_allclose(from_array, pipe.predict(X))
+
+
+def test_array_fit_accepts_a_frame_of_the_fitted_width(mixed_named_frame):
+    X, y = mixed_named_frame
+    numeric = X[["age", "income"]]
+    pre = Preprocessor(numerical_method="minmax").fit(numeric.to_numpy(), y)
+    with pytest.warns(UserWarning, match="fitted without feature names"):
+        from_frame = pre.transform(numeric.rename(columns={"age": "u", "income": "v"}))
+    np.testing.assert_array_equal(from_frame, pre.transform(numeric.to_numpy()))
+
+
+def test_positional_input_of_the_wrong_width_is_rejected(mixed_named_frame):
+    X, y = mixed_named_frame
+    pre = Preprocessor(random_state=0).fit(X, y)
+    with pytest.raises(PretabDataError, match="X has 2 features, but Preprocessor is expecting 3"):
+        pre.transform(X.to_numpy()[:, :2])
+    numeric = X[["age", "income"]]
+    array_fit = Preprocessor(numerical_method="minmax").fit(numeric.to_numpy(), y)
+    with pytest.raises(PretabDataError, match="X has 1 features"):
+        array_fit.transform(X[["age"]])
