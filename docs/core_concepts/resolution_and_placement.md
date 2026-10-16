@@ -97,6 +97,11 @@ placement subsystem so no transformer re-implements it, and it is driven by two 
 | `True`         | `"cart"`                     | Split points from a per-feature decision tree fit against `y`.                    |
 | `True`         | `"lightgbm"`                 | Split points aggregated from gradient-boosted trees (needs the `lightgbm` extra). |
 
+On tied data, such as a zero-inflated, top-coded or low-cardinality feature, several quantiles
+coincide or fall on the range boundary. The spline families keep their interior knots unique
+and strictly inside the observed range, topping a short set up with evenly spaced interior
+points, so no basis function collapses to a point and leaves a dead column.
+
 ```{warning}
 The unsupervised and target-aware rows are mutually exclusive. Combining them, for example
 `target_aware=True` with `placement_strategy="quantile"`, raises an error.
