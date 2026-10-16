@@ -580,6 +580,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
+        # The Preprocessor wraps its own output (set_output / output_format), so the
+        # internal steps always produce plain arrays. Otherwise a global
+        # ``sklearn.set_config(transform_output="pandas")`` reaches them and the
+        # sparse OneHotEncoder refuses pandas output.
+        self.column_transformer_.set_output(transform="default")
         self.column_transformer_.fit(X, y)
         self.n_features_in_ = X.shape[1]
 
@@ -631,7 +636,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             "matrix"``); a dict of per-feature blocks when ``output_structure="blocks"``
             (or ``return_array=False``); a SciPy CSR matrix (or CSR blocks) when
             ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
-            when configured via :meth:`set_output`.
+            when configured via :meth:`set_output` or a global
+            ``sklearn.set_config(transform_output=...)``. That setting applies to this
+            output only: the internal per-column steps always produce arrays.
         """
 
         check_is_fitted(self)
