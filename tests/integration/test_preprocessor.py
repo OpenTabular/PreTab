@@ -377,3 +377,23 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
     X, y = sample_data
     with pytest.raises(InvalidParamError, match="feature_preprocessing"):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
+
+
+# --- ndarray width check at transform (issue #72) ---------------------------------
+
+
+@pytest.mark.parametrize("width", [2, 4])
+def test_transform_rejects_an_ndarray_of_a_different_width(width):
+    """Regression guard for issue #72: an extra array column silently shifted features."""
+    rng = np.random.default_rng(0)
+    X, y = rng.normal(size=(60, 3)), rng.normal(size=60)
+    pre = Preprocessor(random_state=0).fit(X, y)
+    with pytest.raises(ValueError, match=f"X has {width} features, but Preprocessor is expecting 3"):
+        pre.transform(rng.normal(size=(5, width)))
+
+
+def test_transform_accepts_an_ndarray_of_the_fitted_width():
+    rng = np.random.default_rng(0)
+    X, y = rng.normal(size=(60, 3)), rng.normal(size=60)
+    pre = Preprocessor(random_state=0).fit(X, y)
+    assert np.asarray(pre.transform(X)).shape[0] == 60

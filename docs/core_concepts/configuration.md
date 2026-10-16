@@ -27,7 +27,10 @@ strategy strings is in the [representation comparison](../representations/compar
 
 `Preprocessor` also accepts a plain `numpy.ndarray`, not just a `DataFrame`. Columns are
 named `feature_0`, `feature_1`, ... in position order, then detected as numerical or
-categorical exactly as they would be for a `DataFrame`.
+categorical exactly as they would be for a `DataFrame`. Because array columns are matched by
+position, `transform` raises the usual scikit-learn error
+(`X has 4 features, but Preprocessor is expecting 3 features as input.`) when an array has a
+different number of columns than the one seen at `fit`.
 
 ```python
 import numpy as np
