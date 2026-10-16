@@ -121,7 +121,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     --------
     - Supports a wide range of preprocessing methods for numerical and categorical features.
     - Automatically detects feature types (numerical vs. categorical).
-    - Compatible with both pandas DataFrames and NumPy arrays.
+    - Compatible with pandas and polars DataFrames and NumPy arrays (a polars frame is read
+      through pandas, so it gets the same column-type detection).
     - Handles external embedding arrays for models that require learned representations.
     - Returns either a dictionary of transformed feature blocks or a single NumPy array.
     - Fully compatible with scikit-learn transformers and pipelines.
@@ -467,8 +468,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
-            The input features.
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
+            The input features. A polars frame is converted to pandas with the same column
+            names, order and dtypes (no ``pyarrow`` needed); an array (or a list of rows) has
+            its columns named ``feature_0``, ``feature_1``, ....
         y : array-like, default=None
             Target values (used for decision tree-based methods).
         embeddings : np.ndarray or list of np.ndarray, optional
@@ -612,7 +615,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input features to transform.
         embeddings : np.ndarray or list of np.ndarray, optional
             External embeddings to attach to dictionary output. Required when
@@ -675,7 +678,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input features.
         y : array-like, optional
             Target values.
@@ -840,7 +843,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input whose row count drives the estimate; not transformed.
 
         Returns
@@ -860,7 +863,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        X : pandas.DataFrame, numpy.ndarray, or dict
+        X : pandas.DataFrame, polars.DataFrame, numpy.ndarray, or dict
             Input whose row count drives the estimate; not transformed.
 
         Returns

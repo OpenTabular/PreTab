@@ -1,8 +1,12 @@
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
 from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
@@ -377,3 +381,32 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
     X, y = sample_data
     with pytest.raises(InvalidParamError, match="feature_preprocessing"):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
+
+
+# --- input containers (issue #94) -------------------------------------------------
+
+
+def test_a_list_of_rows_is_read_like_an_array():
+    rows = [[1.0, 2.0], [3.0, 5.0], [4.0, 9.0]]
+    pre = Preprocessor(numerical_method="minmax").fit(rows)
+    assert pre.numerical_features_ == ["feature_0", "feature_1"]
+    np.testing.assert_allclose(np.asarray(pre.transform(rows)), np.asarray(pre.transform(np.asarray(rows))))
+
+
+_needs_polars = pytest.mark.skipif(importlib.util.find_spec("polars") is None, reason="polars is not installed")
+
+
+@pytest.mark.parametrize("container", ["pandas", pytest.param("polars", marks=_needs_polars)])
+def test_pipeline_set_output_hands_frames_to_the_preprocessor(container):
+    """A Pipeline configured with set_output hands its frames (pandas or polars)
+    from one step to the next, so the Preprocessor must accept both."""
+    rng = np.random.default_rng(0)
+    numeric = pd.DataFrame({"income": rng.normal(5e4, 1e4, 120), "visits": rng.integers(0, 1000, 120)})
+    pipe = Pipeline([("impute", SimpleImputer()), ("pretab", Preprocessor(numerical_method="minmax"))])
+    pipe.set_output(transform=container)
+
+    out = pipe.fit_transform(numeric, rng.normal(size=120))
+
+    assert type(out).__module__.split(".")[0] == container
+    assert list(out.columns) == ["num_income", "num_visits"]
+    np.testing.assert_allclose(np.asarray(out), np.asarray(pipe.transform(numeric)))
