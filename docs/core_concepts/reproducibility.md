@@ -29,6 +29,11 @@ directly; they are fit outside `Preprocessor` since they operate on the whole fe
 reconstructs it. The spec records the schema and library versions, the resolved parameters,
 and the per-representation fitted state (parameters, knots, centers, columns, scaling).
 
+The spec is strict JSON, so any standard parser (JavaScript, Go, Rust, JSON schema validators)
+reads it. Non-finite floats, such as the imputers' `missing_values=np.nan`, are stored as a
+tagged value, `{"__float__": "nan"}` (or `"inf"`, `"-inf"`), instead of a bare `NaN` token.
+Specs written by PreTab 1.0.0, which contain bare `NaN` tokens, still load.
+
 ```python
 spec = pre.to_spec()                 # returns a dict
 pre.to_spec("representation.json")   # or writes JSON to a path

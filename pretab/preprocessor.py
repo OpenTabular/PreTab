@@ -1009,7 +1009,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         path : str, os.PathLike, or None, default=None
-            When given, the spec is also written to this path as UTF-8 JSON.
+            When given, the spec is also written to this path as strict UTF-8 JSON:
+            non-finite floats are stored as ``{"__float__": "nan"}`` (or ``"inf"`` /
+            ``"-inf"``), so the file contains no ``NaN`` / ``Infinity`` tokens and
+            any standard JSON parser reads it.
 
         Returns
         -------
@@ -1020,7 +1023,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         spec = preprocessor_to_spec(self)
         if path is not None:
             with open(path, "w", encoding="utf-8") as handle:
-                json.dump(spec, handle, indent=2)
+                # Non-finite floats are tagged by the encoder; allow_nan=False keeps
+                # bare NaN / Infinity tokens (rejected by strict JSON parsers) out.
+                json.dump(spec, handle, indent=2, allow_nan=False)
         return spec
 
     @classmethod
@@ -1030,7 +1035,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         source : str, os.PathLike, or dict
-            A path to a JSON spec file, or the spec dictionary itself.
+            A path to a JSON spec file, or the spec dictionary itself. Specs written
+            by PreTab 1.0.0, which store non-finite floats as bare ``NaN`` tokens,
+            still load.
 
         Returns
         -------
@@ -1080,7 +1087,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         the same fitted state and configuration produce the same fingerprint.
         """
         check_is_fitted(self)
-        canonical = json.dumps(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        canonical = json.dumps(
+            self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def reproducibility_report(self) -> dict:

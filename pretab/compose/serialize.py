@@ -12,10 +12,16 @@ The document has a small declarative envelope (schema/library versions, resolved
 constructor params, per-representation summary, output column order) plus a
 ``state`` payload that JSON-encodes the fitted object graph (numpy arrays, knot /
 center / bin locations, scalers, nested estimators) for exact reconstruction.
+
+The document is strict (RFC 8259) JSON: non-finite floats, such as an imputer's
+``missing_values=np.nan``, are tagged as ``{"__float__": "nan"}`` (``"inf"``,
+``"-inf"``), so parsers outside Python read it. Bare ``NaN`` tokens written by
+earlier versions are still decoded.
 """
 
 import dataclasses
 import importlib
+import math
 from collections import UserList
 from typing import Any, cast
 
@@ -53,6 +59,13 @@ _ALLOWED_DATACLASSES = frozenset(
 
 
 # --- helpers -------------------------------------------------------------
+def _map_elements(data, depth: int, func):
+    """Apply ``func`` to the elements of a ``depth``-level nested list (an array's ``tolist()``)."""
+    if depth == 0:
+        return func(data)
+    return [_map_elements(item, depth - 1, func) for item in data]
+
+
 def _qualname(obj) -> str:
     cls = type(obj)
     return f"{cls.__module__}:{cls.__qualname__}"
@@ -77,19 +90,40 @@ def _resolve(dotted: str):
 
 
 # --- encoding ------------------------------------------------------------
+def _encode_float(value):
+    """Return ``value``, tagging NaN / +-inf, which strict JSON cannot represent."""
+    if math.isfinite(value):
+        return value
+    return {"__float__": repr(float(value))}
+
+
+def _encode_object_element(value):
+    """Tag a non-finite float element of an object array; keep any other element as it is."""
+    return _encode_float(value) if isinstance(value, float) else value
+
+
 def _encode(obj):
     if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, np.integer):
         return int(obj)
     if isinstance(obj, np.floating):
-        return float(obj)
-    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return _encode_float(float(obj))
+    if isinstance(obj, float):
+        return _encode_float(obj)
+    if obj is None or isinstance(obj, (bool, int, str)):
         return obj
     if obj is UNSET:
         return {"__unset__": True}
     if isinstance(obj, np.ndarray):
-        return {"__ndarray__": {"dtype": obj.dtype.str, "shape": list(obj.shape), "data": obj.tolist()}}
+        data = obj.tolist()
+        if obj.dtype.kind == "f" and not np.isfinite(obj).all():
+            data = _map_elements(data, obj.ndim, _encode_float)
+        elif obj.dtype.kind == "O":
+            # tolist() keeps the elements of an object array as they are, so tag
+            # the non-finite floats among them (e.g. a NaN category).
+            data = _map_elements(data, obj.ndim, _encode_object_element)
+        return {"__ndarray__": {"dtype": obj.dtype.str, "shape": list(obj.shape), "data": data}}
     if isinstance(obj, np.dtype):
         return {"__npdtype__": obj.str}
     if isinstance(obj, type):
@@ -126,7 +160,9 @@ def _json_safe(obj):
     Keeps JSON-native values verbatim and falls back to the tagged :func:`_encode`
     form only for exotic values. The result is informational and never decoded.
     """
-    if obj is None or isinstance(obj, (bool, int, float, str)):
+    if isinstance(obj, float):
+        return _encode_float(obj)
+    if obj is None or isinstance(obj, (bool, int, str)):
         return obj
     if isinstance(obj, dict) and all(isinstance(k, str) for k in obj):
         return {k: _json_safe(v) for k, v in obj.items()}
@@ -136,9 +172,19 @@ def _json_safe(obj):
 
 
 # --- decoding ------------------------------------------------------------
+def _decode_float_element(item):
+    """Restore a non-finite float tagged by :func:`_encode_float`; keep any other element."""
+    if isinstance(item, dict) and "__float__" in item:
+        return float(item["__float__"])
+    return item
+
+
 def _decode_ndarray(payload: dict) -> np.ndarray:
     dtype = np.dtype(payload["dtype"])
-    arr = np.array(payload["data"], dtype=dtype)
+    data = payload["data"]
+    if dtype.kind in "fO":
+        data = _map_elements(data, len(payload["shape"]), _decode_float_element)
+    arr = np.array(data, dtype=dtype)
     return arr.reshape(payload["shape"])
 
 
@@ -152,6 +198,8 @@ def _decode(obj):
             return _decode_ndarray(obj["__ndarray__"])
         if "__unset__" in obj:
             return UNSET
+        if "__float__" in obj:
+            return float(obj["__float__"])
         if "__npdtype__" in obj:
             return np.dtype(obj["__npdtype__"])
         if "__type__" in obj:
