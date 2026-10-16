@@ -119,7 +119,9 @@ regression and classification differently.
 | `"adaptive"` | task-dependent     | `"int"`              | -            | `True`     | `7`              | `15`             |
 
 `numerical_method` resolves to `"bspline"` when `task="regression"` (the default) and to
-`"ple"` when `task="classification"`, for every preset:
+`"ple"` when `task="classification"`, for every preset. `task` is matched exactly: any other
+value, such as `"Regression"`, raises an `InvalidParamError` from `fit` and
+`get_resolved_config()` instead of falling back to the classification preset.
 
 ```python
 standard_regression = Preprocessor(preset="standard", task="regression")
@@ -182,7 +184,8 @@ The resolution order is deterministic. Later layers win.
 
 ```{warning}
 Configuration is validated at `fit` time, not silently coerced. An invalid combination, such
-as a method that requires the target used with `target_aware=False`, raises a typed error.
+as a method that requires the target used with `target_aware=False`, or a `task` other than
+`"regression"` / `"classification"`, raises a typed error.
 This is intentional: it surfaces mistakes early rather than producing a quietly wrong
 representation.
 ```
