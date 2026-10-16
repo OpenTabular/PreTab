@@ -16,6 +16,7 @@ from ...core.adaptive import AdaptiveResolutionMixin
 from ...core.parameters import UNSET, AliasResolverMixin
 from ...core.representation import RepresentationSpecMixin
 from ...core.supervised import warn_target_leakage
+from ...core.validation import single_target
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -146,9 +147,11 @@ class PLETransformer(
         ----------
         X : array-like of shape (n_samples, n_features)
             Training data. Must be finite; NaN values raise an error.
-        y : array-like of shape (n_samples,)
+        y : array-like of shape (n_samples,) or (n_samples, 1)
             Target values used to grow the per-feature decision trees. PLE is
-            always target-aware, so ``y`` is required.
+            always target-aware, so ``y`` is required, and it places its bins
+            against a single target: a multi-output ``y`` raises
+            :class:`~pretab.exceptions.IncompatibleParamsError`.
 
         Returns
         -------
@@ -167,7 +170,12 @@ class PLETransformer(
             ensure_2d=True,
             ensure_all_finite=True,  # type: ignore
         )
-        y = np.asarray(y).ravel()
+        y = single_target(
+            y,
+            type(self).__name__,
+            fix="fit on one target column. PLE always places its bins against y, so a multi-output "
+            "target needs a numerical method with unsupervised placement.",
+        )
 
         if len(X) != len(y):
             raise PretabDataError(f"X and y must have same length. Got {len(X)} and {len(y)}")

@@ -27,6 +27,7 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from ..exceptions import IncompatibleParamsError, OptionalDependencyError
 from .knots import quantile_knots, select_knots
+from .validation import single_target
 
 Task = Literal["regression", "classification"]
 
@@ -66,8 +67,10 @@ class BaseLocationSelector(ABC):
         ----------
         x : np.ndarray of shape (n_samples,) or (n_samples, 1)
             Input feature values for one feature.
-        y : np.ndarray of shape (n_samples,)
-            Target values. Required -- these selectors are target aware.
+        y : np.ndarray of shape (n_samples,) or (n_samples, 1)
+            Target values. Required -- these selectors are target aware and fit a
+            single target; a multi-output ``y`` raises
+            :class:`~pretab.exceptions.IncompatibleParamsError`.
         task : {"regression", "classification"}, optional
             Type of prediction task. Defaults to ``"regression"``.
         min_count : int
@@ -87,7 +90,7 @@ class BaseLocationSelector(ABC):
         x = np.asarray(x)
         if x.ndim == 1:
             x = x.reshape(-1, 1)
-        y = np.asarray(y).ravel()
+        y = single_target(y, type(self).__name__)
 
         # Only float targets can carry NaN; for integer / object (e.g. string
         # class label) targets, leave the target validation to the fitted model.

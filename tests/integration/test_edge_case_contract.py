@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 
 from pretab import Preprocessor, RepresentationPolicy
-from pretab.exceptions import DataWarning, InsufficientSamplesError, PretabDataError
+from pretab.exceptions import DataWarning, IncompatibleParamsError, InsufficientSamplesError, PretabDataError
 from pretab.transformers import (
     BSplineTransformer,
     CubicRegressionSplineTransformer,
@@ -258,3 +258,58 @@ def test_preprocessor_stores_resolved_policy(rng):
         pre.fit(df, y)
     assert isinstance(pre.policy_, RepresentationPolicy)
     assert pre.policy_.constant == "warn"
+
+
+# --------------------------------------------------------------------------- #
+# Multi-output target
+# --------------------------------------------------------------------------- #
+def _target_aware_factory(name, strategy):
+    """Build a transformer that places its units against the target."""
+    if strategy == "lightgbm":
+        pytest.importorskip("lightgbm")
+    options = {"target_aware": True, "placement_strategy": strategy}
+    return {
+        "BSpline": lambda: BSplineTransformer(**options),
+        "MSpline": lambda: MSplineTransformer(**options),
+        "ISpline": lambda: ISplineTransformer(**options),
+        "NaturalCubic": lambda: NaturalCubicSplineTransformer(**options),
+        "CubicReg": lambda: CubicRegressionSplineTransformer(**options),
+        "RBF": lambda: RBFExpansionTransformer(**options),
+        "ReLU": lambda: ReLUExpansionTransformer(**options),
+        "Sigmoid": lambda: SigmoidExpansionTransformer(**options),
+        "Tanh": lambda: TanhExpansionTransformer(**options),
+        "PLE": lambda: PLETransformer(output_dim=5, placement_strategy=strategy),
+    }[name]()
+
+
+TARGET_AWARE = ["BSpline", "MSpline", "ISpline", "NaturalCubic", "CubicReg", "RBF", "ReLU", "Sigmoid", "Tanh", "PLE"]
+
+
+@pytest.mark.parametrize("strategy", ["cart", "lightgbm"])
+@pytest.mark.parametrize("name", TARGET_AWARE)
+def test_target_aware_placement_rejects_a_multi_output_target(name, strategy, rng):
+    """Target-aware placement fits one model on one target. A 2-D target was flattened
+    into twice as many values and failed with an IndexError (B/M/I), a broadcasting
+    ValueError (natural-cubic, cubic-regression, feature maps) or a misleading length
+    mismatch (PLE) instead of saying so."""
+    X = rng.normal(size=(200, 1))
+    Y = np.column_stack([np.sin(X[:, 0]), np.cos(X[:, 0])])
+    with pytest.raises(IncompatibleParamsError, match=r"single target, but y has shape \(200, 2\)"):
+        _target_aware_factory(name, strategy).fit(X, Y)
+    # A column vector is a single target and places the same units as the flat target.
+    flat = _target_aware_factory(name, strategy).fit(X, Y[:, 0]).transform(X)
+    column = _target_aware_factory(name, strategy).fit(X, Y[:, :1]).transform(X)
+    np.testing.assert_array_equal(column, flat)
+
+
+def test_multi_output_error_suggests_a_fix_the_estimator_supports(rng):
+    """PLE has no ``target_aware`` option, so its error must not suggest switching it
+    off; the spline and feature-map selectors do support it."""
+    X = rng.normal(size=(200, 1))
+    Y = np.column_stack([X[:, 0], -X[:, 0]])
+    with pytest.raises(IncompatibleParamsError) as ple_error:
+        PLETransformer(output_dim=5).fit(X, Y)
+    assert "target_aware" not in str(ple_error.value)
+    assert "unsupervised placement" in str(ple_error.value)
+    with pytest.raises(IncompatibleParamsError, match=r"target_aware=False"):
+        BSplineTransformer(output_dim=6, target_aware=True, placement_strategy="cart").fit(X, Y)
