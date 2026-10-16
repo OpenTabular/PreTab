@@ -52,7 +52,18 @@ _ALLOWED_DATACLASSES = frozenset(
 )
 
 
+# Builtin types that are valid numpy dtype specifiers, encoded as that dtype.
+_BUILTIN_DTYPES = (bool, int, float, complex)
+
+
 # --- helpers -------------------------------------------------------------
+def _map_elements(data, depth: int, func):
+    """Apply ``func`` to the elements of a ``depth``-level nested list (an array's ``tolist()``)."""
+    if depth == 0:
+        return func(data)
+    return [_map_elements(item, depth - 1, func) for item in data]
+
+
 def _qualname(obj) -> str:
     cls = type(obj)
     return f"{cls.__module__}:{cls.__qualname__}"
@@ -89,10 +100,24 @@ def _encode(obj):
     if obj is UNSET:
         return {"__unset__": True}
     if isinstance(obj, np.ndarray):
-        return {"__ndarray__": {"dtype": obj.dtype.str, "shape": list(obj.shape), "data": obj.tolist()}}
+        data = obj.tolist()
+        if obj.dtype.kind == "O":
+            # tolist() keeps the elements of an object array as they are (e.g.
+            # numpy scalars such as np.bool_), so encode each one.
+            data = _map_elements(data, obj.ndim, _encode)
+        return {"__ndarray__": {"dtype": obj.dtype.str, "shape": list(obj.shape), "data": data}}
     if isinstance(obj, np.dtype):
         return {"__npdtype__": obj.str}
     if isinstance(obj, type):
+        if obj in _BUILTIN_DTYPES:
+            # A dtype-like builtin (e.g. ``Preprocessor(dtype=float)``) is stored as
+            # the numpy dtype it denotes; ``builtins`` is never importable from a spec.
+            return {"__npdtype__": np.dtype(obj).str}
+        if not _module_allowed(obj.__module__):
+            raise PretabSerializationError(
+                f"Cannot serialize the type {obj.__module__}.{obj.__qualname__}: a spec can only reference "
+                f"types from {sorted(_ALLOWED_TOP_LEVEL)}."
+            )
         return {"__type__": f"{obj.__module__}:{obj.__qualname__}"}
     if isinstance(obj, slice):
         return {"__slice__": [obj.start, obj.stop, obj.step]}
@@ -138,6 +163,16 @@ def _json_safe(obj):
 # --- decoding ------------------------------------------------------------
 def _decode_ndarray(payload: dict) -> np.ndarray:
     dtype = np.dtype(payload["dtype"])
+    if dtype.kind == "O":
+        # Fill element by element so a decoded element that is itself a sequence
+        # stays a single element instead of adding a dimension.
+        shape = payload["shape"]
+        elements: list = []
+        _map_elements(payload["data"], len(shape), lambda item: elements.append(_decode(item)))
+        arr = np.empty(len(elements), dtype=object)
+        for index, element in enumerate(elements):
+            arr[index] = element
+        return arr.reshape(shape)
     arr = np.array(payload["data"], dtype=dtype)
     return arr.reshape(payload["shape"])
 

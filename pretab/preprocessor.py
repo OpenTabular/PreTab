@@ -93,6 +93,14 @@ _PRESET_PARAM_DEFAULTS = {
 }
 
 
+def _spec_json(spec: dict, **kwargs) -> str:
+    """Serialize a spec to JSON text, raising a typed error for unsupported state."""
+    try:
+        return json.dumps(spec, **kwargs)
+    except (TypeError, ValueError) as exc:
+        raise PretabSerializationError(f"The fitted state cannot be written as JSON: {exc}") from exc
+
+
 def _method_summary(features, *, is_numerical: bool, config: PreprocessorConfig) -> str:
     """Summarize the resolved method(s) actually used across ``features``.
 
@@ -275,7 +283,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         records the resolved choice and its memory footprint in ``output_report_``.
     dtype : numpy dtype or None, default=None
         Optional dtype to cast the transformed output to (e.g. ``numpy.float32`` to
-        halve memory). ``None`` keeps the native ``float64`` output.
+        halve memory). ``None`` keeps the native ``float64`` output. A builtin
+        specifier such as ``float`` is stored in a spec as the numpy dtype it denotes.
     verbose : int, default=0
         Verbosity level controlling ``fit``-time logging, applied through the shared
         ``"pretab"`` logger so a single setting on this entry point governs the whole
@@ -1015,12 +1024,23 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         -------
         dict
             The spec dictionary (always returned, whether or not ``path`` is set).
+
+        Raises
+        ------
+        PretabSerializationError
+            If the fitted state holds a value or type that a spec cannot store or
+            load (for example a type outside ``pretab``, ``sklearn``, ``numpy`` and
+            ``scipy``). The error is raised before ``path`` is opened, so an
+            existing file at ``path`` is left untouched.
         """
         check_is_fitted(self)
         spec = preprocessor_to_spec(self)
+        # Serialize before opening the file, so a failure never truncates an
+        # existing spec at ``path``.
+        text = _spec_json(spec, indent=2)
         if path is not None:
             with open(path, "w", encoding="utf-8") as handle:
-                json.dump(spec, handle, indent=2)
+                handle.write(text)
         return spec
 
     @classmethod
@@ -1078,9 +1098,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         the fitted state (knot / center / bin locations, scaler statistics, encoder
         categories). The digest is deterministic across processes and machines, so
         the same fitted state and configuration produce the same fingerprint.
+
+        Raises
+        ------
+        PretabSerializationError
+            If the fitted state cannot be written as a spec (see :meth:`to_spec`).
         """
         check_is_fitted(self)
-        canonical = json.dumps(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        canonical = _spec_json(self._canonical_spec(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def reproducibility_report(self) -> dict:
