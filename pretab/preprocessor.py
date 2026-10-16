@@ -1,13 +1,15 @@
+import copy
 import hashlib
 import json
 import os
 import time
 import warnings
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from scipy import sparse as sp
 from sklearn.base import BaseEstimator, TransformerMixin, clone
+from sklearn.utils import _safe_indexing
 from sklearn.utils._set_output import _get_output_config
 from sklearn.utils.validation import check_is_fitted
 
@@ -15,6 +17,7 @@ from .compose.config import PreprocessorConfig
 from .compose.factory import build_column_transformer
 from .compose.feature_detection import detect_column_types, to_dataframe
 from .compose.inspection import (
+    block_uses_target,
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
@@ -870,6 +873,37 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
         n_rows, n_cols = self.estimate_output_shape(X)
         return int(n_rows * n_cols * self._output_itemsize())
+
+    def _cross_fit_fold(self, X, y):
+        """Return a copy of this fit whose target-aware blocks are refit on ``(X, y)``.
+
+        Used by :class:`~pretab.CrossFittedTransformer` for its out-of-fold
+        features. Only the blocks that consume the target are refit on the fold;
+        column types, category vocabularies and every other block are shared
+        with this all-data fit, so an out-of-fold row is encoded exactly like
+        ``transform`` encodes it, except that no target-aware placement has seen
+        that row's target. Refitting the whole preprocessor per fold would
+        re-detect column types and relearn categories on fewer rows, shifting
+        integer codes and one-hot columns between the folds and ``transform``.
+        """
+        check_is_fitted(self)
+        # Each block sees the fold rows exactly as the internal ColumnTransformer
+        # routed the training rows to it in ``fit``.
+        X = to_dataframe(X)
+        column_transformer = copy.copy(self.column_transformer_)
+        column_transformer.transformers_ = [
+            (
+                name,
+                cast(Any, clone(transformer)).fit(_safe_indexing(X, columns, axis=1), y)
+                if name != "remainder" and block_uses_target(transformer)
+                else transformer,
+                columns,
+            )
+            for name, transformer, columns in self.column_transformer_.transformers_
+        ]
+        fold = copy.copy(self)
+        fold.column_transformer_ = column_transformer
+        return fold
 
     def _reject_missing(self, X) -> None:
         """Raise when ``missing_policy="error"`` but ``X`` contains missing values."""
