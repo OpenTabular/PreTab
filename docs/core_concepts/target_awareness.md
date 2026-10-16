@@ -158,6 +158,12 @@ search.best_method_
 best_preprocessor_` and `search.best_estimator_` are refit on all the data with `bspline` and
 ready to call `.predict(X_new)`.
 
+The search takes the estimator type of the estimator it wraps. Around a classifier it is a
+classifier itself and delegates `classes_`, `predict_proba`, `predict_log_proba` and
+`decision_function` (whichever the estimator provides) to the refit `best_estimator_`. It can
+therefore be evaluated as a whole in an outer, stratified cross-validation, for example with
+`cross_val_score(search, X, y_class, scoring="roc_auc")`.
+
 ```{note}
 This is deliberately narrow: it only searches the single `numerical_method` axis with one
 global method for every numerical column, not a per-column `feature_preprocessing` search.
