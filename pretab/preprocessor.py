@@ -331,6 +331,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"naturalspline"``, ``"pspline"``, ``"bspline"``, ``"mspline"``, ``"ispline"``,
     ``"fourier"``.
 
+    Box-Cox requires strictly positive input, so ``"box-cox"`` first rescales each column into
+    ``[1e-3, 1]`` with a min-max scaler fitted on the training data. That scaler's output is
+    floored at ``1e-3``: a value below the training minimum transforms like the minimum, while
+    values above the training maximum still extrapolate.
+
     Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
     ``"pretrained"``, ``"none"``. The ``"pretrained"`` method requires the optional
     ``sentence-transformers`` dependency (``pip install "pretab[embeddings]"``).
