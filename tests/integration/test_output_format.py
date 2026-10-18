@@ -9,6 +9,9 @@ import numpy as np
 import pandas as pd
 import pytest
 from scipy import sparse as sp
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import FeatureUnion
+from sklearn.preprocessing import StandardScaler
 
 from pretab import Preprocessor
 from pretab.exceptions import OptionalDependencyError
@@ -18,6 +21,12 @@ from pretab.exceptions import OptionalDependencyError
 def frame():
     rng = np.random.default_rng(0)
     return pd.DataFrame({"a": rng.random(30), "b": rng.random(30)})
+
+
+@pytest.fixture
+def indexed_frame(frame):
+    # Non-default, non-monotonic index, like the one train_test_split leaves behind.
+    return frame.set_axis(np.arange(len(frame))[::-1] + 100)
 
 
 @pytest.fixture
@@ -184,6 +193,34 @@ def test_set_output_pandas_fit_transform(frame, y):
     out = p.fit_transform(frame, y)
     assert isinstance(out, pd.DataFrame)
     assert out.shape[1] == p.total_output_dim_
+
+
+def test_set_output_pandas_preserves_input_index(indexed_frame, y):
+    """Regression guard for issue #60: the DataFrame keeps X's index, as sklearn's transformers do."""
+    p = _bspline().set_output(transform="pandas")
+    pd.testing.assert_index_equal(p.fit_transform(indexed_frame, y).index, indexed_frame.index)
+    pd.testing.assert_index_equal(p.transform(indexed_frame).index, indexed_frame.index)
+
+
+def test_set_output_pandas_inside_column_transformer(indexed_frame):
+    """Regression guard for issue #60: a reset index made the concatenation raise."""
+    ct = ColumnTransformer(
+        [("pre", Preprocessor(numerical_method="minmax"), ["a"]), ("sc", StandardScaler(), ["b"])]
+    ).set_output(transform="pandas")
+    out = ct.fit_transform(indexed_frame)
+    assert isinstance(out, pd.DataFrame)
+    assert out.shape[0] == len(indexed_frame)
+    pd.testing.assert_index_equal(out.index, indexed_frame.index)
+
+
+def test_set_output_pandas_inside_feature_union(indexed_frame):
+    """Regression guard for issue #60: a reset index made FeatureUnion return 2n NaN-padded rows."""
+    fu = FeatureUnion([("pre", Preprocessor(numerical_method="minmax")), ("sc", StandardScaler())])
+    out = fu.set_output(transform="pandas").fit_transform(indexed_frame)
+    assert isinstance(out, pd.DataFrame)
+    assert out.shape[0] == len(indexed_frame)
+    assert not out.isna().to_numpy().any()
+    pd.testing.assert_index_equal(out.index, indexed_frame.index)
 
 
 def test_set_output_default_still_array(frame, y):
