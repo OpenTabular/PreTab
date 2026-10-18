@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import time
 import warnings
@@ -289,8 +290,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Stored verbatim and forwarded by ``get_params`` / ``clone``, so an embedding host
         (e.g. DeepTab) can pass it straight through ``Preprocessor(**kwargs)``. PreTab never
-        configures the root logger or attaches a handler when the host already owns one, so
-        ``verbose=0`` keeps PreTab silent under a host's own logging.
+        configures the root logger or attaches a handler when the host already owns one (on
+        the ``"pretab"`` logger or on an ancestor, such as a root handler from
+        :func:`logging.basicConfig`), so ``verbose=0`` keeps PreTab silent under a host's own
+        logging and every message is printed once. Each fit applies its own level, so a later
+        fit with a higher ``verbose`` logs more.
     preset : {"standard", "expanded", "adaptive"} or None, default=None
         Optional named configuration bundle applied as a transparent alias. A preset only
         fills in parameters left at their defaults; any parameter set explicitly always wins.
@@ -954,7 +958,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         ----------
         verbose : bool, default=True
             If True, renders an aligned per-feature table through the ``pretab``
-            logger (attaching a stream handler when none is configured). If False,
+            logger (attaching a stream handler when no host handler receives its
+            records), without lowering a more verbose level set earlier. If False,
             the info dicts are returned silently.
 
         Returns
@@ -977,7 +982,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         )
 
         if verbose:
-            configure_logging(1)
+            # Render at INFO without lowering a more verbose level set earlier.
+            configure_logging(2 if logger.isEnabledFor(logging.DEBUG) else 1)
             for line in build_transformer_summary(
                 numerical_feature_info,
                 categorical_feature_info,

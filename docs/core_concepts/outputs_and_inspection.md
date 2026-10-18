@@ -354,6 +354,11 @@ Preprocessor(numerical_method="ple", verbose=1).fit(df, y)
 fit complete: 2 numerical (ple) + 1 categorical (int) feature(s) -> 15 output columns in 0.02s
 ```
 
+Each fit applies its own level, so a later `verbose=2` fit in the same process or notebook logs
+the table even after a `verbose=1` fit. PreTab attaches its own stream handler only when no host
+handler receives its records. A handler on the `"pretab"` logger, or on an ancestor such as the
+root handler that `logging.basicConfig` installs, takes over, so every line is printed once.
+
 ```{note}
 When `feature_preprocessing` overrides make columns of the same kind resolve to different
 methods, the summary reports `mixed: <method>, <method>, ...` instead of a single name, so the
