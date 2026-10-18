@@ -167,6 +167,23 @@ def test_round_trip_reproduces_unseen_category_encoding(frame, target):
     )
 
 
+@pytest.mark.parametrize("categorical_method", ["int", "one-hot"])
+@pytest.mark.parametrize("impute", [True, False])
+def test_round_trip_with_nullable_categorical_missing(categorical_method, impute):
+    frame = pd.DataFrame({"c": ["a", None, "b", "a"]}).convert_dtypes()
+    options = {"categorical_method": categorical_method}
+    if not impute:
+        options["categorical_imputation"] = None
+    fitted = Preprocessor(**options).fit(frame)
+    original_fingerprint = fitted.fingerprint_
+    spec = json.loads(json.dumps(fitted.to_spec()))
+    restored = Preprocessor.from_spec(spec)
+
+    np.testing.assert_array_equal(restored.transform(frame), fitted.transform(frame))
+    assert restored.get_feature_names_out().tolist() == fitted.get_feature_names_out().tolist()
+    assert restored.fingerprint_ == original_fingerprint
+
+
 def test_to_spec_requires_fitted():
     from sklearn.exceptions import NotFittedError
 
