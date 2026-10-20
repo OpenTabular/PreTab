@@ -105,6 +105,43 @@ def test_representation_summary_present(frame, target):
     assert "rbf" in families
 
 
+@pytest.mark.parametrize("leaf_input", ["imputed", "frame"])
+def test_representation_summary_names_each_block_after_its_column(frame, target, leaf_input):
+    """Without an imputer or scaler each representation is fitted on its DataFrame
+    column and records ``feature_names_in_``, so a spec built from ``x0`` raised
+    and the summary silently came back empty. The entries are named after the
+    block's column instead of x0."""
+    params = {"numerical_method": "rbf", "target_aware": False, "placement_strategy": "quantile"}
+    if leaf_input == "frame":
+        params.update(numerical_imputation=None, scaling=None)
+    p = Preprocessor(**params).fit(frame, target)
+    entries = {entry["columns"][0]: entry for entry in p.to_spec()["representations"]}
+    inputs = {column: entry["input_features"] for column, entry in entries.items()}
+
+    assert p.reproducibility_report()["representations"] == {"a": "rbf", "b": "rbf", "c": "ordinal"}
+    assert inputs == {"a": ["a"], "b": ["b"], "c": ["c"]}
+    assert entries["a"]["output_features"] == [f"a_rbf{i}" for i in range(entries["a"]["output_dim"])]
+
+
+def test_representation_summary_of_a_leaf_behind_the_imputer_indicator(frame, target):
+    """``add_missing_indicator`` puts the imputer's built-in indicator in front of
+    the representation, so a column with missing values has a leaf with two inputs
+    for a one-column block. Its summary entry names its own inputs instead of
+    failing on the single column name."""
+    X = frame.copy()
+    X.loc[::7, "a"] = np.nan
+    p = Preprocessor(
+        numerical_method="rbf", target_aware=False, placement_strategy="quantile", add_missing_indicator=True
+    ).fit(X, target)
+
+    entries = {entry["columns"][0]: entry for entry in p.to_spec()["representations"]}
+
+    assert entries["a"]["input_features"] == ["x0", "x1"]
+    assert entries["b"]["input_features"] == ["b"]
+    assert p.reproducibility_report()["representations"] == {"a": "rbf", "b": "rbf", "c": "ordinal"}
+    assert isinstance(p.fingerprint_, str)
+
+
 def test_round_trip_preserves_dtype_and_output_format(frame, target):
     p = Preprocessor(
         numerical_method="bspline",

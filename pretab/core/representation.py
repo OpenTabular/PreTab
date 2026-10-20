@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
+from .validation import resolve_input_features
+
 __all__ = [
     "FeatureLineage",
     "RepresentationSpec",
@@ -297,8 +299,11 @@ class RepresentationSpecMixin:
         Parameters
         ----------
         input_features : list of str or None
-            Names of the input features. When ``None``, names of the form
-            ``x0, x1, ...`` are generated.
+            Names of the input features, resolved as in ``get_feature_names_out``:
+            explicit names need one entry per input feature and, after a fit on
+            named (DataFrame) columns, must equal ``feature_names_in_``. When
+            ``None``, ``feature_names_in_`` is used if it was recorded at fit,
+            else names of the form ``x0, x1, ...`` are generated.
 
         Returns
         -------
@@ -306,10 +311,7 @@ class RepresentationSpecMixin:
             The representation metadata describing the produced columns.
         """
         check_is_fitted(self, "n_features_in_")
-        if input_features is None:
-            inputs = tuple(f"x{i}" for i in range(self.n_features_in_))
-        else:
-            inputs = tuple(str(feature) for feature in input_features)
+        inputs = tuple(resolve_input_features(self, input_features))
         output_features = tuple(str(name) for name in self.get_feature_names_out(list(inputs)))
         location_kind, locations = self._representation_locations()
         periodic, period = self._representation_periodic()
