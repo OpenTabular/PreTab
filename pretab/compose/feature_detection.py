@@ -5,12 +5,14 @@ kept here, separate from orchestration, so the Preprocessor's ``fit`` reads as a
 sequence of delegations rather than inlining the classification heuristic.
 """
 
+from collections import Counter
+
 import numpy as np
 import pandas as pd
 
 from ..exceptions import PretabDataError, invalid_param_error
 
-__all__ = ["detect_column_types", "to_dataframe"]
+__all__ = ["detect_column_types", "to_dataframe", "with_string_labels"]
 
 
 def to_dataframe(X, *, copy: bool = False) -> pd.DataFrame:
@@ -39,6 +41,37 @@ def to_dataframe(X, *, copy: bool = False) -> pd.DataFrame:
             f"Duplicate column names are not supported: {duplicated}.\nFix: rename the columns so every name is unique."
         )
     return X
+
+
+def with_string_labels(X: pd.DataFrame) -> pd.DataFrame:
+    """Return ``X`` with every column label converted to its ``str`` form.
+
+    scikit-learn's :class:`~sklearn.compose.ColumnTransformer` treats an integer
+    column selector as a *position*, so routing a column by an integer label (as
+    in ``pd.DataFrame(array)`` or ``read_csv(header=None)`` after reordering or
+    dropping a column) would select the wrong column. The Preprocessor therefore
+    fits and transforms its ColumnTransformer on string labels. ``X`` itself is
+    returned when every label is already a string; otherwise a shallow copy with
+    relabelled columns, so the caller's frame is never modified.
+
+    Raises
+    ------
+    PretabDataError
+        If two labels share a string form (e.g. ``1`` and ``"1"``), which would
+        make the columns indistinguishable.
+    """
+    if all(isinstance(label, str) for label in X.columns):
+        return X
+    labels = [str(label) for label in X.columns]
+    collisions = sorted(label for label, count in Counter(labels).items() if count > 1)
+    if collisions:
+        raise PretabDataError(
+            f"Column labels must stay unique when converted to strings; {collisions} would collide.\n"
+            "Fix: rename the columns so their string forms are unique."
+        )
+    relabelled = X.copy(deep=False)
+    relabelled.columns = pd.Index(labels)
+    return relabelled
 
 
 def detect_column_types(X, *, cat_cutoff, treat_all_integers_as_numerical, estimator_name="Preprocessor"):

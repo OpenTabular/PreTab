@@ -331,17 +331,21 @@ def build_column_transformer(
 
     Numerical features are prefixed ``num_`` and categorical features ``cat_`` to
     match the transformer names the Preprocessor exposes; untransformed columns
-    pass through via ``remainder="passthrough"``.
+    pass through via ``remainder="passthrough"``. Each step selects its column by
+    the label's string form: scikit-learn reads an integer selector as a
+    *position*, so the Preprocessor fits and transforms the ColumnTransformer on a
+    frame whose labels are strings (see
+    :func:`~pretab.compose.feature_detection.with_string_labels`).
     """
     transformers = []
     for feature in numerical_features:
         method = config.method_for(feature, is_numerical=True)
         pipeline = create_transformer(method, is_numerical=True, config=config)
-        transformers.append((f"num_{feature}", pipeline, [feature]))
+        transformers.append((f"num_{feature}", pipeline, [str(feature)]))
     for feature in categorical_features:
         method = config.method_for(feature, is_numerical=False)
         pipeline = create_transformer(method, is_numerical=False, config=config)
-        transformers.append((f"cat_{feature}", pipeline, [feature]))
+        transformers.append((f"cat_{feature}", pipeline, [str(feature)]))
     return ColumnTransformer(
         transformers=transformers,
         remainder="passthrough",
