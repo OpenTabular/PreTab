@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import time
 import warnings
@@ -289,8 +290,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Stored verbatim and forwarded by ``get_params`` / ``clone``, so an embedding host
         (e.g. DeepTab) can pass it straight through ``Preprocessor(**kwargs)``. PreTab never
-        configures the root logger or attaches a handler when the host already owns one, so
-        ``verbose=0`` keeps PreTab silent under a host's own logging.
+        configures the root logger or attaches a handler when the host already owns one (on
+        the ``"pretab"`` logger or on an ancestor, such as a root handler from
+        :func:`logging.basicConfig`), so ``verbose=0`` keeps PreTab silent under a host's own
+        logging and every message is printed once. Each fit applies its own level, so a later
+        fit with a higher ``verbose`` logs more.
     preset : {"standard", "expanded", "adaptive"} or None, default=None
         Optional named configuration bundle applied as a transparent alias. A preset only
         fills in parameters left at their defaults; any parameter set explicitly always wins.
@@ -330,6 +334,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"custombin"``, ``"rbf"``, ``"relu"``, ``"sigmoid"``, ``"tanh"``, ``"cubicspline"``,
     ``"naturalspline"``, ``"pspline"``, ``"bspline"``, ``"mspline"``, ``"ispline"``,
     ``"fourier"``.
+
+    Box-Cox requires strictly positive input, so ``"box-cox"`` first rescales each column into
+    ``[1e-3, 1]`` with a min-max scaler fitted on the training data. That scaler's output is
+    floored at ``1e-3``: a value below the training minimum transforms like the minimum, while
+    values above the training maximum still extrapolate.
 
     Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
     ``"pretrained"``, ``"none"``. The ``"pretrained"`` method requires the optional
@@ -631,7 +640,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             "matrix"``); a dict of per-feature blocks when ``output_structure="blocks"``
             (or ``return_array=False``); a SciPy CSR matrix (or CSR blocks) when
             ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
-            when configured via :meth:`set_output`.
+            when configured via :meth:`set_output` (a pandas DataFrame keeps the index
+            of ``X``).
         """
 
         check_is_fitted(self)
@@ -656,7 +666,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         fmt, self.output_report_ = compute_output_report(transformed_X, self.output_format)
 
         if container in ("pandas", "polars"):
-            return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
+            # Pass X's index explicitly: sklearn's set_output wrapper keeps the index of
+            # a returned DataFrame instead of restoring the input's.
+            return to_dataframe_output(transformed_X, self.get_feature_names_out(), container, index=X.index)
 
         slices = None if resolved_return_array else get_output_slices(self.column_transformer_)
         return format_output(
@@ -946,7 +958,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         ----------
         verbose : bool, default=True
             If True, renders an aligned per-feature table through the ``pretab``
-            logger (attaching a stream handler when none is configured). If False,
+            logger (attaching a stream handler when no host handler receives its
+            records), without lowering a more verbose level set earlier. If False,
             the info dicts are returned silently.
 
         Returns
@@ -969,7 +982,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         )
 
         if verbose:
-            configure_logging(1)
+            # Render at INFO without lowering a more verbose level set earlier.
+            configure_logging(2 if logger.isEnabledFor(logging.DEBUG) else 1)
             for line in build_transformer_summary(
                 numerical_feature_info,
                 categorical_feature_info,

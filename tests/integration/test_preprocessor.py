@@ -377,3 +377,40 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
     X, y = sample_data
     with pytest.raises(InvalidParamError, match="feature_preprocessing"):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
+
+
+# --- box-cox on unseen low values (issue #59) -------------------------------------
+
+
+@pytest.fixture
+def boxcox_fitted():
+    X = pd.DataFrame({"x": np.random.default_rng(0).normal(10, 2, 200)})
+    return X, Preprocessor(numerical_method="box-cox").fit(X)
+
+
+def test_boxcox_transforms_values_below_the_training_minimum(boxcox_fitted):
+    """Regression guard for issue #59: the positivity scaler mapped them to <= 0."""
+    X, pre = boxcox_fitted
+    low = pre.transform(pd.DataFrame({"x": [X.x.min() - 5.0, X.x.min() - 0.5]}))
+    at_min = pre.transform(pd.DataFrame({"x": [X.x.min()]}))
+    assert np.isfinite(low).all()
+    np.testing.assert_allclose(low, np.repeat(at_min, 2, axis=0))
+
+
+def test_boxcox_still_extrapolates_above_the_training_maximum(boxcox_fitted):
+    X, pre = boxcox_fitted
+    out = pre.transform(pd.DataFrame({"x": [X.x.max(), X.x.max() + 3.0]})).ravel()
+    assert np.isfinite(out).all()
+    assert out[1] > out[0]
+
+
+def test_boxcox_survives_cross_validation():
+    from sklearn.datasets import make_regression
+    from sklearn.linear_model import Ridge
+    from sklearn.model_selection import cross_val_score
+    from sklearn.pipeline import make_pipeline
+
+    data = make_regression(n_samples=500, n_features=3, noise=1.0, random_state=0)
+    X, y = data[0], data[1]
+    scores = cross_val_score(make_pipeline(Preprocessor(numerical_method="box-cox"), Ridge()), X, y, cv=5)
+    assert np.isfinite(scores).all()
