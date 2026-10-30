@@ -444,6 +444,8 @@ def test_bool_numpy_array_is_supported():
     pre = Preprocessor().fit(X)
     assert pre.categorical_features_ == ["feature_0"]
     assert np.asarray(pre.transform(X)).shape == (4, 1)
+
+
 # --- box-cox on unseen low values (issue #59) -------------------------------------
 
 
