@@ -9,6 +9,9 @@ import numpy as np
 import pandas as pd
 import pytest
 from scipy import sparse as sp
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import FeatureUnion
+from sklearn.preprocessing import StandardScaler
 
 from pretab import Preprocessor
 from pretab.exceptions import OptionalDependencyError
@@ -18,6 +21,12 @@ from pretab.exceptions import OptionalDependencyError
 def frame():
     rng = np.random.default_rng(0)
     return pd.DataFrame({"a": rng.random(30), "b": rng.random(30)})
+
+
+@pytest.fixture
+def indexed_frame(frame):
+    # Non-default, non-monotonic index, like the one train_test_split leaves behind.
+    return frame.set_axis(np.arange(len(frame))[::-1] + 100)
 
 
 @pytest.fixture
@@ -186,6 +195,34 @@ def test_set_output_pandas_fit_transform(frame, y):
     assert out.shape[1] == p.total_output_dim_
 
 
+def test_set_output_pandas_preserves_input_index(indexed_frame, y):
+    """Regression guard for issue #60: the DataFrame keeps X's index, as sklearn's transformers do."""
+    p = _bspline().set_output(transform="pandas")
+    pd.testing.assert_index_equal(p.fit_transform(indexed_frame, y).index, indexed_frame.index)
+    pd.testing.assert_index_equal(p.transform(indexed_frame).index, indexed_frame.index)
+
+
+def test_set_output_pandas_inside_column_transformer(indexed_frame):
+    """Regression guard for issue #60: a reset index made the concatenation raise."""
+    ct = ColumnTransformer(
+        [("pre", Preprocessor(numerical_method="minmax"), ["a"]), ("sc", StandardScaler(), ["b"])]
+    ).set_output(transform="pandas")
+    out = ct.fit_transform(indexed_frame)
+    assert isinstance(out, pd.DataFrame)
+    assert out.shape[0] == len(indexed_frame)
+    pd.testing.assert_index_equal(out.index, indexed_frame.index)
+
+
+def test_set_output_pandas_inside_feature_union(indexed_frame):
+    """Regression guard for issue #60: a reset index made FeatureUnion return 2n NaN-padded rows."""
+    fu = FeatureUnion([("pre", Preprocessor(numerical_method="minmax")), ("sc", StandardScaler())])
+    out = fu.set_output(transform="pandas").fit_transform(indexed_frame)
+    assert isinstance(out, pd.DataFrame)
+    assert out.shape[0] == len(indexed_frame)
+    assert not out.isna().to_numpy().any()
+    pd.testing.assert_index_equal(out.index, indexed_frame.index)
+
+
 def test_set_output_default_still_array(frame, y):
     # set_output(transform="default") only opts out of pandas/polars wrapping; it
     # does not override output_structure, which still resolves to an array.
@@ -254,30 +291,45 @@ def mixed_frame():
     return pd.DataFrame({"a": a, "color": rng.choice(["red", "green", "blue"], 40)}), rng.normal(size=40)
 
 
-@pytest.mark.parametrize("options", [{"categorical_method": "one-hot"}, {"preset": "expanded"}])
-def test_one_hot_works_under_a_global_pandas_output_config(mixed_frame, options):
+@pytest.mark.parametrize("fit_before_config", [False, True])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"categorical_method": "one-hot"},
+        {"preset": "expanded"},
+        {"feature_preprocessing": {"color": "one-hot"}},
+    ],
+)
+def test_one_hot_works_under_a_global_pandas_output_config(mixed_frame, options, fit_before_config):
     """The global transform_output reached the inner sparse OneHotEncoder, which refused it."""
     import sklearn
 
     X, y = mixed_frame
-    expected = np.asarray(Preprocessor(**options).fit(X, y).transform(X))
+    X = X.set_axis(pd.Index(np.arange(len(X))[::-1] + 100, name="row_id"))
+    pre = Preprocessor(**options).fit(X, y)
+    expected = np.asarray(pre.transform(X))
     with sklearn.config_context(transform_output="pandas"):
-        pre = Preprocessor(**options).fit(X, y)
+        if not fit_before_config:
+            pre = Preprocessor(**options).fit(X, y)
         out = pre.transform(X)
     assert isinstance(out, pd.DataFrame)
+    pd.testing.assert_index_equal(out.index, X.index)
     assert list(out.columns) == list(pre.get_feature_names_out())
     assert set(map(str, out.dtypes)) == {"float64"}
     np.testing.assert_allclose(out.to_numpy(), expected)
 
 
-def test_global_polars_output_config_is_honoured(mixed_frame):
+@pytest.mark.parametrize("fit_before_config", [False, True])
+def test_global_polars_output_config_is_honoured(mixed_frame, fit_before_config):
     import sklearn
 
     pl = pytest.importorskip("polars")
     X, y = mixed_frame
-    expected = np.asarray(Preprocessor(categorical_method="one-hot").fit(X, y).transform(X))
+    pre = Preprocessor(categorical_method="one-hot").fit(X, y)
+    expected = np.asarray(pre.transform(X))
     with sklearn.config_context(transform_output="polars"):
-        pre = Preprocessor(categorical_method="one-hot").fit(X, y)
+        if not fit_before_config:
+            pre = Preprocessor(categorical_method="one-hot").fit(X, y)
         out = pre.transform(X)
     assert isinstance(out, pl.DataFrame)
     assert out.columns == list(pre.get_feature_names_out())  # type: ignore
