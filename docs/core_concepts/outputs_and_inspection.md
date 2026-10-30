@@ -294,8 +294,10 @@ As in scikit-learn, a `Preprocessor` fitted on string-labelled columns (a `DataF
 dict) records them as `feature_names_in_`, and `get_feature_names_out(input_features)` accepts
 only those names. One fitted on a NumPy array has no feature names: `get_feature_names_out`
 then accepts any `n_features_in_` names and uses them in place of `feature_0`, `feature_1`,
-.... This is what `Pipeline.get_feature_names_out()` relies on when an upstream step, such as
-a `SimpleImputer`, outputs arrays:
+.... A frame with non-string column labels also has no `feature_names_in_`, so it accepts
+any names of the right length, including its original labels. Non-string labels are
+converted to strings in output names. This is what `Pipeline.get_feature_names_out()`
+relies on when an upstream step, such as a `SimpleImputer`, outputs arrays:
 
 ```python
 import numpy as np
@@ -375,6 +377,11 @@ Preprocessor(numerical_method="ple", verbose=1).fit(df, y)
 ```text
 fit complete: 2 numerical (ple) + 1 categorical (int) feature(s) -> 15 output columns in 0.02s
 ```
+
+Each fit applies its own level, so a later `verbose=2` fit in the same process or notebook logs
+the table even after a `verbose=1` fit. PreTab attaches its own stream handler only when no host
+handler receives its records. A handler on the `"pretab"` logger, or on an ancestor such as the
+root handler that `logging.basicConfig` installs, takes over, so every line is printed once.
 
 ```{note}
 When `feature_preprocessing` overrides make columns of the same kind resolve to different

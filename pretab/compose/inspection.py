@@ -19,6 +19,7 @@ from ..core.representation import FeatureLineage
 logger = get_logger(__name__)
 
 __all__ = [
+    "block_name",
     "build_feature_info",
     "build_feature_lineage",
     "build_transformer_summary",
@@ -28,15 +29,38 @@ __all__ = [
 ]
 
 
+def _block(step_name, columns):
+    """Return ``(kind, feature)`` for a per-column ``num_*`` / ``cat_*`` step, else ``None``."""
+    if step_name == "remainder" or len(columns) != 1:
+        return None
+    kind, sep, _ = str(step_name).partition("_")
+    if not sep or kind not in ("num", "cat"):
+        return None
+    return kind, str(columns[0])
+
+
+def block_name(step_name, columns):
+    """Return the public block name (``"num_<label>"`` / ``"cat_<label>"``) of a step.
+
+    The name is built from the step's kind and its column label rather than read
+    from the step name itself, which differs for labels scikit-learn cannot embed
+    in a step name (see :func:`pretab.compose.factory._step_names`). Steps that are
+    not per-column representation blocks keep their own name.
+    """
+    block = _block(step_name, columns)
+    return step_name if block is None else f"{block[0]}_{block[1]}"
+
+
 def get_output_slices(column_transformer):
     """Return ordered ``(name, start, width)`` spans for each output block.
 
     Reads widths from ``output_indices_`` — the fitted index map that
     ``ColumnTransformer`` already maintains — so no second transform is needed.
+    ``name`` is the public block name (see :func:`block_name`).
     """
     indices = column_transformer.output_indices_
     slices = []
-    for name, transformer, _columns in column_transformer.transformers_:
+    for name, transformer, columns in column_transformer.transformers_:
         if transformer == "drop":
             continue
         span = indices.get(name)
@@ -45,7 +69,7 @@ def get_output_slices(column_transformer):
         width = span.stop - span.start
         if width == 0:
             continue
-        slices.append((name, span.start, width))
+        slices.append((block_name(name, columns), span.start, width))
     return slices
 
 
@@ -104,19 +128,20 @@ def _without_feature_names(estimator) -> Any:
 def clean_feature_names(column_transformer, names, *, rename=None):
     """Collapse the per-feature name that sklearn's ColumnTransformer duplicates.
 
-    Each per-column step is named ``f"{kind}_{feature}"`` (see ``compose/factory.py``),
-    and every PreTab transformer's own ``get_feature_names_out`` already bakes the
-    input feature name into each output column, so sklearn's default
-    ``f"{step}__{inner}"`` naming doubles it, e.g. ``"num_age__age_bs0"``. This
-    collapses that back to ``"num_age_bs0"``, leaving passthrough/remainder columns
-    and any name it cannot confidently match unchanged. ``rename`` maps fitted
+    Each per-column step is a ``num_*`` / ``cat_*`` block for one feature (see
+    ``compose/factory.py``), and every PreTab transformer's own
+    ``get_feature_names_out`` already bakes the input feature name into each output
+    column, so sklearn's default ``f"{step}__{inner}"`` naming doubles it, e.g.
+    ``"num_age__age_bs0"``. This collapses that back to ``"num_age_bs0"``. Other
+    names of a block keep the public block name as their prefix, and
+    passthrough/remainder columns are left unchanged. ``rename`` maps fitted
     column labels to the input feature names ``names`` were built from (see
     :func:`feature_names_out`); a step of a renamed column is then reported under
     the new name, e.g. ``num_feature_0`` as ``num_age``.
     """
     rename = rename or {}
-    step_to_feature = {
-        name: columns[0]
+    step_to_columns = {
+        name: [rename.get(str(column), column) for column in columns]
         for name, _transformer, columns in column_transformer.transformers_
         if name != "remainder" and len(columns) == 1
     }
@@ -124,19 +149,22 @@ def clean_feature_names(column_transformer, names, *, rename=None):
     for raw in names:
         raw = str(raw)
         step_name, sep, inner_name = raw.partition("__")
-        feature = step_to_feature.get(step_name)
-        if not sep or feature is None:
+        columns = step_to_columns.get(step_name)
+        if not sep or columns is None:
             cleaned.append(raw)
             continue
-        kind_prefix = step_name[: -(len(str(feature)) + 1)] if step_name.endswith(f"_{feature}") else ""
-        feature = rename.get(str(feature), feature)
+        block = _block(step_name, columns)
+        if block is not None:
+            kind_prefix, feature = block
+            public_name = f"{kind_prefix}_{feature}"
+        else:
+            feature = str(columns[0])
+            kind_prefix = step_name[: -(len(feature) + 1)] if step_name.endswith(f"_{feature}") else ""
+            public_name = step_name
         if inner_name == feature or inner_name.startswith(f"{feature}_"):
             cleaned.append(f"{kind_prefix}_{inner_name}" if kind_prefix else inner_name)
-        elif kind_prefix:
-            # Equal to ``raw`` unless the column was renamed.
-            cleaned.append(f"{kind_prefix}_{feature}__{inner_name}")
         else:
-            cleaned.append(raw)
+            cleaned.append(f"{public_name}__{inner_name}")
     return cleaned
 
 
