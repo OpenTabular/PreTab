@@ -119,6 +119,10 @@ PreTab honours the scikit-learn output API, so you can request pandas or polars 
 pre.set_output(transform="pandas")   # or "polars"
 ```
 
+A global `sklearn.set_config(transform_output="pandas")` (or `"polars"`) is honoured the same
+way. It applies to the `Preprocessor`'s own output only: the internal per-column steps always
+produce arrays, so every method, including the sparse one-hot encoding, works under it.
+
 ```{note}
 Polars output requires the optional `polars` extra (`pip install "pretab[polars]"`) and is
 loaded lazily: if polars is not installed, requesting it raises a clear
