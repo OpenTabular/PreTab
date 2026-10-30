@@ -162,6 +162,7 @@ def test_integer_labels_are_matched_by_label_at_transform(int_labelled):
     )
 
 
+@pytest.mark.filterwarnings("error:.*feature names.*:UserWarning")
 def test_array_input_after_an_integer_labelled_fit_is_matched_by_position(int_labelled):
     pre = _passthrough().fit(int_labelled)
     out = _blocks(pre.transform(int_labelled.to_numpy()))

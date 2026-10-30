@@ -379,6 +379,88 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
 
 
+# --- positional input after a named fit (and vice versa) (issue #78) ---------------
+
+
+@pytest.fixture
+def mixed_named_frame():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {
+            "age": rng.normal(40, 10, 100),
+            "income": rng.normal(50, 10, 100),
+            "city": rng.choice(["a", "b", "c"], 100),
+        }
+    )
+    return frame, rng.normal(size=100)
+
+
+def test_frame_fit_accepts_an_array_of_the_fitted_width(mixed_named_frame):
+    """Regression guard for issue #78: a DataFrame-fitted preprocessor rejected the same
+    data as an array ('columns are missing'), breaking NumPy-based serving and explainers."""
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+
+    X, y = mixed_named_frame
+    pipe = make_pipeline(Preprocessor(random_state=0), Ridge()).fit(X, y)
+    with pytest.warns(UserWarning, match="does not have valid feature names"):
+        from_array = pipe.predict(X.to_numpy())
+    np.testing.assert_allclose(from_array, pipe.predict(X))
+
+
+@pytest.mark.parametrize("as_dict", [False, True])
+def test_array_fit_accepts_a_frame_of_the_fitted_width(mixed_named_frame, as_dict):
+    X, y = mixed_named_frame
+    numeric = X[["age", "income"]]
+    pre = Preprocessor(numerical_method="minmax").fit(numeric.to_numpy(), y)
+    incoming = numeric.rename(columns={"age": "u", "income": "v"})
+    if as_dict:
+        incoming = incoming.to_dict(orient="list")
+    with pytest.warns(UserWarning, match="fitted without feature names"):
+        from_frame = pre.transform(incoming)
+    np.testing.assert_array_equal(from_frame, pre.transform(numeric.to_numpy()))
+
+
+@pytest.mark.parametrize("n_features", [1, 4])
+def test_positional_input_of_the_wrong_width_is_rejected(mixed_named_frame, n_features):
+    X, y = mixed_named_frame
+    pre = Preprocessor(random_state=0).fit(X, y)
+    incoming = pd.DataFrame(np.zeros((len(X), n_features)))
+    with pytest.raises(PretabDataError, match=f"X has {n_features} features, but Preprocessor is expecting 3"):
+        pre.transform(incoming.to_numpy())
+    numeric = X[["age", "income"]]
+    array_fit = Preprocessor(numerical_method="minmax").fit(numeric.to_numpy(), y)
+    with pytest.raises(PretabDataError, match=f"X has {n_features} features, but Preprocessor is expecting 2"):
+        array_fit.transform(incoming)
+
+
+@pytest.mark.parametrize("as_dict", [False, True])
+def test_synthetic_named_frame_is_not_treated_as_an_array_fit(as_dict):
+    frame = pd.DataFrame({"feature_0": [1.0, 2, 3, 4], "feature_1": [10.0, 20, 30, 40]})
+    pre = Preprocessor(numerical_method="minmax").fit(frame.to_dict(orient="list") if as_dict else frame)
+    assert pre.feature_names_in_.tolist() == ["feature_0", "feature_1"]
+    expected = pre.transform(frame)
+    np.testing.assert_array_equal(pre.transform(frame[["feature_1", "feature_0"]]), expected)
+    with pytest.raises(ValueError, match="columns are missing"):
+        pre.transform(frame.rename(columns={"feature_0": "age", "feature_1": "income"}))
+    with pytest.warns(UserWarning, match="does not have valid feature names"):
+        from_array = pre.transform(frame.to_numpy(dtype=object))
+    np.testing.assert_array_equal(from_array, expected)
+
+
+@pytest.mark.parametrize("dtype", ["bool", "boolean"])
+def test_boolean_frame_fit_accepts_an_array_without_mutating_input(bool_frame, dtype):
+    frame = bool_frame.astype({"flag": dtype})
+    if dtype == "boolean":
+        frame.loc[2, "flag"] = pd.NA
+    original = frame.copy(deep=True)
+    pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot").fit(frame)
+    with pytest.warns(UserWarning, match="does not have valid feature names"):
+        from_array = pre.transform(frame.to_numpy(na_value=np.nan))
+    np.testing.assert_array_equal(from_array, pre.transform(frame))
+    pd.testing.assert_frame_equal(frame, original)
+
+
 # --- get_feature_names_out(input_features) (issue #65) ----------------------------
 
 

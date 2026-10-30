@@ -650,10 +650,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         X : pandas.DataFrame, numpy.ndarray, or dict
-            Input features to transform. DataFrame and dict columns are matched by
-            label, integer labels included. A NumPy array is matched by position
-            after a fit on a frame with non-string labels (such as
-            ``pd.DataFrame(array)``).
+            Input features to transform. A DataFrame or dict is matched to the fitted
+            columns by label, integer labels included. A NumPy array is matched by
+            position: after a fit on string-labelled columns it takes those names
+            (numeric columns of an object array are
+            re-inferred), with scikit-learn's usual warning that ``X`` does not have
+            valid feature names. Likewise, a DataFrame passed after a fit on an array
+            is matched by position, with a warning that ``X`` has feature names when
+            its labels differ from the fitted synthetic labels. After a fit on
+            non-string labels, an array is matched by position without a feature-name
+            warning.
         embeddings : np.ndarray or list of np.ndarray, optional
             External embeddings to attach to dictionary output. Required when
             embeddings were supplied during ``fit`` and unsupported when the
@@ -673,14 +679,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
             when configured via :meth:`set_output` (a pandas DataFrame keeps the index
             of ``X``).
+
+        Raises
+        ------
+        PretabDataError
+            If input matched by position has a different number of columns than
+            ``n_features_in_``: it could never be routed correctly.
         """
 
         check_is_fitted(self)
 
-        is_array = isinstance(X, np.ndarray)
-        X = to_dataframe(X, copy=True)
-        if is_array:
-            X = self._label_array_by_position(X)
+        X = self._align_input(X)
 
         if self.missing_policy == "error":
             self._reject_missing(X)
@@ -893,6 +902,57 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 dims[input_labels.get(columns[0], columns[0])] = width
         return dims
 
+    def _align_input(self, X):
+        """Return ``X`` as a DataFrame whose columns line up with the fitted columns.
+
+        A NumPy array is matched by position. Once the preprocessor was fitted on
+        named columns, an array of the fitted width takes those column labels
+        (numeric columns of an object array are re-inferred), and a DataFrame
+        passed to a preprocessor fitted on an array is matched by position too --
+        with scikit-learn's usual warning about missing or unexpected feature
+        names. A fit on non-string labels accepts arrays without a feature-name
+        warning. Any other DataFrame is matched by column label, even when its
+        fitted labels are literally ``feature_0``, ``feature_1``, ....
+
+        Raises
+        ------
+        PretabDataError
+            If array-like input matched by position has a different number of
+            columns than seen during ``fit``: it could never be routed correctly.
+        """
+        # Synthetic labels mark an array fit only when no input feature names were recorded.
+        fitted_labels = getattr(self.column_transformer_, "feature_names_in_", None)
+        has_feature_names = hasattr(self, "feature_names_in_")
+        positional_labels = [f"feature_{i}" for i in range(self.n_features_in_)]
+        fitted_on_array = (
+            not has_feature_names and fitted_labels is not None and list(fitted_labels) == positional_labels
+        )
+
+        is_array = isinstance(X, np.ndarray)
+        X = to_dataframe(X, copy=True)
+        if not (is_array or (fitted_on_array and list(X.columns) != positional_labels)):
+            return X
+        if X.shape[1] != self.n_features_in_:
+            raise PretabDataError(
+                f"X has {X.shape[1]} features, but {type(self).__name__} is expecting "
+                f"{self.n_features_in_} features as input."
+            )
+        if is_array and has_feature_names:
+            warnings.warn(
+                f"X does not have valid feature names, but {type(self).__name__} was fitted with feature names",
+                UserWarning,
+                stacklevel=3,
+            )
+        elif not is_array and fitted_on_array:
+            warnings.warn(
+                f"X has feature names, but {type(self).__name__} was fitted without feature names",
+                UserWarning,
+                stacklevel=3,
+            )
+        if fitted_labels is not None and list(X.columns) != list(fitted_labels):
+            X = X.set_axis(list(fitted_labels), axis=1)
+        return X.infer_objects() if is_array else X
+
     @staticmethod
     def _column_transformer_input(X):
         """Adapt a frame to what the internal ColumnTransformer expects.
@@ -914,21 +974,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         non-string label such as ``1`` appears there as ``"1"``.
         """
         return {str(label): label for label in (*self.numerical_features_, *self.categorical_features_)}
-
-    def _label_array_by_position(self, X):
-        """Give the columns of array input the labels seen at fit, by position.
-
-        :func:`~pretab.compose.feature_detection.to_dataframe` names array columns
-        ``feature_0``, ``feature_1``, .... After a fit on a frame with a non-string
-        label, such as ``pd.DataFrame(array)``, an array carries no label to route
-        by, so its columns are matched by position, as scikit-learn does for a
-        frame without string feature names. Any other input is returned unchanged.
-        """
-        fitted = [str(label) for label in getattr(self.column_transformer_, "feature_names_in_", [])]
-        input_labels = self._input_labels()
-        if len(fitted) != X.shape[1] or all(isinstance(input_labels.get(label), str) for label in fitted):
-            return X
-        return X.set_axis(fitted, axis=1)
 
     def _output_itemsize(self) -> int:
         """Bytes per element of the dense transformed array.
