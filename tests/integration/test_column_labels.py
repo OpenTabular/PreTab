@@ -193,6 +193,26 @@ def test_get_feature_names_out_accepts_the_integer_labels_seen_at_fit():
     np.testing.assert_array_equal(pre.get_feature_names_out([0, 1]), pre.get_feature_names_out())
 
 
+@pytest.mark.parametrize("missing_policy", ["impute", "separate_state"])
+def test_non_string_label_fit_renames_fallback_steps_without_mutating_the_fit(missing_policy):
+    frame = pd.DataFrame(np.random.default_rng(0).normal(size=(30, 3)), columns=pd.Index(["_score", 1, "col0"]))
+    pre = Preprocessor(numerical_method="minmax", missing_policy=missing_policy).fit(frame)
+    assert not hasattr(pre, "feature_names_in_")
+    assert pre.column_transformer_.transformers_[0][0] == "num_col0_1"
+    original_names = pre.get_feature_names_out()
+    original_output = pre.transform(frame)
+    np.testing.assert_array_equal(pre.get_feature_names_out(frame.columns), original_names)
+    input_features = ["renamed__score", "value", "_col0"]
+    expected = (
+        Preprocessor(numerical_method="minmax", missing_policy=missing_policy)
+        .fit(frame.set_axis(input_features, axis=1))
+        .get_feature_names_out()
+    )
+    np.testing.assert_array_equal(pre.get_feature_names_out(input_features), expected)
+    np.testing.assert_array_equal(pre.get_feature_names_out(), original_names)
+    np.testing.assert_array_equal(pre.transform(frame), original_output)
+
+
 def test_underscore_and_integer_labels_preserve_routing_and_public_metadata():
     frame = pd.DataFrame(
         {

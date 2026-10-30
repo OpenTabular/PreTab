@@ -379,6 +379,68 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
 
 
+# --- get_feature_names_out(input_features) (issue #65) ----------------------------
+
+
+@pytest.fixture
+def named_numeric():
+    rng = np.random.default_rng(0)
+    return pd.DataFrame({"age": rng.normal(40, 10, 60), "income": rng.normal(50, 10, 60)}), rng.normal(size=60)
+
+
+@pytest.mark.parametrize("input_features", [["age", "income"], ["_score", "income__log"], ["col0", "_score"]])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"numerical_method": "minmax"},
+        {"numerical_method": "polynomial"},
+        {"numerical_method": "bspline", "output_dim": 5, "missing_policy": "separate_state"},
+        {"numerical_method": "ple", "output_dim": 3, "add_missing_indicator": True},
+    ],
+)
+def test_array_fit_uses_the_given_input_features(named_numeric, options, input_features):
+    """Regression guard for issue #65: input_features had to equal the synthetic names."""
+    X, y = named_numeric
+    X = X.set_axis(input_features, axis=1)
+    X.iloc[:3, 0] = np.nan
+    pre = Preprocessor(**options).fit(X.to_numpy(), y)
+    original_names = pre.get_feature_names_out()
+    original_output = pre.transform(X.to_numpy())
+    from_array = pre.get_feature_names_out(input_features)
+    from_frame = Preprocessor(**options).fit(X, y).get_feature_names_out()
+    assert from_array.tolist() == from_frame.tolist()
+    np.testing.assert_array_equal(pre.get_feature_names_out(), original_names)
+    np.testing.assert_array_equal(pre.transform(X.to_numpy()), original_output)
+
+
+def test_array_fit_rejects_input_features_of_the_wrong_length(named_numeric):
+    X, y = named_numeric
+    pre = Preprocessor(numerical_method="minmax").fit(X.to_numpy(), y)
+    with pytest.raises(ValueError, match="length equal to number of features"):
+        pre.get_feature_names_out(["age"])
+
+
+def test_named_fit_records_and_validates_feature_names_in(named_numeric):
+    X, y = named_numeric
+    pre = Preprocessor(numerical_method="minmax").fit(X, y)
+    assert pre.feature_names_in_.tolist() == ["age", "income"]
+    assert pre.get_feature_names_out(["age", "income"]).tolist() == ["num_age", "num_income"]
+    with pytest.raises(ValueError, match="not equal to feature_names_in_"):
+        pre.get_feature_names_out(["a", "b"])
+    assert not hasattr(pre.fit(X.to_numpy(), y), "feature_names_in_")
+
+
+def test_pipeline_feature_names_propagate_through_an_array_step(named_numeric):
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import make_pipeline
+
+    X, y = named_numeric
+    pipe = make_pipeline(SimpleImputer(), Preprocessor(numerical_method="minmax")).fit(X, y)
+    names = pipe.get_feature_names_out()
+    assert names is not None
+    assert names.tolist() == ["num_age", "num_income"]
+
+
 # --- boolean columns (issue #54) ------------------------------------------------
 
 
