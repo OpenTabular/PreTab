@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab.compose.feature_detection import bool_columns_as_object, detect_column_types, to_dataframe
+from pretab.compose.feature_detection import (
+    bool_columns_as_object,
+    detect_column_types,
+    to_dataframe,
+    with_string_labels,
+)
 from pretab.exceptions import InvalidParamError, PretabDataError
 
 
@@ -105,6 +110,15 @@ def test_invalid_cat_cutoff_type_raises():
     df = pd.DataFrame({"x": [1, 2, 3]})
     with pytest.raises(InvalidParamError):
         detect_column_types(df, cat_cutoff="bad", treat_all_integers_as_numerical=False)
+
+
+def test_with_string_labels_relabels_without_touching_the_input():
+    frame = pd.DataFrame({1: [1.0], "b": [2.0]})
+    relabelled = with_string_labels(frame)
+    assert list(relabelled.columns) == ["1", "b"]
+    assert list(frame.columns) == [1, "b"]
+    string_frame = pd.DataFrame({"a": [1.0]})
+    assert with_string_labels(string_frame) is string_frame
 
 
 def test_bool_columns_as_object_casts_only_boolean_columns():
