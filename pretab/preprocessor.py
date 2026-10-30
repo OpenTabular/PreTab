@@ -16,6 +16,7 @@ from .compose.config import PreprocessorConfig
 from .compose.factory import build_column_transformer
 from .compose.feature_detection import bool_columns_as_object, detect_column_types, to_dataframe, with_string_labels
 from .compose.inspection import (
+    block_name,
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
@@ -309,7 +310,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ----------
     column_transformer\_ : ColumnTransformer
         The internal scikit-learn column transformer that handles feature-wise preprocessing.
-        Set when the preprocessor is fitted. It is fitted on the string form of every column
+        Set when the preprocessor is fitted. Each column gets one step, named ``num_<col>``
+        / ``cat_<col>`` whenever scikit-learn accepts that name; a label scikit-learn
+        cannot embed in a step name (one starting with ``_`` or containing ``__``) gets a
+        positional step name such as ``num_col0`` instead. Block keys, feature names and
+        lineage always use the column label. It is fitted on the string form of every column
         label (scikit-learn reads an integer column selector as a position), so a column
         labelled ``1`` appears there as ``"1"``.
     n_features_in\_ : int
@@ -1060,7 +1065,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     def _log_internal_decisions(self):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
-        for name, transformer, _columns in self.column_transformer_.transformers_:
+        for step_name, transformer, columns in self.column_transformer_.transformers_:
+            name = block_name(step_name, columns)
             last_step = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
             for attr in (
                 "thresholds_",
