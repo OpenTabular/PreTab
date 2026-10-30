@@ -408,21 +408,220 @@ def test_frame_fit_accepts_an_array_of_the_fitted_width(mixed_named_frame):
     np.testing.assert_allclose(from_array, pipe.predict(X))
 
 
-def test_array_fit_accepts_a_frame_of_the_fitted_width(mixed_named_frame):
+@pytest.mark.parametrize("as_dict", [False, True])
+def test_array_fit_accepts_a_frame_of_the_fitted_width(mixed_named_frame, as_dict):
     X, y = mixed_named_frame
     numeric = X[["age", "income"]]
     pre = Preprocessor(numerical_method="minmax").fit(numeric.to_numpy(), y)
+    incoming = numeric.rename(columns={"age": "u", "income": "v"})
+    if as_dict:
+        incoming = incoming.to_dict(orient="list")
     with pytest.warns(UserWarning, match="fitted without feature names"):
-        from_frame = pre.transform(numeric.rename(columns={"age": "u", "income": "v"}))
+        from_frame = pre.transform(incoming)
     np.testing.assert_array_equal(from_frame, pre.transform(numeric.to_numpy()))
 
 
-def test_positional_input_of_the_wrong_width_is_rejected(mixed_named_frame):
+@pytest.mark.parametrize("n_features", [1, 4])
+def test_positional_input_of_the_wrong_width_is_rejected(mixed_named_frame, n_features):
     X, y = mixed_named_frame
     pre = Preprocessor(random_state=0).fit(X, y)
-    with pytest.raises(PretabDataError, match="X has 2 features, but Preprocessor is expecting 3"):
-        pre.transform(X.to_numpy()[:, :2])
+    incoming = pd.DataFrame(np.zeros((len(X), n_features)))
+    with pytest.raises(PretabDataError, match=f"X has {n_features} features, but Preprocessor is expecting 3"):
+        pre.transform(incoming.to_numpy())
     numeric = X[["age", "income"]]
     array_fit = Preprocessor(numerical_method="minmax").fit(numeric.to_numpy(), y)
-    with pytest.raises(PretabDataError, match="X has 1 features"):
-        array_fit.transform(X[["age"]])
+    with pytest.raises(PretabDataError, match=f"X has {n_features} features, but Preprocessor is expecting 2"):
+        array_fit.transform(incoming)
+
+
+@pytest.mark.parametrize("as_dict", [False, True])
+def test_synthetic_named_frame_is_not_treated_as_an_array_fit(as_dict):
+    frame = pd.DataFrame({"feature_0": [1.0, 2, 3, 4], "feature_1": [10.0, 20, 30, 40]})
+    pre = Preprocessor(numerical_method="minmax").fit(frame.to_dict(orient="list") if as_dict else frame)
+    assert pre.feature_names_in_.tolist() == ["feature_0", "feature_1"]
+    expected = pre.transform(frame)
+    np.testing.assert_array_equal(pre.transform(frame[["feature_1", "feature_0"]]), expected)
+    with pytest.raises(ValueError, match="columns are missing"):
+        pre.transform(frame.rename(columns={"feature_0": "age", "feature_1": "income"}))
+    with pytest.warns(UserWarning, match="does not have valid feature names"):
+        from_array = pre.transform(frame.to_numpy(dtype=object))
+    np.testing.assert_array_equal(from_array, expected)
+
+
+@pytest.mark.parametrize("dtype", ["bool", "boolean"])
+def test_boolean_frame_fit_accepts_an_array_without_mutating_input(bool_frame, dtype):
+    frame = bool_frame.astype({"flag": dtype})
+    if dtype == "boolean":
+        frame.loc[2, "flag"] = pd.NA
+    original = frame.copy(deep=True)
+    pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot").fit(frame)
+    with pytest.warns(UserWarning, match="does not have valid feature names"):
+        from_array = pre.transform(frame.to_numpy(na_value=np.nan))
+    np.testing.assert_array_equal(from_array, pre.transform(frame))
+    pd.testing.assert_frame_equal(frame, original)
+
+
+# --- get_feature_names_out(input_features) (issue #65) ----------------------------
+
+
+@pytest.fixture
+def named_numeric():
+    rng = np.random.default_rng(0)
+    return pd.DataFrame({"age": rng.normal(40, 10, 60), "income": rng.normal(50, 10, 60)}), rng.normal(size=60)
+
+
+@pytest.mark.parametrize("input_features", [["age", "income"], ["_score", "income__log"], ["col0", "_score"]])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"numerical_method": "minmax"},
+        {"numerical_method": "polynomial"},
+        {"numerical_method": "bspline", "output_dim": 5, "missing_policy": "separate_state"},
+        {"numerical_method": "ple", "output_dim": 3, "add_missing_indicator": True},
+    ],
+)
+def test_array_fit_uses_the_given_input_features(named_numeric, options, input_features):
+    """Regression guard for issue #65: input_features had to equal the synthetic names."""
+    X, y = named_numeric
+    X = X.set_axis(input_features, axis=1)
+    X.iloc[:3, 0] = np.nan
+    pre = Preprocessor(**options).fit(X.to_numpy(), y)
+    original_names = pre.get_feature_names_out()
+    original_output = pre.transform(X.to_numpy())
+    from_array = pre.get_feature_names_out(input_features)
+    from_frame = Preprocessor(**options).fit(X, y).get_feature_names_out()
+    assert from_array.tolist() == from_frame.tolist()
+    np.testing.assert_array_equal(pre.get_feature_names_out(), original_names)
+    np.testing.assert_array_equal(pre.transform(X.to_numpy()), original_output)
+
+
+def test_array_fit_rejects_input_features_of_the_wrong_length(named_numeric):
+    X, y = named_numeric
+    pre = Preprocessor(numerical_method="minmax").fit(X.to_numpy(), y)
+    with pytest.raises(ValueError, match="length equal to number of features"):
+        pre.get_feature_names_out(["age"])
+
+
+def test_named_fit_records_and_validates_feature_names_in(named_numeric):
+    X, y = named_numeric
+    pre = Preprocessor(numerical_method="minmax").fit(X, y)
+    assert pre.feature_names_in_.tolist() == ["age", "income"]
+    assert pre.get_feature_names_out(["age", "income"]).tolist() == ["num_age", "num_income"]
+    with pytest.raises(ValueError, match="not equal to feature_names_in_"):
+        pre.get_feature_names_out(["a", "b"])
+    assert not hasattr(pre.fit(X.to_numpy(), y), "feature_names_in_")
+
+
+def test_pipeline_feature_names_propagate_through_an_array_step(named_numeric):
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import make_pipeline
+
+    X, y = named_numeric
+    pipe = make_pipeline(SimpleImputer(), Preprocessor(numerical_method="minmax")).fit(X, y)
+    names = pipe.get_feature_names_out()
+    assert names is not None
+    assert names.tolist() == ["num_age", "num_income"]
+
+
+# --- boolean columns (issue #54) ------------------------------------------------
+
+
+@pytest.fixture
+def bool_frame():
+    return pd.DataFrame({"x": [0.1, 0.4, 0.2, 0.9, 0.5, 0.7], "flag": [True, False, True, False, True, True]})
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [
+        ({}, ["cat_flag"]),
+        ({"categorical_method": "one-hot"}, ["cat_flag_False", "cat_flag_True"]),
+        pytest.param(
+            {"categorical_method": "onehot_from_ordinal"},
+            ["cat_flag_bin_0", "cat_flag_bin_1"],
+            marks=pytest.mark.filterwarnings("ignore:OneHotFromOrdinalTransformer is deprecated:DeprecationWarning"),
+        ),
+        ({"categorical_method": "none"}, ["cat_flag"]),
+        ({"preset": "standard"}, ["cat_flag"]),
+        ({"preset": "expanded"}, ["cat_flag_False", "cat_flag_True"]),
+        ({"preset": "adaptive"}, ["cat_flag"]),
+        ({"missing_policy": "impute"}, ["cat_flag"]),
+        ({"missing_policy": "impute_with_indicator"}, ["cat_flag"]),
+        ({"missing_policy": "separate_state"}, ["cat_flag__representation__flag", "cat_flag__missing__flag__missing"]),
+        ({"treat_all_integers_as_numerical": True}, ["cat_flag"]),
+    ],
+)
+def test_bool_column_is_encoded_as_a_binary_categorical(bool_frame, options, expected):
+    """Regression guard for issue #54: SimpleImputer rejected the bool dtype."""
+    pre = Preprocessor(**options).fit(bool_frame, np.arange(6.0))
+    names = pre.get_feature_names_out().tolist()
+    assert names[-len(expected) :] == expected
+    assert pre.categorical_features_ == ["flag"]
+    assert np.asarray(pre.transform(bool_frame)).shape == (6, len(names))
+
+
+def test_bool_column_integer_codes_follow_the_values(bool_frame):
+    pre = Preprocessor(categorical_method="int").fit(bool_frame, np.arange(6.0))
+    codes = np.asarray(pre.transform(bool_frame))[:, -1]
+    np.testing.assert_array_equal(codes, np.where(bool_frame["flag"], 2.0, 1.0))
+
+
+def test_nullable_boolean_column_with_missing_values_is_imputed(bool_frame):
+    frame = bool_frame.astype({"flag": "boolean"})
+    frame.loc[2, "flag"] = pd.NA
+    pre = Preprocessor(categorical_method="one-hot").fit(frame, np.arange(6.0))
+    assert pre.get_feature_names_out().tolist()[-2:] == ["cat_flag_False", "cat_flag_True"]
+    one_hot = np.asarray(pre.transform(frame))[:, -2:]
+    np.testing.assert_array_equal(one_hot[2], [0.0, 1.0])  # imputed with the most frequent value, True
+
+
+def test_nullable_boolean_missing_value_gets_the_missing_code_without_imputation(bool_frame):
+    frame = bool_frame.astype({"flag": "boolean"})
+    frame.loc[2, "flag"] = pd.NA
+    pre = Preprocessor(categorical_method="int", missing_policy="propagate").fit(frame, np.arange(6.0))
+    codes = np.asarray(pre.transform(frame))[:, -1]
+    np.testing.assert_array_equal(codes, [2.0, 1.0, 0.0, 1.0, 2.0, 2.0])  # False -> 1, True -> 2, missing -> 0
+
+
+def test_bool_numpy_array_is_supported():
+    X = np.array([[True], [False], [True], [True]])
+    pre = Preprocessor().fit(X)
+    assert pre.categorical_features_ == ["feature_0"]
+    assert np.asarray(pre.transform(X)).shape == (4, 1)
+
+
+# --- box-cox on unseen low values (issue #59) -------------------------------------
+
+
+@pytest.fixture
+def boxcox_fitted():
+    X = pd.DataFrame({"x": np.random.default_rng(0).normal(10, 2, 200)})
+    return X, Preprocessor(numerical_method="box-cox").fit(X)
+
+
+def test_boxcox_transforms_values_below_the_training_minimum(boxcox_fitted):
+    """Regression guard for issue #59: the positivity scaler mapped them to <= 0."""
+    X, pre = boxcox_fitted
+    low = pre.transform(pd.DataFrame({"x": [X.x.min() - 5.0, X.x.min() - 0.5]}))
+    at_min = pre.transform(pd.DataFrame({"x": [X.x.min()]}))
+    assert np.isfinite(low).all()
+    np.testing.assert_allclose(low, np.repeat(at_min, 2, axis=0))
+
+
+def test_boxcox_still_extrapolates_above_the_training_maximum(boxcox_fitted):
+    X, pre = boxcox_fitted
+    out = pre.transform(pd.DataFrame({"x": [X.x.max(), X.x.max() + 3.0]})).ravel()
+    assert np.isfinite(out).all()
+    assert out[1] > out[0]
+
+
+def test_boxcox_survives_cross_validation():
+    from sklearn.datasets import make_regression
+    from sklearn.linear_model import Ridge
+    from sklearn.model_selection import cross_val_score
+    from sklearn.pipeline import make_pipeline
+
+    data = make_regression(n_samples=500, n_features=3, noise=1.0, random_state=0)
+    X, y = data[0], data[1]
+    scores = cross_val_score(make_pipeline(Preprocessor(numerical_method="box-cox"), Ridge()), X, y, cv=5)
+    assert np.isfinite(scores).all()
