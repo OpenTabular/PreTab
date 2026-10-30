@@ -379,6 +379,73 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
 
 
+# --- boolean columns (issue #54) ------------------------------------------------
+
+
+@pytest.fixture
+def bool_frame():
+    return pd.DataFrame({"x": [0.1, 0.4, 0.2, 0.9, 0.5, 0.7], "flag": [True, False, True, False, True, True]})
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [
+        ({}, ["cat_flag"]),
+        ({"categorical_method": "one-hot"}, ["cat_flag_False", "cat_flag_True"]),
+        pytest.param(
+            {"categorical_method": "onehot_from_ordinal"},
+            ["cat_flag_bin_0", "cat_flag_bin_1"],
+            marks=pytest.mark.filterwarnings("ignore:OneHotFromOrdinalTransformer is deprecated:DeprecationWarning"),
+        ),
+        ({"categorical_method": "none"}, ["cat_flag"]),
+        ({"preset": "standard"}, ["cat_flag"]),
+        ({"preset": "expanded"}, ["cat_flag_False", "cat_flag_True"]),
+        ({"preset": "adaptive"}, ["cat_flag"]),
+        ({"missing_policy": "impute"}, ["cat_flag"]),
+        ({"missing_policy": "impute_with_indicator"}, ["cat_flag"]),
+        ({"missing_policy": "separate_state"}, ["cat_flag__representation__flag", "cat_flag__missing__flag__missing"]),
+        ({"treat_all_integers_as_numerical": True}, ["cat_flag"]),
+    ],
+)
+def test_bool_column_is_encoded_as_a_binary_categorical(bool_frame, options, expected):
+    """Regression guard for issue #54: SimpleImputer rejected the bool dtype."""
+    pre = Preprocessor(**options).fit(bool_frame, np.arange(6.0))
+    names = pre.get_feature_names_out().tolist()
+    assert names[-len(expected) :] == expected
+    assert pre.categorical_features_ == ["flag"]
+    assert np.asarray(pre.transform(bool_frame)).shape == (6, len(names))
+
+
+def test_bool_column_integer_codes_follow_the_values(bool_frame):
+    pre = Preprocessor(categorical_method="int").fit(bool_frame, np.arange(6.0))
+    codes = np.asarray(pre.transform(bool_frame))[:, -1]
+    np.testing.assert_array_equal(codes, np.where(bool_frame["flag"], 2.0, 1.0))
+
+
+def test_nullable_boolean_column_with_missing_values_is_imputed(bool_frame):
+    frame = bool_frame.astype({"flag": "boolean"})
+    frame.loc[2, "flag"] = pd.NA
+    pre = Preprocessor(categorical_method="one-hot").fit(frame, np.arange(6.0))
+    assert pre.get_feature_names_out().tolist()[-2:] == ["cat_flag_False", "cat_flag_True"]
+    one_hot = np.asarray(pre.transform(frame))[:, -2:]
+    np.testing.assert_array_equal(one_hot[2], [0.0, 1.0])  # imputed with the most frequent value, True
+
+
+def test_nullable_boolean_missing_value_gets_the_missing_code_without_imputation(bool_frame):
+    frame = bool_frame.astype({"flag": "boolean"})
+    frame.loc[2, "flag"] = pd.NA
+    pre = Preprocessor(categorical_method="int", missing_policy="propagate").fit(frame, np.arange(6.0))
+    codes = np.asarray(pre.transform(frame))[:, -1]
+    np.testing.assert_array_equal(codes, [2.0, 1.0, 0.0, 1.0, 2.0, 2.0])  # False -> 1, True -> 2, missing -> 0
+
+
+def test_bool_numpy_array_is_supported():
+    X = np.array([[True], [False], [True], [True]])
+    pre = Preprocessor().fit(X)
+    assert pre.categorical_features_ == ["feature_0"]
+    assert np.asarray(pre.transform(X)).shape == (4, 1)
+
+
 # --- box-cox on unseen low values (issue #59) -------------------------------------
 
 

@@ -309,9 +309,10 @@ Preprocessor(preset="adaptive")   # same numerical method, int codes, adaptive w
 ### Automatic feature-type detection
 
 By default PreTab inspects each column and classifies it as numerical or categorical.
-String and object columns are treated as categorical, low-cardinality integer columns are
-categorical, and integer columns with enough distinct values stay numerical. Tune the
-behavior with `cat_cutoff` and `treat_all_integers_as_numerical`.
+String, object and boolean columns are treated as categorical, low-cardinality integer
+columns are categorical, and integer columns with enough distinct values stay numerical.
+A boolean column is encoded like any other binary categorical column, with the categories
+`False` and `True`. Tune the behavior with `cat_cutoff` and `treat_all_integers_as_numerical`.
 
 ```python
 preprocessor = Preprocessor(
