@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import time
 import warnings
@@ -13,7 +14,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from .compose.config import PreprocessorConfig
 from .compose.factory import build_column_transformer
-from .compose.feature_detection import detect_column_types, to_dataframe, with_string_labels
+from .compose.feature_detection import bool_columns_as_object, detect_column_types, to_dataframe, with_string_labels
 from .compose.inspection import (
     build_feature_info,
     build_feature_lineage,
@@ -289,8 +290,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Stored verbatim and forwarded by ``get_params`` / ``clone``, so an embedding host
         (e.g. DeepTab) can pass it straight through ``Preprocessor(**kwargs)``. PreTab never
-        configures the root logger or attaches a handler when the host already owns one, so
-        ``verbose=0`` keeps PreTab silent under a host's own logging.
+        configures the root logger or attaches a handler when the host already owns one (on
+        the ``"pretab"`` logger or on an ancestor, such as a root handler from
+        :func:`logging.basicConfig`), so ``verbose=0`` keeps PreTab silent under a host's own
+        logging and every message is printed once. Each fit applies its own level, so a later
+        fit with a higher ``verbose`` logs more.
     preset : {"standard", "expanded", "adaptive"} or None, default=None
         Optional named configuration bundle applied as a transparent alias. A preset only
         fills in parameters left at their defaults; any parameter set explicitly always wins.
@@ -333,6 +337,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ``"naturalspline"``, ``"pspline"``, ``"bspline"``, ``"mspline"``, ``"ispline"``,
     ``"fourier"``.
 
+    Box-Cox requires strictly positive input, so ``"box-cox"`` first rescales each column into
+    ``[1e-3, 1]`` with a min-max scaler fitted on the training data. That scaler's output is
+    floored at ``1e-3``: a value below the training minimum transforms like the minimum, while
+    values above the training maximum still extrapolate.
+
     Available ``categorical_method`` values: ``"int"``, ``"one-hot"``, ``"onehot_from_ordinal"``,
     ``"pretrained"``, ``"none"``. The ``"pretrained"`` method requires the optional
     ``sentence-transformers`` dependency (``pip install "pretab[embeddings]"``).
@@ -342,6 +351,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     are also accepted, e.g. ``"std"`` / ``"standard"`` -> ``"standardization"``, ``"ohe"`` /
     ``"dummy"`` -> ``"one-hot"``, ``"ordinal"`` / ``"label"`` -> ``"int"``, ``"poly"`` ->
     ``"polynomial"``, and ``"passthrough"`` -> ``"none"``.
+
+    Boolean columns (``bool`` and pandas' nullable ``boolean``) are categorical and are encoded
+    like any other binary categorical column, with the categories ``False`` and ``True``; a
+    missing value of the nullable ``boolean`` dtype is treated as missing (``NaN``).
 
     ``transform`` returns a single stacked array by default (``output_structure="matrix"``),
     or a dict of per-feature blocks keyed ``num_<col>`` / ``cat_<col>`` when
@@ -643,7 +656,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             "matrix"``); a dict of per-feature blocks when ``output_structure="blocks"``
             (or ``return_array=False``); a SciPy CSR matrix (or CSR blocks) when
             ``output_format`` resolves to ``"sparse"``; or a pandas / polars DataFrame
-            when configured via :meth:`set_output`.
+            when configured via :meth:`set_output` (a pandas DataFrame keeps the index
+            of ``X``).
         """
 
         check_is_fitted(self)
@@ -671,7 +685,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         fmt, self.output_report_ = compute_output_report(transformed_X, self.output_format)
 
         if container in ("pandas", "polars"):
-            return to_dataframe_output(transformed_X, self.get_feature_names_out(), container)
+            # Pass X's index explicitly: sklearn's set_output wrapper keeps the index of
+            # a returned DataFrame instead of restoring the input's.
+            return to_dataframe_output(transformed_X, self.get_feature_names_out(), container, index=X.index)
 
         slices = None if resolved_return_array else get_output_slices(self.column_transformer_)
         return format_output(
@@ -849,10 +865,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Column labels become strings, because scikit-learn reads an integer
         column selector as a position (see
-        :func:`~pretab.compose.feature_detection.with_string_labels`). The
+        :func:`~pretab.compose.feature_detection.with_string_labels`). Boolean
+        columns become ``object`` columns, because the categorical imputer rejects
+        ``bool`` (see :func:`~pretab.compose.feature_detection.bool_columns_as_object`). The
         caller's frame is never modified.
         """
-        return with_string_labels(X)
+        return bool_columns_as_object(with_string_labels(X))
 
     def _input_labels(self) -> dict:
         """Map each ColumnTransformer column back to the label it has in the input.
@@ -1002,7 +1020,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         ----------
         verbose : bool, default=True
             If True, renders an aligned per-feature table through the ``pretab``
-            logger (attaching a stream handler when none is configured). If False,
+            logger (attaching a stream handler when no host handler receives its
+            records), without lowering a more verbose level set earlier. If False,
             the info dicts are returned silently.
 
         Returns
@@ -1028,7 +1047,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         categorical_feature_info = {input_labels.get(key, key): info for key, info in categorical_feature_info.items()}
 
         if verbose:
-            configure_logging(1)
+            # Render at INFO without lowering a more verbose level set earlier.
+            configure_logging(2 if logger.isEnabledFor(logging.DEBUG) else 1)
             for line in build_transformer_summary(
                 numerical_feature_info,
                 categorical_feature_info,

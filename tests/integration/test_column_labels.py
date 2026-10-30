@@ -66,6 +66,30 @@ def test_integer_labels_of_different_column_types_reach_their_own_pipeline():
     np.testing.assert_array_equal(np.asarray(default.transform(frame))[:, -1], [1.0, 2.0, 3.0, 1.0, 2.0, 3.0])
 
 
+@pytest.mark.parametrize(
+    ("dtype", "missing_policy", "expected_codes"),
+    [
+        ("bool", "impute", [2.0, 1.0, 2.0, 1.0, 2.0, 2.0]),
+        ("boolean", "impute", [2.0, 1.0, 2.0, 1.0, 2.0, 2.0]),
+        ("boolean", "propagate", [2.0, 1.0, 0.0, 1.0, 2.0, 2.0]),
+    ],
+)
+def test_boolean_columns_with_integer_labels_keep_routing_and_encoding(dtype, missing_policy, expected_codes):
+    frame = pd.DataFrame({1: pd.array([True, False, True, False, True, True], dtype=dtype), 0: [1.0, 2, 3, 4, 5, 6]})
+    if dtype == "boolean":
+        frame.loc[2, 1] = pd.NA
+    original = frame.copy(deep=True)
+    pre = _passthrough(categorical_method="int", missing_policy=missing_policy).fit(frame)
+    assert pre.numerical_features_ == [0]
+    assert pre.categorical_features_ == [1]
+    assert pre.output_dims_ == {0: 1, 1: 1}
+    for data in (frame, frame[[0, 1]], frame.to_numpy(na_value=np.nan)):
+        out = _blocks(pre.transform(data))
+        np.testing.assert_array_equal(out["num_0"].ravel(), frame[0].to_numpy())
+        np.testing.assert_array_equal(out["cat_1"].ravel(), expected_codes)
+    pd.testing.assert_frame_equal(frame, original)
+
+
 def test_integer_labels_are_matched_by_label_at_transform(int_labelled):
     pre = _passthrough(output_format="dense").fit(int_labelled)
     reordered = int_labelled[[0, 1]]

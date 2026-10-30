@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab.compose.feature_detection import detect_column_types, to_dataframe, with_string_labels
+from pretab.compose.feature_detection import (
+    bool_columns_as_object,
+    detect_column_types,
+    to_dataframe,
+    with_string_labels,
+)
 from pretab.exceptions import InvalidParamError, PretabDataError
 
 
@@ -114,3 +119,19 @@ def test_with_string_labels_relabels_without_touching_the_input():
     assert list(frame.columns) == [1, "b"]
     string_frame = pd.DataFrame({"a": [1.0]})
     assert with_string_labels(string_frame) is string_frame
+
+
+def test_bool_columns_as_object_casts_only_boolean_columns():
+    frame = pd.DataFrame({"x": [0.5, 1.5], "flag": [True, False], "nullable": pd.array([True, None], dtype="boolean")})
+    cast = bool_columns_as_object(frame)
+    assert cast["x"].dtype == np.float64
+    assert cast["flag"].dtype == object and cast["flag"].tolist() == [True, False]
+    assert cast["nullable"].dtype == object
+    assert cast["nullable"][0] is True and np.isnan(cast["nullable"][1])
+    # The caller's frame keeps its dtypes.
+    assert frame["flag"].dtype == bool and frame["nullable"].dtype == "boolean"
+
+
+def test_bool_columns_as_object_returns_frame_without_bool_columns_unchanged():
+    frame = pd.DataFrame({"x": [0.5, 1.5]})
+    assert bool_columns_as_object(frame) is frame

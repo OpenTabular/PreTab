@@ -12,7 +12,7 @@ import pandas as pd
 
 from ..exceptions import PretabDataError, invalid_param_error
 
-__all__ = ["detect_column_types", "to_dataframe", "with_string_labels"]
+__all__ = ["bool_columns_as_object", "detect_column_types", "to_dataframe", "with_string_labels"]
 
 
 def to_dataframe(X, *, copy: bool = False) -> pd.DataFrame:
@@ -74,14 +74,35 @@ def with_string_labels(X: pd.DataFrame) -> pd.DataFrame:
     return relabelled
 
 
+def bool_columns_as_object(X: pd.DataFrame) -> pd.DataFrame:
+    """Return ``X`` with its boolean columns cast to ``object``.
+
+    Boolean columns are categorical (see :func:`detect_column_types`), but the
+    categorical pipeline starts with a :class:`~sklearn.impute.SimpleImputer`,
+    which rejects the ``bool`` dtype. As ``object`` columns of ``True`` /
+    ``False`` they are encoded like any other binary categorical column; a
+    missing value of pandas' nullable ``boolean`` dtype becomes ``NaN``, the
+    missing marker the imputer recognizes. ``X`` itself is returned when it has
+    no boolean column, so the caller's frame is never modified.
+    """
+    bool_columns = [label for label, dtype in X.dtypes.items() if dtype.kind == "b"]
+    if not bool_columns:
+        return X
+    cast = X.copy(deep=False)
+    for label in bool_columns:
+        column = X[label].astype(object)
+        cast[label] = column.where(column.notna(), np.nan)
+    return cast
+
+
 def detect_column_types(X, *, cat_cutoff, treat_all_integers_as_numerical, estimator_name="Preprocessor"):
     """Classify each column of ``X`` as numerical or categorical.
 
     An integer column is treated as categorical when its cardinality falls below
     ``cat_cutoff`` -- interpreted as a unique-ratio cutoff when a float, or an
-    absolute unique-count cutoff when an int. Non-numeric dtypes are always
-    categorical; ``treat_all_integers_as_numerical`` bypasses the heuristic for
-    integer columns.
+    absolute unique-count cutoff when an int. Non-numeric dtypes, including
+    ``bool`` and pandas' nullable ``boolean``, are always categorical;
+    ``treat_all_integers_as_numerical`` bypasses the heuristic for integer columns.
 
     Returns
     -------
