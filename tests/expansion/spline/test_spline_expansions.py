@@ -118,6 +118,45 @@ def test_mspline_handles_nan():
     assert np.isfinite(Xt).all()
 
 
+@pytest.mark.parametrize("scale", [1.0, 1e-2, 1e-3, 1e-7])
+def test_mspline_basis_integrates_to_one_at_any_feature_scale(scale):
+    """Regression guard for issue #63: absolute clipping thresholds flattened the
+    basis on small-scale features and zeroed it on tiny-range ones."""
+    from scipy.integrate import trapezoid
+
+    X = np.random.default_rng(0).uniform(0, 1, (2000, 1)) * scale
+    transformer = MSplineTransformer(output_dim=8, placement_strategy="uniform").fit(X)
+    grid = np.linspace(X.min(), X.max(), 200_001)
+    integrals = trapezoid(transformer.transform(grid.reshape(-1, 1)), grid, axis=0)
+    np.testing.assert_allclose(integrals, 1.0, atol=1e-3)
+
+
+def test_mspline_basis_is_scale_equivariant():
+    X = np.random.default_rng(0).lognormal(0, 2, (2000, 1))
+    unit = MSplineTransformer(output_dim=8).fit(X).transform(X)
+    scaled = MSplineTransformer(output_dim=8).fit(X * 1e-4).transform(X * 1e-4)
+    # M-spline values scale like 1 / span, so rescaling x by c rescales M by 1 / c.
+    np.testing.assert_allclose(scaled * 1e-4, unit, rtol=1e-8)
+
+
+def test_mspline_basis_is_not_clipped_after_the_preprocessor_scaling():
+    """Tight quantile knots on a skewed feature, after the default min-max scaling to
+    [-1, 1], pushed M-spline peaks above the absolute clip at 1000."""
+    import pandas as pd
+    from scipy.integrate import trapezoid
+
+    from pretab import Preprocessor
+
+    x = np.random.default_rng(0).lognormal(0, 2, 2000)
+    pre = Preprocessor(numerical_method="mspline", target_aware=False, placement_strategy="quantile")
+    pre.fit(pd.DataFrame({"x": x}))
+    grid = np.linspace(x.min(), x.max(), 200_001)
+    basis = np.asarray(pre.transform(pd.DataFrame({"x": grid})))
+    scaled = (grid - x.min()) / (x.max() - x.min()) * 2.0 - 1.0
+    assert basis.max() > 1000.0
+    np.testing.assert_allclose(trapezoid(basis, scaled, axis=0), 1.0, atol=1e-3)
+
+
 def test_ispline_monotonic_increasing():
     X = np.linspace(0, 10, 200).reshape(-1, 1)
     transformer = ISplineTransformer(output_dim=8, include_bias=False)
