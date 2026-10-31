@@ -12,7 +12,7 @@ import warnings
 
 import numpy as np
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
+from sklearn.impute import MissingIndicator, SimpleImputer
 from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
@@ -291,7 +291,6 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             target_aware=config.target_aware,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
-            add_missing_indicator=plan["add_indicator"],
             output_dim=config.output_dim,
             adaptive=config.adaptive,
             min_output_dim=config.min_output_dim if config.adaptive else None,
@@ -321,7 +320,6 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             method,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
-            add_missing_indicator=plan["add_indicator"],
             **constructor_kwargs,
         )
 
@@ -330,6 +328,22 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
         # Emit a dedicated ``__missing`` column (built on the raw input) alongside
         # the imputed representation, so the indicator never enters the basis.
         return FeatureUnion([("representation", pipeline), ("missing", MissingStateIndicator())])
+    if plan["add_indicator"]:
+        # The imputer's missing indicator, built on the raw input next to the
+        # representation instead of being fed through the scaler and basis as a
+        # second feature. It keeps SimpleImputer(add_indicator=True)'s semantics
+        # (a column only for features with missing values at fit) and names.
+        indicator = MissingIndicator(error_on_new=False)
+        if is_numerical:
+            missing_branch = indicator
+        else:
+            missing_branch = Pipeline(
+                [("normalize_missing", _CategoricalMissingNormalizer()), ("indicator", indicator)]
+            )
+        return FeatureUnion(
+            [("representation", pipeline), ("missing", missing_branch)],
+            verbose_feature_names_out=False,
+        )
     return pipeline
 
 
