@@ -177,6 +177,28 @@ def test_output_report_shape_and_keys(frame, y):
     assert 0.0 <= report["density"] <= 1.0
 
 
+@pytest.mark.parametrize("return_array", [True, False])
+@pytest.mark.parametrize("output_format", ["dense", "auto"])
+def test_object_output_density_keeps_raw_missing_markers(return_array, output_format):
+    frame = pd.DataFrame({"c": ["a", pd.NA, None, np.nan, 0, False, ""]}, dtype=object)
+    original = frame.copy(deep=True)
+    fitted = Preprocessor(categorical_method="none", missing_policy="propagate", output_format=output_format).fit(frame)
+    assert fitted.output_format_ == "dense"
+
+    transformed = fitted.transform(frame, return_array=return_array)
+    result = transformed if return_array else transformed["cat_c"]
+
+    assert fitted.output_report_["density"] == pytest.approx(3 / 7)
+    assert result[0, 0] == "a"
+    assert result[1, 0] is pd.NA
+    assert result[2, 0] is None
+    assert np.isnan(result[3, 0])
+    assert result[4, 0] == 0
+    assert result[5, 0] is False
+    assert result[6, 0] == ""
+    pd.testing.assert_frame_equal(frame, original)
+
+
 # --- set_output ----------------------------------------------------------------
 
 
@@ -283,6 +305,25 @@ def test_invalid_output_format_raises(frame, y):
 
 
 # --- "auto" is resolved once per fit (issue #73) ----------------------------------
+
+
+@pytest.mark.parametrize("return_array", [True, False])
+def test_auto_object_output_keeps_dense_format_for_low_density_batch(return_array):
+    training = pd.DataFrame({"c": ["a", pd.NA]}, dtype=object)
+    pre = Preprocessor(categorical_method="none", missing_policy="propagate", output_format="auto").fit(training)
+    assert pre.output_format_ == "dense"
+    frame = pd.DataFrame({"c": [pd.NA, None, 0, False, ""]}, dtype=object)
+
+    transformed = pre.transform(frame, return_array=return_array)
+    result = transformed if return_array else transformed["cat_c"]
+
+    assert isinstance(result, np.ndarray)
+    assert pre.output_report_["format"] == "dense"
+    assert pre.output_report_["shape"] == frame.shape
+    assert pre.output_report_["density"] == pytest.approx(1 / 5)
+    assert result[0, 0] is pd.NA
+    assert result[1, 0] is None
+    pd.testing.assert_frame_equal(pd.DataFrame(result, columns=frame.columns), frame)
 
 
 def test_auto_format_is_fixed_at_fit_for_dense_training_output():

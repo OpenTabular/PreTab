@@ -3,6 +3,10 @@
 Missing data is handled explicitly, never silently: a small set of imputation parameters
 covers the common case, and a single `missing_policy` gives finer control when you need it.
 
+Default categorical imputation treats `None`, `pd.NA` and `NaN` consistently. With imputation
+disabled, ordinal encoding maps missing values to `0`, while raw categorical passthrough
+preserves the original markers.
+
 ## Imputation parameters
 
 | Parameter                | Meaning                                                           | Default           |
