@@ -64,7 +64,7 @@ pip install "pretab[polars]"
 ```
 
 ```{note}
-`polars` is only needed for the `set_output(transform="polars")` output path; every other
+`polars` is only needed for polars DataFrame input or the `set_output(transform="polars")` output path; every other
 output (`output_structure="matrix"`/`"blocks"`, `output_format="dense"`/`"sparse"`,
 `set_output(transform="pandas")`) works without it. Requesting `"polars"` output without the
 extra installed raises a clear `OptionalDependencyError`. A `polars.DataFrame` is also accepted

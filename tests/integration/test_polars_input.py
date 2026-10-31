@@ -6,19 +6,27 @@ scikit-learn ``Pipeline`` with ``set_output(transform="polars")`` crashed when i
 handed its polars output to the Preprocessor.
 """
 
+from typing import Protocol, runtime_checkable
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from pretab import Preprocessor
+from pretab.exceptions import DataWarning
 
 pl = pytest.importorskip("polars")
+
+
+@runtime_checkable
+class _NamedFrame(Protocol):
+    columns: pd.Index | list[str]
 
 
 @pytest.fixture
 def frames():
     """The same mixed-type data as a pandas and as a polars frame (Float64, Int64,
-    String and Categorical columns)."""
+    String, Categorical and Boolean columns)."""
     rng = np.random.default_rng(0)
     n = 120
     pandas_frame = pd.DataFrame(
@@ -28,6 +36,7 @@ def frames():
             "rooms": rng.integers(1, 4, n),
             "plan": rng.choice(["basic", "premium"], n),
             "city": rng.choice(["a", "b", "c"], n),
+            "flag": rng.choice([True, False], n),
         }
     )
     polars_frame = pl.DataFrame(
@@ -37,6 +46,7 @@ def frames():
             "rooms": pandas_frame["rooms"].to_numpy(),
             "plan": pandas_frame["plan"].tolist(),
             "city": pandas_frame["city"].tolist(),
+            "flag": pandas_frame["flag"].to_numpy(),
         }
     ).with_columns(pl.col("city").cast(pl.Categorical))
     return pandas_frame, polars_frame, rng.normal(size=n)
@@ -56,8 +66,9 @@ def test_polars_input_matches_pandas_input(frames, params):
     from_polars = Preprocessor(**params).fit(polars_frame, y)
 
     assert from_polars.numerical_features_ == ["income", "visits"]
-    assert from_polars.categorical_features_ == ["rooms", "plan", "city"]
+    assert from_polars.categorical_features_ == ["rooms", "plan", "city", "flag"]
     assert from_polars.categorical_features_ == from_pandas.categorical_features_
+    assert list(from_polars.feature_names_in_) == polars_frame.columns
     np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
 
     expected = np.asarray(from_pandas.transform(pandas_frame))
@@ -79,14 +90,70 @@ def test_polars_input_with_polars_output(frames):
     assert out.shape == (polars_frame.height, pre.total_output_dim_)
 
 
+@pytest.mark.parametrize("output", ["pandas", "polars"])
+def test_polars_input_with_global_dataframe_output(frames, output):
+    from sklearn import config_context
+
+    pandas_frame, polars_frame, y = frames
+    expected = Preprocessor(numerical_method="minmax").fit_transform(pandas_frame, y)
+    with config_context(transform_output=output):
+        pre = Preprocessor(numerical_method="minmax").fit(polars_frame, y)
+        result = pre.transform(polars_frame)
+    assert isinstance(result, pd.DataFrame if output == "pandas" else pl.DataFrame)
+    assert isinstance(result, _NamedFrame)
+    assert list(result.columns) == list(pre.get_feature_names_out())
+    np.testing.assert_array_equal(np.asarray(result), np.asarray(expected))
+
+
+def test_polars_input_round_trips_through_spec(frames):
+    _, polars_frame, y = frames
+    pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot").fit(polars_frame, y)
+    restored = Preprocessor.from_spec(pre.to_spec())
+    np.testing.assert_array_equal(restored.get_feature_names_out(), pre.get_feature_names_out())
+    np.testing.assert_array_equal(restored.transform(polars_frame), pre.transform(polars_frame))
+
+
 def test_polars_nulls_are_missing_values():
-    frame = pl.DataFrame({"x": [1.0, None, 3.0, 4.0] * 10, "city": ["a", None, "b", "a"] * 10})
-    pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot", missing_policy="impute_with_indicator")
+    frame = pl.DataFrame(
+        {
+            "x": [1.0, None, 3.0, 4.0] * 10,
+            "city": ["a", None, "b", "a"] * 10,
+            "flag": [True, None, False, True] * 10,
+        }
+    )
+    original = frame.clone()
+    pre = Preprocessor(
+        numerical_method="minmax",
+        categorical_method="one-hot",
+        missing_policy="impute_with_indicator",
+        output_format="dense",
+    )
     pre.fit(frame)
     names = list(pre.get_feature_names_out())
     # The null is imputed and flagged, not encoded as a "None" category.
     assert any("missingindicator_city" in name for name in names)
     assert not any("None" in name for name in names)
+    output = pre.transform(frame)
+    for column in frame.columns:
+        index = next(i for i, name in enumerate(names) if f"missingindicator_{column}" in name)
+        np.testing.assert_array_equal(np.asarray(output)[:, index], [0, 1, 0, 0] * 10)
+    restored = Preprocessor.from_spec(pre.to_spec())
+    np.testing.assert_array_equal(restored.transform(frame), output)
+    assert frame.equals(original)
+
+
+@pytest.mark.parametrize("dtype", ["Float64", "Utf8", "Boolean"])
+def test_polars_all_null_column_is_retained_like_pandas(dtype):
+    frame = pl.DataFrame({"empty": pl.Series([None] * 8, dtype=getattr(pl, dtype))})
+    pandas_dtype = float if dtype == "Float64" else object
+    expected_frame = pd.DataFrame({"empty": pd.Series([None] * 8, dtype=pandas_dtype)})
+    options = {"numerical_method": "none", "categorical_method": "one-hot", "add_missing_indicator": True}
+    with pytest.warns(DataWarning, match="no observed"):
+        from_polars = Preprocessor(**options).fit(frame)
+    with pytest.warns(DataWarning, match="no observed"):
+        from_pandas = Preprocessor(**options).fit(expected_frame)
+    np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
+    np.testing.assert_array_equal(from_polars.transform(frame), from_pandas.transform(expected_frame))
 
 
 def test_representation_search_on_polars_matches_pandas(frames):

@@ -39,14 +39,21 @@ def polars_to_pandas(X) -> pd.DataFrame:
     while string, categorical and enum columns -- and boolean columns with nulls
     -- become ``object`` columns. Their nulls arrive as ``None`` and are mapped
     to ``NaN``, the missing marker the imputers and missing indicators recognize.
+    Categorical and enum columns are first cast to strings so the native NumPy
+    export also works on older Polars releases.
 
     Convert a frame once and take row subsets of the result: converted on its
     own, a subset can get another dtype (an integer column with a null is float
     as a whole, but int in a subset without the null).
     """
+    polars = sys.modules["polars"]
     columns = {}
     for column in X.get_columns():
+        if column.dtype in (polars.Categorical, polars.Enum):
+            column = column.cast(str)
         values = column.to_numpy()
+        if column.dtype == polars.Boolean and column.null_count() == 0:
+            values = values.astype(bool, copy=False)
         if values.dtype == object:
             values = np.where(pd.isna(values), np.nan, values)
         columns[column.name] = values

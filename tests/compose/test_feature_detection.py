@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab.compose.feature_detection import detect_column_types, to_dataframe
+from pretab.compose.feature_detection import (
+    bool_columns_as_object,
+    detect_column_types,
+    to_dataframe,
+    with_string_labels,
+)
 from pretab.exceptions import InvalidParamError, PretabDataError
 
 
@@ -47,7 +52,10 @@ def test_to_dataframe_converts_polars_frame_with_names_order_and_dtypes():
             "flag_with_null": [True, None, False],
             "city": ["b", "a", None],
         }
-    ).with_columns(pl.col("city").cast(pl.Categorical).alias("city_cat"))
+    ).with_columns(
+        pl.col("city").cast(pl.Categorical).alias("city_cat"),
+        pl.col("city").cast(pl.Enum(["a", "b"])).alias("city_enum"),
+    )
 
     df = to_dataframe(frame)
 
@@ -61,9 +69,11 @@ def test_to_dataframe_converts_polars_frame_with_names_order_and_dtypes():
         "flag_with_null": object,
         "city": object,
         "city_cat": object,
+        "city_enum": object,
     }
     assert df["count"].tolist() == [3, 1, 2]
     assert df["city"].tolist()[:2] == ["b", "a"] and df["city_cat"].tolist()[:2] == ["b", "a"]
+    assert df["city_enum"].tolist()[:2] == ["b", "a"]
     # Polars nulls become NaN, the missing marker pandas and the imputers use.
     assert df.isna().sum().to_dict() == {
         "z_float": 1,
@@ -73,6 +83,7 @@ def test_to_dataframe_converts_polars_frame_with_names_order_and_dtypes():
         "flag_with_null": 1,
         "city": 1,
         "city_cat": 1,
+        "city_enum": 1,
     }
     assert np.isnan(df["city"][2]) and np.isnan(df["flag_with_null"][1])
 
@@ -182,3 +193,28 @@ def test_invalid_cat_cutoff_type_raises():
     df = pd.DataFrame({"x": [1, 2, 3]})
     with pytest.raises(InvalidParamError):
         detect_column_types(df, cat_cutoff="bad", treat_all_integers_as_numerical=False)
+
+
+def test_with_string_labels_relabels_without_touching_the_input():
+    frame = pd.DataFrame({1: [1.0], "b": [2.0]})
+    relabelled = with_string_labels(frame)
+    assert list(relabelled.columns) == ["1", "b"]
+    assert list(frame.columns) == [1, "b"]
+    string_frame = pd.DataFrame({"a": [1.0]})
+    assert with_string_labels(string_frame) is string_frame
+
+
+def test_bool_columns_as_object_casts_only_boolean_columns():
+    frame = pd.DataFrame({"x": [0.5, 1.5], "flag": [True, False], "nullable": pd.array([True, None], dtype="boolean")})
+    cast = bool_columns_as_object(frame)
+    assert cast["x"].dtype == np.float64
+    assert cast["flag"].dtype == object and cast["flag"].tolist() == [True, False]
+    assert cast["nullable"].dtype == object
+    assert cast["nullable"][0] is True and np.isnan(cast["nullable"][1])
+    # The caller's frame keeps its dtypes.
+    assert frame["flag"].dtype == bool and frame["nullable"].dtype == "boolean"
+
+
+def test_bool_columns_as_object_returns_frame_without_bool_columns_unchanged():
+    frame = pd.DataFrame({"x": [0.5, 1.5]})
+    assert bool_columns_as_object(frame) is frame

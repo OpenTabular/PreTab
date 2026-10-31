@@ -52,7 +52,8 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
 
     placement_strategy : {"uniform", "quantile"}, default="uniform"
         Interior-knot placement rule for each marginal dimension. ``"uniform"``
-        spaces knots evenly; ``"quantile"`` uses data quantiles.
+        spaces knots evenly; ``"quantile"`` uses data quantiles, made unique and
+        strictly interior on tied data.
 
         .. note::
            The tensor-product spline is a penalized (difference-penalty) spline
