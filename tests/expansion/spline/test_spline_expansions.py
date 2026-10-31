@@ -3,8 +3,10 @@ import pytest
 
 from pretab.transformers import (
     BSplineTransformer,
+    CubicRegressionSplineTransformer,
     ISplineTransformer,
     MSplineTransformer,
+    NaturalCubicSplineTransformer,
 )
 
 
@@ -116,6 +118,45 @@ def test_mspline_handles_nan():
     assert np.isfinite(Xt).all()
 
 
+@pytest.mark.parametrize("scale", [1.0, 1e-2, 1e-3, 1e-7])
+def test_mspline_basis_integrates_to_one_at_any_feature_scale(scale):
+    """Regression guard for issue #63: absolute clipping thresholds flattened the
+    basis on small-scale features and zeroed it on tiny-range ones."""
+    from scipy.integrate import trapezoid
+
+    X = np.random.default_rng(0).uniform(0, 1, (2000, 1)) * scale
+    transformer = MSplineTransformer(output_dim=8, placement_strategy="uniform").fit(X)
+    grid = np.linspace(X.min(), X.max(), 200_001)
+    integrals = trapezoid(transformer.transform(grid.reshape(-1, 1)), grid, axis=0)
+    np.testing.assert_allclose(integrals, 1.0, atol=1e-3)
+
+
+def test_mspline_basis_is_scale_equivariant():
+    X = np.random.default_rng(0).lognormal(0, 2, (2000, 1))
+    unit = MSplineTransformer(output_dim=8).fit(X).transform(X)
+    scaled = MSplineTransformer(output_dim=8).fit(X * 1e-4).transform(X * 1e-4)
+    # M-spline values scale like 1 / span, so rescaling x by c rescales M by 1 / c.
+    np.testing.assert_allclose(scaled * 1e-4, unit, rtol=1e-8)
+
+
+def test_mspline_basis_is_not_clipped_after_the_preprocessor_scaling():
+    """Tight quantile knots on a skewed feature, after the default min-max scaling to
+    [-1, 1], pushed M-spline peaks above the absolute clip at 1000."""
+    import pandas as pd
+    from scipy.integrate import trapezoid
+
+    from pretab import Preprocessor
+
+    x = np.random.default_rng(0).lognormal(0, 2, 2000)
+    pre = Preprocessor(numerical_method="mspline", target_aware=False, placement_strategy="quantile")
+    pre.fit(pd.DataFrame({"x": x}))
+    grid = np.linspace(x.min(), x.max(), 200_001)
+    basis = np.asarray(pre.transform(pd.DataFrame({"x": grid})))
+    scaled = (grid - x.min()) / (x.max() - x.min()) * 2.0 - 1.0
+    assert basis.max() > 1000.0
+    np.testing.assert_allclose(trapezoid(basis, scaled, axis=0), 1.0, atol=1e-3)
+
+
 def test_ispline_monotonic_increasing():
     X = np.linspace(0, 10, 200).reshape(-1, 1)
     transformer = ISplineTransformer(output_dim=8, include_bias=False)
@@ -154,3 +195,46 @@ def test_spline_penalty_matrix_symmetric(data):
     P = transformer.get_penalty_matrix()
     assert P.shape[0] == P.shape[1]
     assert np.allclose(P, P.T, atol=1e-9)
+
+
+# --- target-aware splines search their own knot window (issue #69) ------------
+
+
+def _step_data(seed=1):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(0, 10, 1000)
+    y = np.where(x > 5.0, 1.0, 0.0) + 0.3 * rng.normal(size=1000)
+    return x.reshape(-1, 1), y
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("output_dim", [5, 6])
+def test_target_aware_bmi_spline_keeps_the_dominant_split(cls, output_dim):
+    """Regression guard for issue #69: selector knots were trimmed by position, so
+    the split where the target changes was routinely discarded."""
+    X, y = _step_data()
+    transformer = cls(output_dim=output_dim, target_aware=True, placement_strategy="cart").fit(X, y)
+    interior = transformer.knots_[0][transformer.degree + 1 : -(transformer.degree + 1)]
+    assert len(interior) == output_dim - transformer.degree - 1
+    assert np.abs(interior - 5.0).min() < 0.1, interior
+
+
+@pytest.mark.parametrize("cls", [CubicRegressionSplineTransformer, NaturalCubicSplineTransformer])
+def test_target_aware_cubic_families_keep_the_dominant_split(cls):
+    X, y = _step_data()
+    knots = cls(output_dim=5, target_aware=True, placement_strategy="cart").fit(X, y).knots_[0]
+    assert np.abs(knots - 5.0).min() < 0.1, knots
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, CubicRegressionSplineTransformer, NaturalCubicSplineTransformer])
+@pytest.mark.parametrize(("low", "high"), [(5, 40), (20, 50)])
+def test_adaptive_spline_width_is_not_capped_at_the_legacy_window(cls, low, high):
+    """The fixed 3-15 selector window capped the width at 15 (14 / 12 for the cubic
+    families), and a window entirely above it collapsed to ``min_output_dim``."""
+    rng = np.random.default_rng(0)
+    x = rng.uniform(0, 10, 3000)
+    y = np.sin(2 * x) * 3 + rng.normal(0, 0.3, 3000)
+    transformer = cls(
+        adaptive=True, min_output_dim=low, max_output_dim=high, target_aware=True, placement_strategy="cart"
+    ).fit(x.reshape(-1, 1), y)
+    assert max(15, low) < transformer.total_output_dim_ <= high
