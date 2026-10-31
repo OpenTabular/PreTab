@@ -55,7 +55,9 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         When ``target_aware=True``, the selector: ``"cart"`` or ``"lightgbm"``.
         When ``target_aware=False``, the spacing: ``"uniform"`` reproduces the
         historical evenly spaced knots, ``"quantile"`` places them at evenly spaced
-        data quantiles.
+        data quantiles. The range endpoints are kept once; on tied data, repeated
+        interior quantiles and quantiles on the boundary are replaced by unique,
+        strictly interior quantile / uniform knots.
 
     task : {"regression", "classification"} or None, default=None
         Task forwarded to the target-aware selector when ``target_aware=True``. ``None`` is
