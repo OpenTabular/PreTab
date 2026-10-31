@@ -68,6 +68,9 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
         If True (with ``target_aware=True``), the per-feature output dimension may
         vary within ``[min_output_dim, max_output_dim]`` instead of being fixed to
         ``output_dim``. When both bounds are set, ``output_dim`` is ignored entirely.
+        A target-aware selector searches exactly this window (the width set by
+        ``output_dim`` when ``adaptive=False``) and keeps its most informative
+        splits.
 
     min_output_dim : int or None, default=None
         Lower bound on the per-feature output dimension in adaptive mode.
