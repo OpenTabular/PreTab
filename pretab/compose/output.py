@@ -23,6 +23,7 @@ __all__ = [
     "compute_output_report",
     "format_output",
     "resolve_embedding_dimensions",
+    "resolve_output_format",
     "to_dataframe_output",
     "validate_embedding_request",
 ]
@@ -63,6 +64,33 @@ def validate_embedding_request(embeddings, *, expected: bool, output_kind: str =
         raise IncompatibleParamsError(_EMBEDDINGS_DICT_ONLY)
 
 
+def _density(array) -> float:
+    """Fraction of non-zero entries in a dense or sparse array (0.0 when empty)."""
+    size = int(np.prod(array.shape, dtype=np.int64))
+    if sp.issparse(array):
+        nonzero = int(array.count_nonzero())
+    elif array.dtype.kind == "O":
+        # pd.NA has no boolean value; count it like NaN without modifying the
+        # raw output or the truthiness of any other object value.
+        nonzero = sum(value is pd.NA or bool(value) for value in array.flat)
+    else:
+        nonzero = int(np.count_nonzero(array))
+    return float(nonzero) / size if size else 0.0
+
+
+def resolve_output_format(array, output_format, *, threshold=_SPARSE_AUTO_THRESHOLD) -> str:
+    """Resolve ``output_format`` to ``"dense"`` or ``"sparse"`` for ``array``.
+
+    ``"auto"`` picks ``"sparse"`` when the density of ``array`` is below
+    ``threshold``. The Preprocessor calls this once at ``fit`` on the training
+    output, so the container is fixed per fit rather than chosen per batch (a
+    sparse single row would break a dense-only downstream estimator).
+    """
+    if output_format == "auto":
+        return "sparse" if _density(array) < threshold else "dense"
+    return output_format
+
+
 def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESHOLD):
     """Resolve the concrete output format and build the memory report.
 
@@ -72,8 +100,9 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
         The stacked output. Sparse inputs are inspected through their shape,
         dtype, and stored values without converting them to a dense array.
     output_format : {"auto", "dense", "sparse"}
-        Requested format. ``"auto"`` picks ``"sparse"`` when the density is below
-        ``threshold``.
+        Requested format. ``"auto"`` picks ``"sparse"`` when the density of this
+        ``array`` is below ``threshold``; pass the format resolved at fit (see
+        :func:`resolve_output_format`) to keep the container stable across calls.
     threshold : float, default=0.3
         Density cut-off for the ``"auto"`` decision.
 
@@ -85,23 +114,9 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
         ``memory_saved_bytes``.
     """
     size = int(np.prod(array.shape, dtype=np.int64))
-    if sp.issparse(array):
-        nonzero = int(array.count_nonzero())
-    elif array.dtype.kind == "O":
-        # pd.NA has no boolean value; count it like NaN without modifying the
-        # raw output or the truthiness of any other object value.
-        nonzero = sum(value is pd.NA or bool(value) for value in array.flat)
-    else:
-        nonzero = int(np.count_nonzero(array))
-    density = float(nonzero) / size if size else 0.0
+    density = _density(array)
     dense_bytes = size * int(array.dtype.itemsize)
-
-    if output_format == "sparse":
-        use_sparse = True
-    elif output_format == "auto":
-        use_sparse = density < threshold
-    else:  # "dense"
-        use_sparse = False
+    use_sparse = resolve_output_format(array, output_format, threshold=threshold) == "sparse"
 
     if use_sparse:
         csr = array.tocsr(copy=False) if sp.issparse(array) else sp.csr_matrix(array)

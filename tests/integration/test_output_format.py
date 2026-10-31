@@ -5,6 +5,8 @@ Covers ``output_format`` (dense/sparse/auto), ``dtype`` casting, the
 wrapping.
 """
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -176,10 +178,12 @@ def test_output_report_shape_and_keys(frame, y):
 
 
 @pytest.mark.parametrize("return_array", [True, False])
-def test_object_output_density_keeps_raw_missing_markers(return_array):
+@pytest.mark.parametrize("output_format", ["dense", "auto"])
+def test_object_output_density_keeps_raw_missing_markers(return_array, output_format):
     frame = pd.DataFrame({"c": ["a", pd.NA, None, np.nan, 0, False, ""]}, dtype=object)
     original = frame.copy(deep=True)
-    fitted = Preprocessor(categorical_method="none", missing_policy="propagate", output_format="dense").fit(frame)
+    fitted = Preprocessor(categorical_method="none", missing_policy="propagate", output_format=output_format).fit(frame)
+    assert fitted.output_format_ == "dense"
 
     transformed = fitted.transform(frame, return_array=return_array)
     result = transformed if return_array else transformed["cat_c"]
@@ -298,3 +302,130 @@ def test_invalid_output_format_raises(frame, y):
 
     with pytest.raises(InvalidParamError):
         _bspline(output_format="nope").fit(frame, y)
+
+
+# --- "auto" is resolved once per fit (issue #73) ----------------------------------
+
+
+@pytest.mark.parametrize("return_array", [True, False])
+def test_auto_object_output_keeps_dense_format_for_low_density_batch(return_array):
+    training = pd.DataFrame({"c": ["a", pd.NA]}, dtype=object)
+    pre = Preprocessor(categorical_method="none", missing_policy="propagate", output_format="auto").fit(training)
+    assert pre.output_format_ == "dense"
+    frame = pd.DataFrame({"c": [pd.NA, None, 0, False, ""]}, dtype=object)
+
+    transformed = pre.transform(frame, return_array=return_array)
+    result = transformed if return_array else transformed["cat_c"]
+
+    assert isinstance(result, np.ndarray)
+    assert pre.output_report_["format"] == "dense"
+    assert pre.output_report_["shape"] == frame.shape
+    assert pre.output_report_["density"] == pytest.approx(1 / 5)
+    assert result[0, 0] is pd.NA
+    assert result[1, 0] is None
+    pd.testing.assert_frame_equal(pd.DataFrame(result, columns=frame.columns), frame)
+
+
+def test_auto_format_is_fixed_at_fit_for_dense_training_output():
+    """Regression guard for issue #73: low-density single rows came back sparse."""
+    from sklearn.datasets import load_diabetes
+
+    X, y = cast("tuple[pd.DataFrame, pd.Series]", load_diabetes(return_X_y=True, as_frame=True))
+    pre = Preprocessor(output_format="auto", random_state=0).fit(X, y)
+    assert pre.output_format_ == "dense"
+    for i in range(len(X)):
+        assert isinstance(pre.transform(X.iloc[[i]]), np.ndarray)
+    # The report still describes each call's own density.
+    pre.transform(X.iloc[[0]])
+    assert pre.output_report_["format"] == "dense"
+    assert pre.output_report_["shape"] == (1, pre.total_output_dim_)
+
+
+def test_auto_format_is_fixed_at_fit_for_sparse_training_output():
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"city": rng.choice([f"c{i}" for i in range(20)], 200)})
+    pre = Preprocessor(categorical_method="one-hot", output_format="auto").fit(frame)
+    assert pre.output_format_ == "sparse"
+    assert sp.issparse(pre.transform(frame.iloc[:1]))
+    assert sp.issparse(pre.transform(frame))
+
+
+def test_auto_sparse_format_remains_sparse_for_a_dense_single_row():
+    frame = pd.DataFrame(np.zeros((40, 3)), columns=pd.Index(["a", "b", "c"]))
+    frame.iloc[0] = [1.0, 2.0, 3.0]
+    pre = Preprocessor(numerical_method="none", output_format="auto").fit(frame)
+    assert pre.output_format_ == "sparse"
+    assert sp.issparse(pre.transform(frame))
+    assert pre.output_report_["density"] == pytest.approx(1.0 / 40)
+    row = pre.transform(frame.iloc[:1])
+    assert isinstance(row, sp.csr_matrix)
+    np.testing.assert_array_equal(row.toarray(), [[1.0, 2.0, 3.0]])
+    assert pre.output_report_["format"] == "sparse"
+    assert pre.output_report_["density"] == 1.0
+
+
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+def test_explicit_formats_are_stored_as_resolved(frame, y, output_format):
+    pre = Preprocessor(numerical_method="minmax", output_format=output_format).fit(frame, y)
+    assert pre.output_format_ == output_format
+
+
+# --- global scikit-learn output config ----------------------------------------------
+
+
+@pytest.fixture
+def mixed_frame():
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=40)
+    a[:4] = np.nan
+    return pd.DataFrame({"a": a, "color": rng.choice(["red", "green", "blue"], 40)}), rng.normal(size=40)
+
+
+@pytest.mark.parametrize("fit_before_config", [False, True])
+@pytest.mark.parametrize("output_format", ["dense", "sparse", "auto"])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"categorical_method": "one-hot"},
+        {"preset": "expanded"},
+        {"feature_preprocessing": {"color": "one-hot"}},
+    ],
+)
+def test_one_hot_works_under_a_global_pandas_output_config(mixed_frame, options, fit_before_config, output_format):
+    """The global transform_output reached the inner sparse OneHotEncoder, which refused it."""
+    import sklearn
+
+    X, y = mixed_frame
+    X = X.set_axis(pd.Index(np.arange(len(X))[::-1] + 100, name="row_id"))
+    pre = Preprocessor(output_format=output_format, **options).fit(X, y)
+    expected_output = pre.transform(X)
+    expected = expected_output.toarray() if isinstance(expected_output, sp.csr_matrix) else np.asarray(expected_output)
+    expected_format = pre.output_format_
+    with sklearn.config_context(transform_output="pandas"):
+        if not fit_before_config:
+            pre = Preprocessor(output_format=output_format, **options).fit(X, y)
+        out = pre.transform(X)
+    assert isinstance(out, pd.DataFrame)
+    assert pre.output_format_ == expected_format
+    assert pre.output_report_["format"] == expected_format
+    pd.testing.assert_index_equal(out.index, X.index)
+    assert list(out.columns) == list(pre.get_feature_names_out())
+    assert set(map(str, out.dtypes)) == {"float64"}
+    np.testing.assert_allclose(out.to_numpy(), expected)
+
+
+@pytest.mark.parametrize("fit_before_config", [False, True])
+def test_global_polars_output_config_is_honoured(mixed_frame, fit_before_config):
+    import sklearn
+
+    pl = pytest.importorskip("polars")
+    X, y = mixed_frame
+    pre = Preprocessor(categorical_method="one-hot").fit(X, y)
+    expected = np.asarray(pre.transform(X))
+    with sklearn.config_context(transform_output="polars"):
+        if not fit_before_config:
+            pre = Preprocessor(categorical_method="one-hot").fit(X, y)
+        out = pre.transform(X)
+    assert isinstance(out, pl.DataFrame)
+    assert out.columns == list(pre.get_feature_names_out())  # type: ignore
+    np.testing.assert_allclose(np.asarray(out), expected)
