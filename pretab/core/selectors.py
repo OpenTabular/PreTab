@@ -15,8 +15,10 @@ Two strategies are provided:
   the optional ``lightgbm`` dependency (``pip install pretab[lightgbm]``).
 
 Both share the :class:`BaseLocationSelector` template, which handles input
-validation, small-sample quantile fallbacks, minimum spacing, and topping up or
-trimming the candidate set to fit within ``[min_count, max_count]``.
+validation, small-sample fallbacks, minimum spacing, and topping up or trimming
+the candidate set to fit within ``[min_count, max_count]``. Fallback and top-up
+locations are distinct and strictly inside the feature's range, also on tied or
+discrete features.
 """
 
 from abc import ABC, abstractmethod
@@ -26,9 +28,14 @@ import numpy as np
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from ..exceptions import IncompatibleParamsError, OptionalDependencyError
-from .knots import quantile_knots, select_knots
+from .knots import quantile_knots, select_knots, uniform_knots
+from .parameters import validate_task
 
 Task = Literal["regression", "classification"]
+
+# Magnitude bound of LightGBM's "split at zero" sentinel threshold (its
+# ``kZeroThreshold`` is 1e-35, reported as the float32 value ~1.0000000180e-35).
+_LIGHTGBM_ZERO_THRESHOLD = 1e-34
 
 
 class BaseLocationSelector(ABC):
@@ -40,9 +47,11 @@ class BaseLocationSelector(ABC):
     candidate set to ``max_count`` using the selector's importance ranking).
 
     The shared :meth:`select` template validates and cleans the inputs, falls
-    back to quantile locations when there are too few samples or no candidates,
-    enforces a minimum spacing, and tops up or trims the result so it lands
-    inside ``[min_count, max_count]``.
+    back to unsupervised locations when there are too few samples or no
+    candidates, enforces a minimum spacing, and tops up or trims the result so it
+    lands inside ``[min_count, max_count]``. Fallback and top-up locations are
+    distinct, strictly interior points: spaced quantile locations first, then
+    uniform ones, so a tied or discrete feature still gets the requested count.
 
     The following attributes are expected to be set by every subclass:
     ``min_location_spacing`` and ``min_samples_floor``.
@@ -68,8 +77,8 @@ class BaseLocationSelector(ABC):
             Input feature values for one feature.
         y : np.ndarray of shape (n_samples,)
             Target values. Required -- these selectors are target aware.
-        task : {"regression", "classification"}, optional
-            Type of prediction task. Defaults to ``"regression"``.
+        task : {"regression", "classification"} or None, default="regression"
+            Type of prediction task. ``None`` is treated as ``"regression"``.
         min_count : int
             Minimum number of locations to return.
         max_count : int
@@ -78,11 +87,19 @@ class BaseLocationSelector(ABC):
         Returns
         -------
         locations : np.ndarray
-            Sorted array of selected locations.
+            Sorted array of between ``min_count`` and ``max_count`` distinct
+            locations strictly inside the range of the non-missing ``x`` values.
+            A feature with a single distinct value has no interior; its value
+            is then repeated ``min_count`` times.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``task`` is not ``"regression"``, ``"classification"`` or ``None``.
         """
         if y is None:
             raise IncompatibleParamsError(f"{type(self).__name__} requires y to select locations.")
-        task = task or "regression"
+        task = validate_task(task, type(self).__name__, allow_none=True) or "regression"
 
         x = np.asarray(x)
         if x.ndim == 1:
@@ -97,11 +114,11 @@ class BaseLocationSelector(ABC):
         y_valid = y[valid_mask]
 
         if len(x_valid) < self.min_samples_floor:
-            return quantile_knots(x_valid, min_count)
+            return np.array(self._supplement([], x_valid, min_count))
 
         points, context = self._ordered_candidates(x_valid, y_valid, task)
         if len(points) == 0:
-            return quantile_knots(x_valid, min_count)
+            return np.array(self._supplement([], x_valid, min_count))
 
         locations = self._enforce_spacing(points, x_valid)
 
@@ -151,22 +168,44 @@ class BaseLocationSelector(ABC):
         return spaced
 
     def _supplement(self, existing: list[float], x: np.ndarray, target_count: int) -> list[float]:
-        """Top up an under-filled location set with quantile locations.
+        """Top up an under-filled location set to ``target_count`` distinct locations.
 
         Keeps every existing (selector-found) location and fills only the
-        shortfall with quantile candidates, rather than truncating the union
-        (which would preferentially drop the largest existing values).
+        shortfall, rather than truncating the union (which would preferentially
+        drop the largest existing values). Candidates lie strictly inside the
+        range of ``x`` and keep ``min_location_spacing`` from every kept location:
+        evenly spread quantile locations first, then uniform ones. On a tied or
+        discrete feature the quantiles collapse onto a few values (often the range
+        boundary), and the uniform candidates still provide distinct interior
+        locations for any feature with a positive range. Only when the requested
+        count is too dense for the spacing are the remaining uniform locations
+        added without it.
         """
         missing = target_count - len(existing)
         if missing <= 0:
             return existing
 
-        existing_set = set(existing)
-        candidates = [c for c in quantile_knots(x, target_count).tolist() if c not in existing_set]
-        combined = sorted(existing_set | set(candidates[:missing]))
-        if len(combined) > target_count:
-            combined = select_knots(np.array(combined), target_count).tolist()
-        return combined
+        x = np.asarray(x, dtype=float).ravel()
+        x_min, x_max = float(x.min()), float(x.max())
+        if x_max <= x_min:
+            # A zero-range feature has no interior; keep the historical repeated
+            # location so the requested count (and output width) still holds.
+            return sorted([*existing, *quantile_knots(x, missing).tolist()])
+
+        min_distance = self.min_location_spacing * (x_max - x_min)
+        kept = sorted(float(location) for location in existing)
+        for candidates in (quantile_knots(x, target_count), uniform_knots(x, target_count)):
+            eligible = []
+            for candidate in np.unique(candidates[(candidates > x_min) & (candidates < x_max)]):
+                if all(abs(candidate - other) >= min_distance for other in (*kept, *eligible)):
+                    eligible.append(float(candidate))
+            kept = sorted(kept + select_knots(np.array(eligible), missing).tolist())
+            missing = target_count - len(kept)
+            if missing <= 0:
+                return kept
+
+        leftovers = np.setdiff1d(uniform_knots(x, target_count), kept)
+        return sorted(kept + select_knots(leftovers, missing).tolist())
 
 
 class CARTLocationSelector(BaseLocationSelector):
@@ -209,20 +248,13 @@ class CARTLocationSelector(BaseLocationSelector):
         self.min_samples_floor = min_samples_split
 
     def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
-        if task == "regression":
-            tree = DecisionTreeRegressor(
-                max_depth=self.max_tree_depth,
-                min_samples_split=self.min_samples_split,
-                min_samples_leaf=self.min_samples_leaf,
-                random_state=self.random_state,
-            )
-        else:
-            tree = DecisionTreeClassifier(
-                max_depth=self.max_tree_depth,
-                min_samples_split=self.min_samples_split,
-                min_samples_leaf=self.min_samples_leaf,
-                random_state=self.random_state,
-            )
+        tree_class = DecisionTreeClassifier if task == "classification" else DecisionTreeRegressor
+        tree = tree_class(
+            max_depth=self.max_tree_depth,
+            min_samples_split=self.min_samples_split,
+            min_samples_leaf=self.min_samples_leaf,
+            random_state=self.random_state,
+        )
 
         tree.fit(x_valid, y_valid)
         importance = self._split_importance(tree, x_valid)
@@ -278,6 +310,12 @@ class LightGBMLocationSelector(BaseLocationSelector):
     split thresholds are ranked by their cumulative gain across all trees. This
     tends to find informative locations that a single tree can miss.
 
+    For ``task="classification"`` the target is label-encoded first, so any class
+    labels work (for example ``{1, 2}`` or strings, as with the CART selector).
+    Two classes are fitted with LightGBM's ``binary`` objective, more with its
+    ``multiclass`` objective; a target with a single class has no split to learn
+    and falls back to unsupervised locations.
+
     Requires the optional ``lightgbm`` dependency, installable with
     ``pip install pretab[lightgbm]``.
 
@@ -329,9 +367,21 @@ class LightGBMLocationSelector(BaseLocationSelector):
     def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         lgb = self._import_lightgbm()
 
+        if task == "regression":
+            objective = {"objective": "regression", "metric": "rmse"}
+        else:
+            # LightGBM needs integer class codes: its binary objective treats every
+            # label > 0 as positive and it cannot read string labels.
+            classes, y_valid = np.unique(y_valid, return_inverse=True)
+            if len(classes) < 2:
+                return [], None
+            if len(classes) == 2:
+                objective = {"objective": "binary", "metric": "binary_logloss"}
+            else:
+                objective = {"objective": "multiclass", "metric": "multi_logloss", "num_class": len(classes)}
+
         params = {
-            "objective": "regression" if task == "regression" else "binary",
-            "metric": "rmse" if task == "regression" else "binary_logloss",
+            **objective,
             "num_leaves": 2**self.max_depth,
             "max_depth": self.max_depth,
             "learning_rate": self.learning_rate,
@@ -361,16 +411,39 @@ class LightGBMLocationSelector(BaseLocationSelector):
 
     def _extract_split_points_with_gains(self, model, x: np.ndarray) -> dict[float, float]:
         """Collect split thresholds and their cumulative gains from a model."""
+        x = np.asarray(x, dtype=float).ravel()
         x_min, x_max = float(x.min()), float(x.max())
         split_importance: dict[float, float] = {}
 
+        # LightGBM reports a split at zero as the sentinel threshold +/-1e-35
+        # rather than as a bin midpoint. Map it to the midpoint between the
+        # values the split separates, the location CART would report.
+        zero_splits = {
+            1.0: self._midpoint(x[x <= 0], x[x > 0]),
+            -1.0: self._midpoint(x[x < 0], x[x >= 0]),
+        }
+
         model_dict = model.dump_model()
         for tree_info in model_dict["tree_info"]:
-            self._traverse_tree(tree_info["tree_structure"], split_importance, x_min, x_max)
+            self._traverse_tree(tree_info["tree_structure"], split_importance, x_min, x_max, zero_splits)
 
         return split_importance
 
-    def _traverse_tree(self, node: dict, split_importance: dict, x_min: float, x_max: float):
+    @staticmethod
+    def _midpoint(left: np.ndarray, right: np.ndarray) -> float | None:
+        """Midpoint between the largest ``left`` and the smallest ``right`` value."""
+        if left.size == 0 or right.size == 0:
+            return None
+        return float((left.max() + right.min()) / 2.0)
+
+    def _traverse_tree(
+        self,
+        node: dict,
+        split_importance: dict,
+        x_min: float,
+        x_max: float,
+        zero_splits: dict[float, float | None] | None = None,
+    ):
         """Recursively accumulate split gains for the single feature."""
         if "split_feature" not in node:
             return
@@ -378,10 +451,12 @@ class LightGBMLocationSelector(BaseLocationSelector):
         if node["split_feature"] == 0:
             threshold = node["threshold"]
             gain = node.get("split_gain", 0.0)
-            if x_min < threshold < x_max:
+            if zero_splits is not None and abs(threshold) <= _LIGHTGBM_ZERO_THRESHOLD:
+                threshold = zero_splits[1.0 if threshold >= 0 else -1.0]
+            if threshold is not None and x_min < threshold < x_max:
                 split_importance[threshold] = split_importance.get(threshold, 0.0) + gain
 
         if "left_child" in node:
-            self._traverse_tree(node["left_child"], split_importance, x_min, x_max)
+            self._traverse_tree(node["left_child"], split_importance, x_min, x_max, zero_splits)
         if "right_child" in node:
-            self._traverse_tree(node["right_child"], split_importance, x_min, x_max)
+            self._traverse_tree(node["right_child"], split_importance, x_min, x_max, zero_splits)
