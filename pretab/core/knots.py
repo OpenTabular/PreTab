@@ -23,6 +23,7 @@ __all__ = [
     "quantile_knots",
     "select_knots",
     "spanning_knots",
+    "supplement_interior_knots",
     "uniform_knots",
 ]
 
@@ -142,3 +143,43 @@ def select_knots(knots: np.ndarray, count: int) -> np.ndarray:
         return knots
     idx = np.linspace(0, len(knots) - 1, count).round().astype(int)
     return knots[idx]
+
+
+def supplement_interior_knots(x: np.ndarray, knots: np.ndarray, count: int) -> np.ndarray:
+    """Return unique knots strictly inside the range of ``x``, topped up to ``count``.
+
+    Knots equal to (or outside) ``min(x)`` / ``max(x)`` and repeated knots give a
+    spline basis function with zero-width support -- a dead column -- so they are
+    dropped first. Every remaining knot is kept; when fewer than ``count`` remain,
+    the shortfall is filled with evenly spread quantile and uniform candidates
+    that are themselves strictly interior and not already present. On heavily tied
+    data the quantile candidates coincide with the tied values (often the range
+    boundary), so the uniform candidates guarantee the top-up for any feature with
+    a positive range. Never down-samples: callers trim an overfull set themselves.
+
+    Parameters
+    ----------
+    x : ndarray
+        Values of a single feature (finite).
+    knots : ndarray
+        Candidate interior knots, e.g. quantile knots or selector locations.
+    count : int
+        Minimum number of interior knots to return.
+
+    Returns
+    -------
+    ndarray
+        Sorted, unique knots strictly inside ``(min(x), max(x))``.
+    """
+    x = np.asarray(x, dtype=float)
+    x_min, x_max = x.min(), x.max()
+    knots = np.asarray(knots, dtype=float)
+    knots = np.unique(knots[(knots > x_min) & (knots < x_max)])
+    missing = count - len(knots)
+    if missing <= 0:
+        return knots
+
+    candidates = np.unique(np.concatenate([quantile_knots(x, count), uniform_knots(x, count)]))
+    candidates = candidates[(candidates > x_min) & (candidates < x_max)]
+    candidates = np.setdiff1d(candidates, knots)
+    return np.unique(np.concatenate([knots, select_knots(candidates, missing)]))

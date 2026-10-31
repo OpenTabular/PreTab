@@ -6,15 +6,58 @@ warning registry de-duplicate it instead of re-firing per transformer per
 ``transform`` -- and so ``n_features_in_`` is recorded consistently.
 """
 
+import sys
 import warnings
 from typing import Literal
 
 import numpy as np
+import pandas as pd
 from sklearn.utils.validation import check_array
 
 from ..exceptions import DataWarning, PretabDataError
 
-__all__ = ["validate_2d_allow_nan"]
+__all__ = ["is_polars_frame", "polars_to_pandas", "validate_2d_allow_nan"]
+
+
+def is_polars_frame(X) -> bool:
+    """Return True if ``X`` is a polars DataFrame, without importing polars.
+
+    A polars object can only exist once polars has been imported, so when the
+    module is absent from ``sys.modules`` ``X`` cannot be a polars frame.
+    """
+    polars = sys.modules.get("polars")
+    return polars is not None and isinstance(X, polars.DataFrame)
+
+
+def polars_to_pandas(X) -> pd.DataFrame:
+    """Convert a polars DataFrame to pandas, keeping column names, order and dtypes.
+
+    ``polars.DataFrame.to_pandas`` requires pyarrow, which neither polars nor
+    PreTab depends on, so each column goes through ``Series.to_numpy`` instead:
+    integer, unsigned, float, boolean and temporal columns keep their NumPy
+    dtype (an integer column with nulls becomes float with NaN, as in pandas),
+    while string, categorical and enum columns -- and boolean columns with nulls
+    -- become ``object`` columns. Their nulls arrive as ``None`` and are mapped
+    to ``NaN``, the missing marker the imputers and missing indicators recognize.
+    Categorical and enum columns are first cast to strings so the native NumPy
+    export also works on older Polars releases.
+
+    Convert a frame once and take row subsets of the result: converted on its
+    own, a subset can get another dtype (an integer column with a null is float
+    as a whole, but int in a subset without the null).
+    """
+    polars = sys.modules["polars"]
+    columns = {}
+    for column in X.get_columns():
+        if column.dtype in (polars.Categorical, polars.Enum):
+            column = column.cast(str)
+        values = column.to_numpy()
+        if column.dtype == polars.Boolean and column.null_count() == 0:
+            values = values.astype(bool, copy=False)
+        if values.dtype == object:
+            values = np.where(pd.isna(values), np.nan, values)
+        columns[column.name] = values
+    return pd.DataFrame(columns)
 
 
 def validate_2d_allow_nan(X, *, allow_nan: bool = True, reset: bool, estimator):
