@@ -169,12 +169,13 @@ def test_round_trip_reproduces_unseen_category_encoding(frame, target):
 
 @pytest.mark.parametrize("categorical_method", ["int", "one-hot"])
 @pytest.mark.parametrize("impute", [True, False])
-def test_round_trip_with_nullable_categorical_missing(categorical_method, impute):
+@pytest.mark.parametrize("add_missing_indicator", [True, False])
+def test_round_trip_with_nullable_categorical_missing(categorical_method, impute, add_missing_indicator):
     frame = pd.DataFrame({"c": ["a", None, "b", "a"]}).convert_dtypes()
     options = {"categorical_method": categorical_method}
     if not impute:
         options["categorical_imputation"] = None
-    fitted = Preprocessor(**options).fit(frame)
+    fitted = Preprocessor(add_missing_indicator=add_missing_indicator, **options).fit(frame)
     original_fingerprint = fitted.fingerprint_
     spec = json.loads(json.dumps(fitted.to_spec()))
     restored = Preprocessor.from_spec(spec)

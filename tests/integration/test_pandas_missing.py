@@ -16,9 +16,14 @@ def _frame():
 
 @pytest.mark.parametrize("categorical_method", ["int", "one-hot"])
 @pytest.mark.parametrize("impute", [True, False])
-def test_nullable_categorical_fit_matches_nan(categorical_method, impute):
+@pytest.mark.parametrize("add_missing_indicator", [True, False])
+def test_nullable_categorical_fit_matches_nan(categorical_method, impute, add_missing_indicator):
     frame = _frame()
-    options: dict[str, Any] = {"numerical_method": "minmax", "categorical_method": categorical_method}
+    options: dict[str, Any] = {
+        "numerical_method": "minmax",
+        "categorical_method": categorical_method,
+        "add_missing_indicator": add_missing_indicator,
+    }
     if not impute:
         options.update(numerical_imputation=None, categorical_imputation=None)
     expected = Preprocessor(**options).fit(frame)
@@ -31,7 +36,15 @@ def test_nullable_categorical_fit_matches_nan(categorical_method, impute):
     )
 
 
-@pytest.mark.parametrize("missing_options", [{}, {"add_missing_indicator": True}, {"missing_policy": "separate_state"}])
+@pytest.mark.parametrize(
+    "missing_options",
+    [
+        {},
+        {"add_missing_indicator": True},
+        {"missing_policy": "impute_with_indicator"},
+        {"missing_policy": "separate_state"},
+    ],
+)
 def test_object_none_imputation_matches_nan(missing_options):
     reference = _frame()
     frame = reference.copy()
@@ -47,7 +60,7 @@ def test_object_none_imputation_matches_nan(missing_options):
 
 
 @pytest.mark.parametrize("categorical_method", ["int", "one-hot"])
-@pytest.mark.parametrize("missing_policy", [None, "propagate", "separate_state"])
+@pytest.mark.parametrize("missing_policy", [None, "propagate", "impute_with_indicator", "separate_state"])
 def test_mixed_categorical_missing_matches_nan(categorical_method, missing_policy):
     frame = pd.DataFrame({"c": ["b", None, "a", pd.NA, np.nan, "a"]}, index=pd.Index([7, 2, 19, 4, 30, 1]))
     original = frame.copy(deep=True)
@@ -61,6 +74,28 @@ def test_mixed_categorical_missing_matches_nan(categorical_method, missing_polic
     np.testing.assert_allclose(
         np.asarray(actual.transform(frame), dtype=float), np.asarray(expected.transform(reference), dtype=float)
     )
+    pd.testing.assert_frame_equal(frame, original)
+
+
+@pytest.mark.parametrize("categorical_method", ["int", "one-hot"])
+@pytest.mark.parametrize(
+    "missing_options", [{"add_missing_indicator": True}, {"missing_policy": "impute_with_indicator"}]
+)
+def test_categorical_indicator_matches_raw_missing_at_transform(categorical_method, missing_options):
+    training = pd.DataFrame({"c": ["a", None, "b", pd.NA, np.nan]}, dtype=object)
+    frame = pd.DataFrame({"c": [pd.NA, None, "b", "unseen", np.nan]}, dtype=object)
+    original = frame.copy(deep=True)
+    fitted = Preprocessor(categorical_method=categorical_method, **missing_options).fit(training)
+    names = fitted.get_feature_names_out().tolist()
+    indicator_name = "cat_c__missingindicator_c"
+    assert names.count(indicator_name) == 1
+
+    transformed = np.asarray(fitted.transform(frame), dtype=float)
+
+    np.testing.assert_array_equal(transformed[:, names.index(indicator_name)], frame["c"].isna().astype(float))
+    assert transformed.shape == (len(frame), len(names))
+    missing = [record.output_feature for record in fitted.get_feature_lineage() if record.family == "missing_state"]
+    assert missing == [indicator_name]
     pd.testing.assert_frame_equal(frame, original)
 
 

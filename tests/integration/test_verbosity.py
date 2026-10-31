@@ -120,12 +120,33 @@ def test_verbose_3_logs_internal_decisions(sample_data, caplog):
     assert "thresholds_" in debug_text or "total_output_dim_" in debug_text
 
 
-def test_verbose_3_logs_internal_decisions_under_the_block_name(caplog):
+@pytest.mark.parametrize("options", [{"add_missing_indicator": True}, {"missing_policy": "separate_state"}])
+def test_verbose_3_logs_internal_decisions_of_missing_state_blocks(sample_data, caplog, options):
+    """These blocks are a FeatureUnion of the representation and the missing
+    indicator; the union itself has no fitted thresholds, so none were logged."""
+    X, y = sample_data
+    caplog.set_level(logging.DEBUG, logger="pretab")
+    Preprocessor(numerical_method="ple", verbose=3, **options).fit(X, y)
+    debug_text = "\n".join(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
+    assert "num_num1.thresholds_" in debug_text
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {},
+        {"add_missing_indicator": True},
+        {"missing_policy": "impute_with_indicator"},
+        {"missing_policy": "separate_state"},
+    ],
+)
+def test_verbose_3_logs_internal_decisions_under_the_block_name(caplog, options):
     """Issue #71: a label that cannot be part of a step name is logged by its block name."""
     rng = np.random.default_rng(0)
     X = pd.DataFrame({"_score": rng.normal(size=60)})
+    X.iloc[0, 0] = np.nan
     caplog.set_level(logging.DEBUG, logger="pretab")
-    Preprocessor(numerical_method="ple", verbose=3).fit(X, rng.normal(size=60))
+    Preprocessor(numerical_method="ple", verbose=3, **options).fit(X, rng.normal(size=60))
     debug_text = "\n".join(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
     assert "num__score.total_output_dim_" in debug_text
     assert "num_col0" not in debug_text
