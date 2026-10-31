@@ -3,6 +3,10 @@
 Missing data is handled explicitly, never silently: a small set of imputation parameters
 covers the common case, and a single `missing_policy` gives finer control when you need it.
 
+Default categorical imputation treats `None`, `pd.NA` and `NaN` consistently. With imputation
+disabled, ordinal encoding maps missing values to `0`, while raw categorical passthrough
+preserves the original markers.
+
 ## Imputation parameters
 
 | Parameter                | Meaning                                                           | Default           |
@@ -21,6 +25,13 @@ pre = Preprocessor(
 )
 ```
 
+With imputation enabled, the indicator (also used by `missing_policy="impute_with_indicator"`)
+is a raw `0`/`1` column computed on the input before imputation and placed next to the
+feature's representation. It is never scaled or expanded by the numerical or categorical
+method, and it is added only for features that had missing values at `fit`.
+For categorical columns, the indicator recognizes `None`, `pd.NA` and `NaN`,
+consistently with imputation.
+
 ```{note}
 Disabling imputation lets `NaN` reach the transformer directly. Scalers, splines, and the
 feature maps (`rbf`, `relu`, `sigmoid`, `tanh`) tolerate it, so an affected row's output is
@@ -34,6 +45,15 @@ routes through the same `__missing` branch `missing_policy="separate_state"` use
 Imputers fit their fill values only on the data passed to `fit`, and reuse those values
 unchanged at `transform`. PreTab never drops a row for missing values: every input row
 produces an output row.
+```
+
+```{note}
+A column with no observed value at `fit` (for example an optional field that is empty in a
+training window or a cross-validation fold) still keeps its block, so the output layout does not
+depend on which rows were seen. The imputers fill it with `0` (or `fill_value` for
+`strategy="constant"`), which makes it a constant column, and `fit` emits a `DataWarning`
+naming it. See [Edge-case behaviour](../representations/choosing_a_method.md) for the methods
+that cannot be fitted on a constant column.
 ```
 
 ## The `missing_policy` control

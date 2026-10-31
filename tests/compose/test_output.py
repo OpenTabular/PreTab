@@ -1,9 +1,16 @@
 """Unit tests for :mod:`pretab.compose.output`."""
 
 import numpy as np
+import pandas as pd
 import pytest
 
-from pretab.compose.output import attach_embeddings, build_output_dict, format_output, resolve_embedding_dimensions
+from pretab.compose.output import (
+    attach_embeddings,
+    build_output_dict,
+    format_output,
+    resolve_embedding_dimensions,
+    to_dataframe_output,
+)
 from pretab.exceptions import IncompatibleParamsError, PretabDataError
 
 
@@ -109,3 +116,11 @@ def test_format_output_rejects_embeddings_with_array_output():
             embeddings=np.ones((2, 3)),
             embeddings_expected=True,
         )
+
+
+def test_to_dataframe_output_pandas_uses_given_index():
+    """Regression guard for issue #60: the pandas container carries the passed row labels."""
+    index = pd.Index([10, 30, 20])
+    out = to_dataframe_output(np.arange(6).reshape(3, 2), ["a", "b"], "pandas", index=index)
+    pd.testing.assert_index_equal(out.index, index)
+    pd.testing.assert_index_equal(to_dataframe_output(np.zeros((3, 2)), ["a", "b"], "pandas").index, pd.RangeIndex(3))
