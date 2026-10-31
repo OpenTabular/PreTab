@@ -87,6 +87,11 @@ PreTab is explicit about degenerate inputs rather than failing silently.
   tensor-product) raise a typed error rather than fitting a meaningless basis. Numeric
   binning falls back to a single bin instead of raising, and PLE and the feature maps place
   all their bins or centers at the same value, a degenerate but still valid basis.
+- **Discrete or heavily tied column**: target-aware PLE and feature maps still get the
+  requested number of distinct bin edges or centers strictly inside the observed range. When
+  the tree finds fewer splits than requested, the shortfall is filled with spaced quantile
+  points and then evenly spaced points, so the output width does not depend on the data (or
+  on the cross-fitting fold).
 - **Out-of-range input at transform**: B/M/I-spline, P-spline, and tensor-product clip
   values beyond the fitted range by default; natural-cubic and cubic-regression extrapolate
   smoothly by default. Pass `policy=RepresentationPolicy(out_of_range=...)` directly to any
