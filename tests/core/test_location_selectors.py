@@ -6,7 +6,7 @@ from pretab.core.selectors import (
     CARTLocationSelector,
     LightGBMLocationSelector,
 )
-from pretab.exceptions import IncompatibleParamsError
+from pretab.exceptions import IncompatibleParamsError, InvalidParamError
 from pretab.placement.adapters import SplinePlacementAdapter
 
 
@@ -43,6 +43,24 @@ def test_cart_requires_y(data):
     X, _ = data
     with pytest.raises(IncompatibleParamsError, match="requires y"):
         CARTLocationSelector().select(X, None, min_count=2, max_count=5)
+
+
+@pytest.mark.parametrize("selector_cls", [CARTLocationSelector, LightGBMLocationSelector])
+@pytest.mark.parametrize("task", ["Regression", "regresion", "", 1])
+@pytest.mark.parametrize("n_samples", [5, 300])
+def test_selectors_reject_an_unknown_task(data, selector_cls, task, n_samples):
+    """Any task other than "regression" used to fall through to a classifier."""
+    X, y = data
+    with pytest.raises(InvalidParamError, match="task"):
+        selector_cls().select(X[:n_samples], y[:n_samples], task=task, min_count=2, max_count=10)
+
+
+def test_cart_task_none_means_regression(data):
+    X, y = data
+    np.testing.assert_array_equal(
+        CARTLocationSelector().select(X, y, task=None, min_count=2, max_count=10),
+        CARTLocationSelector().select(X, y, task="regression", min_count=2, max_count=10),
+    )
 
 
 def test_cart_reproducible(data):
@@ -206,9 +224,10 @@ def test_supplement_fills_dense_requests_beyond_the_spacing():
     assert len(np.unique(result)) == 150
 
 
-def test_small_sample_fallback_on_tied_data_is_distinct_and_interior():
+@pytest.mark.parametrize("task", ["regression", "classification", None])
+def test_small_sample_fallback_on_tied_data_is_distinct_and_interior(task):
     X = np.array([[0.0], [0.0], [0.0], [1.0], [1.0]])
-    locations = CARTLocationSelector().select(X, np.arange(5.0), min_count=3, max_count=3)
+    locations = CARTLocationSelector().select(X, np.arange(5.0), task=task, min_count=3, max_count=3)
     _assert_distinct_interior(locations, X, 3)
 
 

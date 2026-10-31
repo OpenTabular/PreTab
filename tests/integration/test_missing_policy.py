@@ -1,5 +1,7 @@
 """Tests for the high-level ``missing_policy`` orchestration knob (P8.5)."""
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -262,3 +264,108 @@ def test_add_missing_indicator_no_longer_requires_imputation_enabled(frame_with_
     assert out.size > 0
     assert np.isnan(out).any()
     assert p.total_output_dim_ > 0
+
+
+# --- imputer indicator stays outside the representation (issue #62) -----------
+
+
+def _indicator_values(pre, frame, name):
+    names = list(pre.get_feature_names_out())
+    return np.asarray(pre.transform(frame, return_array=True), dtype=float)[:, names.index(name)]
+
+
+@pytest.mark.parametrize("options", [{"add_missing_indicator": True}, {"missing_policy": "impute_with_indicator"}])
+def test_imputer_indicator_is_a_raw_binary_column(frame_with_nan, y, options):
+    """Regression guard for issue #62: the indicator was standardized / expanded
+    by the representation like a second input feature."""
+    pre = Preprocessor(numerical_method="standardization", **options).fit(frame_with_nan, y)
+    values = _indicator_values(pre, frame_with_nan, "num_a__missingindicator_a")
+    np.testing.assert_array_equal(values, frame_with_nan["a"].isna().astype(float))
+
+
+@pytest.mark.parametrize("method", ["bspline", "rbf", "pspline", "fourier", "cubicspline", "polynomial"])
+def test_imputer_indicator_adds_exactly_one_column_per_feature_with_missing(frame_with_nan, y, method):
+    plain = Preprocessor(numerical_method=method, output_dim=5, missing_policy="impute").fit(frame_with_nan, y)
+    pre = Preprocessor(numerical_method=method, output_dim=5, missing_policy="impute_with_indicator").fit(
+        frame_with_nan, y
+    )
+    names = list(pre.get_feature_names_out())
+    indicators = [name for name in names if "missingindicator" in name]
+    assert indicators == ["num_a__missingindicator_a", "num_b__missingindicator_b"]
+    assert [name for name in names if name not in indicators] == list(plain.get_feature_names_out())
+    assert pre.output_dims_ == {key: width + 1 for key, width in plain.output_dims_.items()}
+
+
+@pytest.mark.parametrize("method", ["bspline", "rbf", "pspline", "fourier", "cubicspline"])
+def test_imputer_indicator_lineage_and_feature_info(frame_with_nan, y, method):
+    pre = Preprocessor(numerical_method=method, output_dim=5, add_missing_indicator=True).fit(frame_with_nan, y)
+    lineage = pre.get_feature_lineage()
+    assert [record.output_feature for record in lineage] == list(pre.get_feature_names_out())
+    missing = [record for record in lineage if record.family == "missing_state"]
+    assert [record.output_feature for record in missing] == ["num_a__missingindicator_a", "num_b__missingindicator_b"]
+    numerical, _, _ = pre.get_feature_info(verbose=False)
+    assert {feature: info["dimension"] for feature, info in numerical.items()} == pre.output_dims_
+
+
+def test_imputer_indicator_on_categorical_integer_codes(y):
+    frame = pd.DataFrame({"c": ["x", "y", np.nan, "x", "y", "x"]})
+    pre = Preprocessor(categorical_method="int", add_missing_indicator=True).fit(frame, y)
+    assert list(pre.get_feature_names_out()) == ["cat_c", "cat_c__missingindicator_c"]
+    np.testing.assert_array_equal(_indicator_values(pre, frame, "cat_c__missingindicator_c"), frame["c"].isna())
+
+
+def test_imputer_indicator_only_marks_features_with_missing_values_at_fit(clean_frame, frame_with_nan, y):
+    pre = Preprocessor(numerical_method="minmax", add_missing_indicator=True).fit(clean_frame, y)
+    assert not any("missing" in name for name in pre.get_feature_names_out())
+    assert np.asarray(pre.transform(frame_with_nan, return_array=True)).shape == (6, 2)
+
+
+# --- representation summary of missing-indicator / separate-state blocks --------
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"add_missing_indicator": True},
+        {"missing_policy": "impute_with_indicator"},
+        {"missing_policy": "separate_state"},
+    ],
+)
+def test_missing_state_blocks_report_their_representation(frame_with_nan, y, options):
+    """The spec summary read each block's last step, which for these blocks is the
+    FeatureUnion of the representation and the missing indicator, so to_spec() and
+    reproducibility_report() listed no representation for them."""
+    plain = _bspline(missing_policy="impute").fit(frame_with_nan, y)
+    pre = _bspline(**options).fit(frame_with_nan, y)
+
+    assert pre.reproducibility_report()["representations"] == {"a": "bspline", "b": "bspline"}
+    assert pre.to_spec()["representations"] == plain.to_spec()["representations"]
+
+
+def test_block_with_the_imputer_built_in_indicator_still_loads_and_reports(frame_with_nan, y):
+    """A preprocessor fitted by PreTab 1.0.0 with add_missing_indicator has the
+    imputer's built-in indicator in front of the representation (a pipeline, not
+    a union). Such an object still transforms, round-trips through its spec with
+    the same fingerprint, and lists its representations."""
+    from sklearn.pipeline import Pipeline
+
+    pre = _bspline(add_missing_indicator=True).fit(frame_with_nan, y)
+
+    def legacy_block(transformer, columns):
+        if not isinstance(transformer, Pipeline):
+            transformer = dict(transformer.transformer_list)["representation"]
+        block = clone(transformer)
+        assert isinstance(block, Pipeline)
+        return block.set_params(imputer__add_indicator=True).fit(frame_with_nan[columns], y)
+
+    pre.column_transformer_.transformers_ = [
+        (name, legacy_block(transformer, columns), columns)
+        for name, transformer, columns in pre.column_transformer_.transformers_
+    ]
+    out = np.asarray(pre.transform(frame_with_nan, return_array=True))
+    restored = Preprocessor.from_spec(json.loads(json.dumps(pre.to_spec())))
+
+    assert out.shape == (6, 2 * 2 * 8)  # the old layout expands the indicator too
+    np.testing.assert_array_equal(np.asarray(restored.transform(frame_with_nan, return_array=True)), out)
+    assert restored.fingerprint_ == pre.fingerprint_
+    assert restored.reproducibility_report()["representations"] == {"a": "bspline", "b": "bspline"}
