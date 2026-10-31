@@ -180,6 +180,36 @@ def test_supplement_preserves_high_end_split_end_to_end():
     assert locations.max() > 5.0, f"expected a high-end location to survive supplementing, got {locations}"
 
 
+@pytest.mark.parametrize(
+    "make_target",
+    [
+        pytest.param(lambda x: np.where(x < 0.9, 1, 2), id="labels-1-2"),
+        pytest.param(lambda x: np.digitize(x, [0.1, 0.9]), id="three-classes"),
+        pytest.param(lambda x: np.where(x < 0.9, "no", "yes"), id="string-labels"),
+    ],
+)
+def test_lightgbm_classification_places_a_location_at_the_class_boundary(make_target):
+    """Regression guard for issue #61: the binary objective on raw labels lost the
+    supervision for non-0/1, multiclass and string targets."""
+    pytest.importorskip("lightgbm")
+    x = np.random.default_rng(0).uniform(0, 1, size=1000)
+    locations = LightGBMLocationSelector().select(
+        x.reshape(-1, 1), make_target(x), task="classification", min_count=2, max_count=2
+    )
+    assert np.abs(locations - 0.9).min() < 0.01, locations
+
+
+def test_lightgbm_classification_with_a_single_class_falls_back():
+    """A single-class target has no boundary to learn: the selector falls back to
+    unsupervised locations instead of failing on the (string) labels."""
+    pytest.importorskip("lightgbm")
+    x = np.linspace(0, 1, 200)
+    locations = LightGBMLocationSelector().select(
+        x.reshape(-1, 1), np.full(200, "yes"), task="classification", min_count=2, max_count=2
+    )
+    np.testing.assert_allclose(locations, [1 / 3, 2 / 3])
+
+
 # --- tied / discrete features (issue #57) ------------------------------------
 
 
@@ -193,6 +223,16 @@ def _assert_distinct_interior(locations, X, count):
     assert len(locations) == count
     assert len(np.unique(locations)) == count
     assert locations.min() > X.min() and locations.max() < X.max()
+
+
+@pytest.mark.parametrize("levels", [2, 5])
+def test_lightgbm_single_class_tied_feature_keeps_fixed_width(levels):
+    pytest.importorskip("lightgbm")
+    X, _ = _discrete(levels)
+    locations = LightGBMLocationSelector().select(
+        X, np.full(len(X), "yes"), task="classification", min_count=8, max_count=8
+    )
+    _assert_distinct_interior(locations, X, 8)
 
 
 @pytest.mark.parametrize("selector_cls", [CARTLocationSelector, LightGBMLocationSelector])
@@ -225,9 +265,10 @@ def test_supplement_fills_dense_requests_beyond_the_spacing():
 
 
 @pytest.mark.parametrize("task", ["regression", "classification", None])
-def test_small_sample_fallback_on_tied_data_is_distinct_and_interior(task):
+@pytest.mark.parametrize("selector_cls", [CARTLocationSelector, LightGBMLocationSelector])
+def test_small_sample_fallback_on_tied_data_is_distinct_and_interior(task, selector_cls):
     X = np.array([[0.0], [0.0], [0.0], [1.0], [1.0]])
-    locations = CARTLocationSelector().select(X, np.arange(5.0), task=task, min_count=3, max_count=3)
+    locations = selector_cls().select(X, np.arange(5.0), task=task, min_count=3, max_count=3)
     _assert_distinct_interior(locations, X, 3)
 
 

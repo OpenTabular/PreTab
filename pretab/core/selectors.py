@@ -319,6 +319,12 @@ class LightGBMLocationSelector(BaseLocationSelector):
     split thresholds are ranked by their cumulative gain across all trees. This
     tends to find informative locations that a single tree can miss.
 
+    For ``task="classification"`` the target is label-encoded first, so any class
+    labels work (for example ``{1, 2}`` or strings, as with the CART selector).
+    Two classes are fitted with LightGBM's ``binary`` objective, more with its
+    ``multiclass`` objective; a target with a single class has no split to learn
+    and falls back to unsupervised locations.
+
     Requires the optional ``lightgbm`` dependency, installable with
     ``pip install pretab[lightgbm]``.
 
@@ -370,9 +376,21 @@ class LightGBMLocationSelector(BaseLocationSelector):
     def _ordered_candidates(self, x_valid: np.ndarray, y_valid: np.ndarray, task: Task) -> tuple[list[float], object]:
         lgb = self._import_lightgbm()
 
+        if task == "regression":
+            objective = {"objective": "regression", "metric": "rmse"}
+        else:
+            # LightGBM needs integer class codes: its binary objective treats every
+            # label > 0 as positive and it cannot read string labels.
+            classes, y_valid = np.unique(y_valid, return_inverse=True)
+            if len(classes) < 2:
+                return [], None
+            if len(classes) == 2:
+                objective = {"objective": "binary", "metric": "binary_logloss"}
+            else:
+                objective = {"objective": "multiclass", "metric": "multi_logloss", "num_class": len(classes)}
+
         params = {
-            "objective": "binary" if task == "classification" else "regression",
-            "metric": "binary_logloss" if task == "classification" else "rmse",
+            **objective,
             "num_leaves": 2**self.max_depth,
             "max_depth": self.max_depth,
             "learning_rate": self.learning_rate,
