@@ -94,7 +94,9 @@ Two parameters control the physical layout of the stacked output.
 
 `output_format`
 : One of `"dense"`, `"sparse"`, or `"auto"`. `"auto"` picks sparse when it saves memory (for
-example wide one-hot blocks) and dense otherwise. Default `"dense"`.
+example wide one-hot blocks) and dense otherwise. The choice is made once at `fit`, from the
+training output, and stored in `output_format_`, so every `transform` returns the same container,
+even for a single row. Default `"dense"`.
 
 `dtype`
 : The floating-point precision of the output, for example `numpy.float32` to halve memory.
