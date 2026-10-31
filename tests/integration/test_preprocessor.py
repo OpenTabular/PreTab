@@ -1,8 +1,12 @@
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
 from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
@@ -379,6 +383,54 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
 
 
+# --- input containers (issue #94) -------------------------------------------------
+
+
+def test_a_list_of_rows_is_read_like_an_array():
+    rows = [[1.0, 2.0], [3.0, 5.0], [4.0, 9.0]]
+    pre = Preprocessor(numerical_method="minmax").fit(rows)
+    assert pre.numerical_features_ == ["feature_0", "feature_1"]
+    assert not hasattr(pre, "feature_names_in_")
+    np.testing.assert_allclose(np.asarray(pre.transform(rows)), np.asarray(pre.transform(np.asarray(rows))))
+
+
+def test_a_list_of_rows_is_matched_by_position_after_a_frame_fit(named_numeric):
+    frame, y = named_numeric
+    pre = Preprocessor(numerical_method="minmax").fit(frame, y)
+    with pytest.warns(UserWarning, match="does not have valid feature names"):
+        from_rows = pre.transform(frame.to_numpy().tolist())
+    np.testing.assert_array_equal(from_rows, pre.transform(frame))
+
+
+def test_list_fit_accepts_named_input_and_custom_feature_names(named_numeric):
+    frame, y = named_numeric
+    from_rows = Preprocessor(numerical_method="minmax").fit(frame.to_numpy().tolist(), y)
+    from_frame = Preprocessor(numerical_method="minmax").fit(frame, y)
+    with pytest.warns(UserWarning, match="has feature names"):
+        from_named = from_rows.transform(frame)
+    np.testing.assert_array_equal(from_named, from_frame.transform(frame))
+    np.testing.assert_array_equal(from_rows.get_feature_names_out(frame.columns), from_frame.get_feature_names_out())
+
+
+_needs_polars = pytest.mark.skipif(importlib.util.find_spec("polars") is None, reason="polars is not installed")
+
+
+@pytest.mark.parametrize("container", ["pandas", pytest.param("polars", marks=_needs_polars)])
+def test_pipeline_set_output_hands_frames_to_the_preprocessor(container):
+    """A Pipeline configured with set_output hands its frames (pandas or polars)
+    from one step to the next, so the Preprocessor must accept both."""
+    rng = np.random.default_rng(0)
+    numeric = pd.DataFrame({"income": rng.normal(5e4, 1e4, 120), "visits": rng.integers(0, 1000, 120)})
+    pipe = Pipeline([("impute", SimpleImputer()), ("pretab", Preprocessor(numerical_method="minmax"))])
+    pipe.set_output(transform=container)
+
+    out = pipe.fit_transform(numeric, rng.normal(size=120))
+
+    assert type(out).__module__.split(".")[0] == container
+    assert list(out.columns) == ["num_income", "num_visits"]
+    np.testing.assert_allclose(np.asarray(out), np.asarray(pipe.transform(numeric)))
+
+
 # --- positional input after a named fit (and vice versa) (issue #78) ---------------
 
 
@@ -502,14 +554,16 @@ def test_array_fit_rejects_input_features_of_the_wrong_length(named_numeric):
         pre.get_feature_names_out(["age"])
 
 
-def test_named_fit_records_and_validates_feature_names_in(named_numeric):
+@pytest.mark.parametrize("as_list", [False, True])
+def test_named_fit_records_and_validates_feature_names_in(named_numeric, as_list):
     X, y = named_numeric
     pre = Preprocessor(numerical_method="minmax").fit(X, y)
     assert pre.feature_names_in_.tolist() == ["age", "income"]
     assert pre.get_feature_names_out(["age", "income"]).tolist() == ["num_age", "num_income"]
     with pytest.raises(ValueError, match="not equal to feature_names_in_"):
         pre.get_feature_names_out(["a", "b"])
-    assert not hasattr(pre.fit(X.to_numpy(), y), "feature_names_in_")
+    unnamed = X.to_numpy().tolist() if as_list else X.to_numpy()
+    assert not hasattr(pre.fit(unnamed, y), "feature_names_in_")
 
 
 def test_pipeline_feature_names_propagate_through_an_array_step(named_numeric):

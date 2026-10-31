@@ -51,7 +51,7 @@ example `{"feature_0": "rbf"}`. Check `numerical_features_` / `categorical_featu
 overrides, rather than guessing the column order.
 ```
 
-At `transform`, array columns are matched by position, so the training and serving
+At `transform`, an array or a list of rows is matched by position, so the training and serving
 containers may differ, as in scikit-learn. A `Preprocessor` fitted on a string-labelled
 `DataFrame` accepts the same data as an array of the same width (for example `df.to_numpy()`
 in NumPy-based serving or an explainer such as `shap.KernelExplainer`). It warns that `X`
@@ -63,6 +63,31 @@ labels. After a `DataFrame` fit, subsequent frames are still matched by label, e
 the fitted labels are literally `feature_0`, `feature_1`, .... Input matched by position
 with a different number of columns raises the usual
 `X has 4 features, but Preprocessor is expecting 3 features as input.` error.
+
+## Polars DataFrame input
+
+A `polars.DataFrame` is accepted as input to the `Preprocessor` and `RepresentationSearchCV`
+wherever a pandas `DataFrame` is (temporal columns are not supported), so a scikit-learn
+`Pipeline` configured with `set_output(transform="polars")` can hand its polars output straight
+to the `Preprocessor`. PreTab reads the frame through pandas with the same column names, order
+and dtypes, then detects column types as usual: `Float*` columns are numerical, `Int*` /
+`UInt*` columns follow the integer cardinality rule (an integer column with nulls becomes
+float, as in pandas), and `String` (`Utf8` on older Polars), `Categorical`, `Enum` and `Boolean` columns are
+categorical. Polars nulls become missing values, so imputation and `missing_policy` treat them
+like `NaN` in a pandas frame. The conversion does not need `pyarrow`.
+
+```python
+import polars as pl
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+
+X = pl.DataFrame({"age": [25.0, None, 47.0, 33.0], "income": [3.1e4, 5.2e4, None, 4.4e4]})
+y = [0.0, 1.0, 1.0, 0.0]
+
+pipe = Pipeline([("impute", SimpleImputer()), ("pretab", Preprocessor(numerical_method="minmax"))])
+pipe.set_output(transform="polars")
+pipe.fit_transform(X, y)   # a polars.DataFrame with columns num_age, num_income
+```
 
 ## Per-feature overrides
 

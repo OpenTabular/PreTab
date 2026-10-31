@@ -34,8 +34,8 @@ public, discoverable protocol.
 ## Why PreTab?
 
 - **Familiar interface.** A scikit-learn `fit`/`transform`/`fit_transform` API that drops
-  into existing pipelines and works with both `pandas.DataFrame` and `numpy.ndarray`
-  inputs.
+  into existing pipelines and works with `pandas.DataFrame`, `polars.DataFrame` and
+  `numpy.ndarray` inputs.
 - **Automatic feature handling.** Feature-type detection and per-feature strategies let you
   describe intent once instead of wiring transformers by hand.
 - **Beyond scaling.** Spline bases, neural basis maps, piecewise-linear encoding, and
@@ -80,8 +80,8 @@ print(X.shape)
 # (100, 22)
 ```
 
-> **Note:** PreTab accepts a `pandas.DataFrame` or a `numpy.ndarray` and infers numerical
-> versus categorical columns either way.
+> **Note:** PreTab accepts a `pandas.DataFrame`, a `polars.DataFrame` or a `numpy.ndarray` and
+> infers numerical versus categorical columns either way.
 
 > **Tip:** Swap the global methods for a `feature_preprocessing` map, for example
 > `{"age": "ple", "income": "rbf", "city": "one-hot"}`, and PreTab fits each column with its
