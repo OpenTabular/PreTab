@@ -13,7 +13,7 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
-from ...core.parameters import UNSET, validate_placement
+from ...core.parameters import UNSET, validate_placement, validate_task
 from ...core.supervised import warn_target_leakage
 from ...exceptions import (
     IncompatibleParamsError,
@@ -84,8 +84,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         warn_target_leakage(self, y)
         placement_strategy = self._resolve_placement_strategy()
         validate_placement(self.target_aware, placement_strategy)
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}.")
+        task = validate_task(self.task, type(self).__name__)
         n_centers = self._resolve_param("output_dim", default=6)
         min_req = self._resolve_param("min_output_dim", default=None)
         max_req = self._resolve_param("max_output_dim", default=None)
@@ -105,7 +104,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         adapter = RBFPlacementAdapter(
             target_aware=self.target_aware,
             placement_strategy=placement_strategy,
-            task=self.task,
+            task=task,
             random_state=self.random_state,
         )
         if self.target_aware and self.adaptive:

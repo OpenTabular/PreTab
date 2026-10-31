@@ -58,7 +58,7 @@ def test_sigmoid_invalid_strategy():
 
 
 def test_sigmoid_invalid_task():
-    with pytest.raises(ValueError, match="Invalid task"):
+    with pytest.raises(ValueError, match=r"SigmoidExpansionTransformer\.task = 'nonsense' is invalid"):
         SigmoidExpansionTransformer(task="nonsense").fit(np.random.rand(5, 1))
 
 
