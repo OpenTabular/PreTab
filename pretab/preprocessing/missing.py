@@ -1,7 +1,35 @@
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_is_fitted
+from scipy import sparse as sp
+from sklearn.base import BaseEstimator, OneToOneFeatureMixin, TransformerMixin
+from sklearn.utils.validation import check_array, check_is_fitted, validate_data
+
+
+class _CategoricalMissingNormalizer(OneToOneFeatureMixin, TransformerMixin, BaseEstimator):
+    """Normalize object missing markers without changing numeric or sparse inputs."""
+
+    def fit(self, X, y=None):
+        validate_data(self, X, skip_check_array=True)
+        return self
+
+    def transform(self, X):
+        check_is_fitted(self, "n_features_in_")
+        validate_data(self, X, reset=False, skip_check_array=True)
+        if sp.issparse(X) or (
+            isinstance(X, pd.DataFrame) and all(isinstance(dtype, pd.SparseDtype) for dtype in X.dtypes)
+        ):
+            # Keep pandas sparse columns intact: converting them to scipy sparse
+            # rejects nonzero fill values and changes OneHotEncoder's input contract.
+            return X.copy()
+        values = check_array(X, dtype=None, ensure_all_finite=False, copy=True)  # type: ignore[arg-type]
+        if values.dtype.kind == "O":
+            return np.where(pd.isna(values), np.nan, values)
+        return X.copy() if isinstance(X, pd.DataFrame) else values
+
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()  # type: ignore[attr-defined]
+        tags.input_tags.allow_nan = True
+        return tags
 
 
 class MissingStateIndicator(TransformerMixin, BaseEstimator):
