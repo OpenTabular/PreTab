@@ -51,6 +51,19 @@ example `{"feature_0": "rbf"}`. Check `numerical_features_` / `categorical_featu
 overrides, rather than guessing the column order.
 ```
 
+At `transform`, array columns are matched by position, so the training and serving
+containers may differ, as in scikit-learn. A `Preprocessor` fitted on a string-labelled
+`DataFrame` accepts the same data as an array of the same width (for example `df.to_numpy()`
+in NumPy-based serving or an explainer such as `shap.KernelExplainer`). It warns that `X`
+does not have valid feature names and re-infers the numeric columns of an object array.
+A fit on non-string column labels accepts arrays by position without that warning.
+One fitted on an array accepts a `DataFrame` or dict of the same width the same way,
+with a warning that `X` has feature names when its labels differ from the fitted synthetic
+labels. After a `DataFrame` fit, subsequent frames are still matched by label, even when
+the fitted labels are literally `feature_0`, `feature_1`, .... Input matched by position
+with a different number of columns raises the usual
+`X has 4 features, but Preprocessor is expecting 3 features as input.` error.
+
 ## Per-feature overrides
 
 Columns rarely want identical treatment. The `feature_preprocessing` dict assigns a strategy

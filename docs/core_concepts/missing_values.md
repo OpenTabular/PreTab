@@ -3,6 +3,10 @@
 Missing data is handled explicitly, never silently: a small set of imputation parameters
 covers the common case, and a single `missing_policy` gives finer control when you need it.
 
+Default categorical imputation treats `None`, `pd.NA` and `NaN` consistently. With imputation
+disabled, ordinal encoding maps missing values to `0`, while raw categorical passthrough
+preserves the original markers.
+
 ## Imputation parameters
 
 | Parameter                | Meaning                                                           | Default           |
@@ -20,6 +24,13 @@ pre = Preprocessor(
     add_missing_indicator=True,
 )
 ```
+
+With imputation enabled, the indicator (also used by `missing_policy="impute_with_indicator"`)
+is a raw `0`/`1` column computed on the input before imputation and placed next to the
+feature's representation. It is never scaled or expanded by the numerical or categorical
+method, and it is added only for features that had missing values at `fit`.
+For categorical columns, the indicator recognizes `None`, `pd.NA` and `NaN`,
+consistently with imputation.
 
 ```{note}
 Disabling imputation lets `NaN` reach the transformer directly. Scalers, splines, and the

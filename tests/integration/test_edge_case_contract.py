@@ -297,13 +297,7 @@ def _assert_metadata_matches_output(pre, X, X_later):
     numerical, categorical, _ = pre.get_feature_info(verbose=False)
     assert set(numerical) | set(categorical) == {"age", "city", "empty"}
     info = {**numerical, **categorical}["empty"]
-    # The imputer's own missing indicator (imputation with add_missing_indicator or
-    # "impute_with_indicator") runs through the representation step, and
-    # get_feature_info does not count it for every method; that is a separate
-    # defect, so the dimension is compared only for blocks without it.
-    has_imputer_indicator = any("__missingindicator_" in str(name) for name in pre.get_feature_names_out())
-    if info["dimension"] is not None and not has_imputer_indicator:
-        assert info["dimension"] == pre.output_dims_["empty"]
+    assert info["dimension"] == pre.output_dims_["empty"]
     # Data where the column is observed later is transformed with the fitted width.
     assert pre.transform(X_later, return_array=True).shape == (len(X_later), width)
 
@@ -345,11 +339,12 @@ def test_empty_numerical_column_keeps_its_block(method, target_aware, placement,
 @pytest.mark.parametrize(
     "method", ["bspline", "mspline", "ispline", "pspline", "naturalspline", "cubicspline", "box-cox"]
 )
-def test_empty_numerical_column_names_the_column_when_the_method_needs_spread(method, rng):
-    X = _frame_with_empty_column(rng, "numerical")
+@pytest.mark.parametrize("column", ["empty", 0, None, "_empty"])
+def test_empty_numerical_column_names_the_column_when_the_method_needs_spread(method, column, rng):
+    X = _frame_with_empty_column(rng, "numerical").rename(columns={"empty": column})
     y = rng.normal(size=len(X))
     pre = Preprocessor(numerical_method=method, target_aware=False, placement_strategy="uniform")
-    with pytest.warns(DataWarning), pytest.raises(PretabDataError, match=f"Column 'empty' .* {method!r}") as info:
+    with pytest.warns(DataWarning), pytest.raises(PretabDataError, match=f"Column {column!r} .* {method!r}") as info:
         pre.fit(X, y)
     assert info.value.__cause__ is not None  # chained to the method's own error
 
@@ -398,6 +393,7 @@ def test_empty_numerical_column_under_missing_value_settings(params, rng):
 
 
 @pytest.mark.parametrize("method", ["int", "one-hot", "none"])
+@pytest.mark.parametrize("marker", [None, pd.NA, np.nan], ids=["None", "pd.NA", "NaN"])
 @pytest.mark.parametrize(
     "params",
     [
@@ -410,8 +406,9 @@ def test_empty_numerical_column_under_missing_value_settings(params, rng):
         {"categorical_imputation": "constant"},
     ],
 )
-def test_empty_categorical_column_keeps_its_block(method, params, rng):
+def test_empty_categorical_column_keeps_its_block(method, marker, params, rng):
     X = _frame_with_empty_column(rng, "categorical")
+    X["empty"] = pd.Series([marker] * len(X), dtype=object)
     y = rng.normal(size=len(X))
     pre = Preprocessor(numerical_method="minmax", categorical_method=method, **params)
     _fit_empty(pre, X, y)
