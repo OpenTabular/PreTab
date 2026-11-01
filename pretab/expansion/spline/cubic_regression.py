@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.parameters import UNSET, validate_placement
+from ...core.parameters import UNSET, validate_placement, validate_task
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...core.supervised import warn_target_leakage
 from ...exceptions import InvalidParamError
@@ -54,14 +54,21 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
         When ``target_aware=True``, the selector: ``"cart"`` or ``"lightgbm"``.
         When ``target_aware=False``, the spacing: ``"uniform"`` spaces knots evenly
         across the range, ``"quantile"`` places them at evenly spaced data quantiles.
+        On tied data, repeated quantiles and quantiles on the range boundary are
+        replaced by unique, strictly interior quantile / uniform knots.
 
     task : {"regression", "classification"} or None, default=None
-        Task forwarded to the target-aware selector when ``target_aware=True``.
+        Task forwarded to the target-aware selector when ``target_aware=True``. ``None`` is
+        treated as ``"regression"``; any other value raises
+        :class:`~pretab.exceptions.InvalidParamError` at ``fit``.
 
     adaptive : bool, default=False
         If True (with ``target_aware=True``), the per-feature output dimension may
         vary within ``[min_output_dim, max_output_dim]`` instead of being fixed to
         ``output_dim``. When both bounds are set, ``output_dim`` is ignored entirely.
+        A target-aware selector searches exactly this window (the width set by
+        ``output_dim`` when ``adaptive=False``) and keeps its most informative
+        splits.
 
     min_output_dim : int or None, default=None
         Lower bound on the per-feature output dimension in adaptive mode.
@@ -166,6 +173,7 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
     def fit(self, X, y=None):
         warn_target_leakage(self, y)
         validate_placement(self.target_aware, self.placement_strategy)
+        validate_task(self.task, type(self).__name__, allow_none=True)
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=6)
 

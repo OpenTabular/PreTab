@@ -87,17 +87,35 @@ PreTab is explicit about degenerate inputs rather than failing silently.
   tensor-product) raise a typed error rather than fitting a meaningless basis. Numeric
   binning falls back to a single bin instead of raising, and PLE and the feature maps place
   all their bins or centers at the same value, a degenerate but still valid basis.
+- **Discrete or heavily tied column**: target-aware PLE and feature maps still get the
+  requested number of distinct bin edges or centers strictly inside the observed range. When
+  the tree finds fewer splits than requested, the shortfall is filled with spaced quantile
+  points and then evenly spaced points, so the output width does not depend on the data (or
+  on the cross-fitting fold).
 - **Out-of-range input at transform**: B/M/I-spline, P-spline, and tensor-product clip
   values beyond the fitted range by default; natural-cubic and cubic-regression extrapolate
   smoothly by default. Pass `policy=RepresentationPolicy(out_of_range=...)` directly to any
   of these transformers to override its default with `"clip"`, `"warn"`, or `"error"`
-  instead. This is standalone-transformer-only for now, not yet available through
+  instead, or with `"extrapolate"` for the clipping families: `"extrapolate"` and `"warn"`
+  evaluate an out-of-range value on the extended boundary polynomial pieces of the basis (an
+  I-spline stays at 0 below and 1 above the range). A mapping such as
+  `{"constant": "warn"}` changes only the axes it names and keeps the family's other
+  defaults. This is standalone-transformer-only for now, not yet available through
   `Preprocessor`.
 - **Unseen category**: `ContinuousOrdinalTransformer` (`"int"`) maps an unseen category to a
   reserved code rather than raising; one-hot encoding (`"one-hot"`) instead emits an all-zero
   row for it.
 - **NaN into a finite-only method**: raises a typed error unless imputation is configured. See
   [Missing values](../core_concepts/missing_values.md).
+- **Column with no observed value at fit** (missing on every row, e.g. an optional field that is
+  empty in a training window or a cross-validation fold): `Preprocessor` keeps the column's
+  block and emits a `DataWarning` naming it. The imputers fill it with `0` (or `fill_value`
+  for `strategy="constant"`), so it is fitted as a constant column; a method that cannot be
+  fitted on a constant column (the splines above, or Box-Cox) raises a typed error naming the
+  column. With imputation disabled the column stays missing: the scalers, `"quantile"` and
+  `"none"` keep its block as missing values, and every other method raises the same typed
+  error. `policy={"constant": "error"}` rejects an empty numerical column like any other
+  constant one.
 
 ## Non-goals
 

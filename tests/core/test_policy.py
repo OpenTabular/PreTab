@@ -14,6 +14,8 @@ knot range in the same sense (a kernel evaluated at any point) and is out of sco
 this pass.
 """
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -125,3 +127,63 @@ def test_policy_dict_is_accepted():
     transformer = BSplineTransformer(output_dim=8, policy={"out_of_range": "error"}).fit(X)
     with pytest.raises(PretabDataError):
         transformer.transform(np.array([[20.0]]))
+
+
+# --- partial overrides and the "extrapolate" / "warn" reactions ---------------------
+
+_CLIP_FAMILIES = [
+    (BSplineTransformer, {"output_dim": 6}),
+    (MSplineTransformer, {"output_dim": 6}),
+    (ISplineTransformer, {"output_dim": 6}),
+    (PSplineTransformer, {}),
+]
+
+
+@pytest.mark.parametrize(("cls", "kwargs"), _CLIP_FAMILIES)
+def test_partial_policy_mapping_keeps_the_family_out_of_range_default(cls, kwargs):
+    """A mapping naming only "constant" used to reset out_of_range to the dataclass
+    default "extrapolate", silently turning the clip families' out-of-range rows to zero."""
+    X = np.linspace(0, 1, 50).reshape(-1, 1)
+    probe = np.array([[1.05], [-0.05]])
+    default = cls(**kwargs).fit(X).transform(probe)
+    partial = cls(policy={"constant": "warn"}, **kwargs).fit(X).transform(probe)
+    np.testing.assert_array_equal(partial, default)
+
+
+def test_tensorproduct_partial_policy_mapping_keeps_clipping():
+    X = np.random.default_rng(0).uniform(0, 1, (200, 2))
+    probe = np.array([[1.05, 0.5]])
+    default = TensorProductSplineTransformer().fit(X).transform(probe)
+    partial = TensorProductSplineTransformer(policy={"constant": "warn"}).fit(X).transform(probe)
+    np.testing.assert_array_equal(partial, default)
+
+
+def test_policy_mapping_with_an_unknown_axis_is_rejected():
+    from pretab.exceptions import InvalidParamError
+
+    with pytest.raises(InvalidParamError):
+        BSplineTransformer(policy={"missing": "error"}).fit(np.linspace(0, 1, 50).reshape(-1, 1)).transform([[0.5]])
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, PSplineTransformer])
+@pytest.mark.parametrize("reaction", ["extrapolate", "warn"])
+def test_extrapolated_bspline_rows_are_not_zeroed(cls, reaction):
+    """Out-of-range rows were all zero under "extrapolate" / "warn": the basis is zero
+    outside the knot span. They now extend the boundary pieces, a partition of unity."""
+    X = np.linspace(0, 1, 50).reshape(-1, 1)
+    transformer = cls(policy=RepresentationPolicy(out_of_range=reaction)).fit(X)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DataWarning)
+        out = transformer.transform(np.array([[1.05], [-0.05], [0.5]]))
+    np.testing.assert_allclose(out.sum(axis=1), 1.0)
+    clipped = cls().fit(X).transform(np.array([[0.5]]))
+    np.testing.assert_array_equal(out[2], clipped[0])  # in-range rows are unchanged
+
+
+def test_extrapolated_mspline_and_tensor_rows_are_not_zeroed():
+    policy = RepresentationPolicy(out_of_range="extrapolate")
+    X = np.linspace(0, 1, 50).reshape(-1, 1)
+    assert (MSplineTransformer(output_dim=6, policy=policy).fit(X).transform([[1.05]]).sum() > 0).all()
+    X2 = np.random.default_rng(0).uniform(0, 1, (200, 2))
+    tensor = TensorProductSplineTransformer(policy=policy).fit(X2)
+    np.testing.assert_allclose(tensor.transform([[1.05, 0.5]]).sum(), 1.0)
