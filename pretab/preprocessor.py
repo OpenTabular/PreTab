@@ -30,6 +30,7 @@ from .compose.inspection import (
     build_transformer_summary,
     feature_names_out,
     get_output_slices,
+    refit_block_representation,
     representation_leaf,
 )
 from .compose.output import (
@@ -1118,16 +1119,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return int(n_rows * n_cols * self._output_itemsize())
 
     def _cross_fit_fold(self, X, y):
-        """Return a copy of this fit whose target-aware blocks are refit on ``(X, y)``.
+        """Return a copy of this fit whose target-aware representations are refit on ``(X, y)``.
 
         Used by :class:`~pretab.CrossFittedTransformer` for its out-of-fold
-        features. Only the blocks that consume the target are refit on the fold;
-        column types and target-free blocks, including their category vocabularies, are shared
-        with this all-data fit, so an out-of-fold row is encoded exactly like
+        features. Only the representations that consume the target are refit on
+        the fold. Column types, target-free blocks and their vocabularies, and
+        preprocessing before the representation (imputers and scalers) are
+        shared with this all-data fit. Missing-indicator branches are shared too.
+        An out-of-fold row is encoded exactly like
         ``transform`` encodes it, except that no target-aware placement has seen
         that row's target. Refitting the whole preprocessor per fold would
         re-detect column types and relearn categories on fewer rows, shifting
-        integer codes and one-hot columns between the folds and ``transform``.
+        integer codes and one-hot columns between the folds and ``transform``;
+        refitting a block's missing indicator would drop its column on a fold
+        without missing values.
         """
         check_is_fitted(self)
         # Each block sees the fold rows exactly as the internal ColumnTransformer
@@ -1138,8 +1143,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         for name, transformer, columns in self.column_transformer_.transformers_:
             fold_transformer = transformer
             if name != "remainder" and block_uses_target(transformer):
-                fold_transformer = cast(TransformerLike, clone(transformer))
-                fold_transformer.fit(X_ct[list(columns)], y)
+                fold_transformer = refit_block_representation(transformer, X_ct[list(columns)], y)
                 span = self.column_transformer_.output_indices_[name]
                 expected_width = span.stop - span.start
                 width = len(fold_transformer.get_feature_names_out(list(columns)))
@@ -1147,7 +1151,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                     raise IncompatibleParamsError(
                         f"Cross-fitting requires a fixed output width for block {block_name(name, columns)!r}; "
                         f"expected {expected_width}, got {width}. The block's width depends on the training rows; "
-                        "use a fixed-width representation and stable missing-indicator columns."
+                        "configure the representation to produce the same columns on every fold."
                     )
             column_transformer.transformers_.append((name, fold_transformer, columns))
         fold = copy.copy(self)

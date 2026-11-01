@@ -125,12 +125,14 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     transformer : estimator
         A supervised (target-aware) PreTab transformer to cross-fit, or an
         estimator such as a :class:`~pretab.Preprocessor` or ``Pipeline`` built
-        from them. For a :class:`~pretab.Preprocessor`, only its target-aware blocks are refit per
-        fold: column types and the blocks that do not use ``y``, including their
-        category vocabularies, come from the all-data fit, so their out-of-fold features use exactly the
-        encoding of :meth:`transform`. Any other estimator is cloned and refit
+        from them. For a :class:`~pretab.Preprocessor`, only its target-aware
+        representations and subsequent steps are refit per fold. Column types,
+        target-free blocks and their vocabularies, imputers, scalers before the
+        representation and missing-indicator branches come from the all-data fit.
+        Target-free feature values match :meth:`transform`; target-aware values
+        exclude the held-out targets. Any other estimator is cloned and refit
         from scratch on each fold. A pandas DataFrame ``X`` is passed through
-        unchanged (each fold is a row subset), so column names, dtypes and index labels are preserved. Polars
+        unchanged (each fold is a row subset), preserving column names, dtypes and index labels. Polars
         DataFrames are converted once to pandas before selecting fold rows.
     n_folds : int, default=5
         Number of cross-fitting folds. Must be at least 2.
@@ -227,8 +229,9 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
                     raise IncompatibleParamsError(
                         "Cross-fitting requires a fixed output width across folds; expected "
                         f"{width}, got {fold_out.shape[1]}. The wrapped transformer's width "
-                        "depends on the training rows (e.g. adaptive sizing); fix it, for "
-                        "example by disabling adaptive sizing."
+                        "depends on the rows it is fit on (e.g. adaptive sizing, or category / "
+                        "indicator columns learned from the data); configure it to produce the "
+                        "same columns on every fold."
                     )
                 out[test_idx] = fold_out
         finally:

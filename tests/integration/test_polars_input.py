@@ -251,3 +251,32 @@ def test_cross_fitting_converts_a_polars_frame_once(frames_with_one_null_integer
     np.testing.assert_allclose(from_polars.transform(polars_frame), from_pandas.transform(pandas_frame))
     np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
     assert from_polars.get_representation_spec().input_features == ("x", "kids")
+
+
+@pytest.mark.parametrize("method", ["ple", "bspline", "rbf"])
+@pytest.mark.parametrize("policy", ["impute_with_indicator", "separate_state"])
+def test_cross_fitting_keeps_single_missing_value_indicators_for_polars(method, policy):
+    from pretab import CrossFittedTransformer
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=200)
+    X[7] = np.nan
+    pandas_frame = pd.DataFrame({"x": X})
+    polars_frame = pl.DataFrame({"x": [None if np.isnan(value) else float(value) for value in X]})
+    y = rng.normal(size=len(X))
+
+    def cross_fit(frame):
+        wrapped = CrossFittedTransformer(
+            Preprocessor(numerical_method=method, missing_policy=policy, output_format="dense", random_state=0),
+            n_folds=5,
+            random_state=0,
+        )
+        return wrapped, wrapped.fit_transform(frame, y)
+
+    reference, expected = cross_fit(pandas_frame)
+    wrapped, actual = cross_fit(polars_frame)
+    assert actual.shape == wrapped.transform(polars_frame).shape == (len(X), 8)
+    np.testing.assert_allclose(actual, expected)
+    np.testing.assert_array_equal(actual[:, -1], np.isnan(X).astype(float))
+    np.testing.assert_array_equal(wrapped.get_feature_names_out(), reference.get_feature_names_out())
+    assert polars_frame.null_count()["x"][0] == 1

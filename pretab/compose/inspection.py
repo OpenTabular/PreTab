@@ -8,11 +8,13 @@ collects per-feature preprocessing / dimension / category metadata, and
 """
 
 import copy
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+from sklearn.base import clone
 from sklearn.pipeline import FeatureUnion, Pipeline
 
+from ..core._typing import TransformerLike
 from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
 from .registry import TRANSFORMER_REGISTRY
@@ -28,6 +30,7 @@ __all__ = [
     "clean_feature_names",
     "feature_names_out",
     "get_output_slices",
+    "refit_block_representation",
     "representation_leaf",
 ]
 
@@ -364,20 +367,25 @@ _STEP_FAMILY = {
 }
 
 
-def _resolve_block_representation(pipeline, columns):
-    """Return ``(family, component, uses_target, is_interaction)`` for a block.
+def _locate_block_representation(pipeline, columns):
+    """Return ``(step_index, (family, component, uses_target, is_interaction))`` for a block.
 
     The representation-bearing step is the last pipeline step exposing a
     ``get_representation_spec`` (a PreTab transformer), a known scikit-learn
     step name, or a registered method that consumes the target; helper steps
     such as imputers and float casts are skipped. ``columns`` names the spec's
-    inputs; with None the step names its own.
+    inputs; with None the step names its own. ``step_index`` is that step's
+    position in ``pipeline.steps`` (0 for a bare transformer), or None when the
+    block has no representation step. Known scikit-learn names are a fallback:
+    trailing scalers must not hide a representation's declared target use.
     """
     steps = pipeline.steps if hasattr(pipeline, "steps") else [("_", pipeline)]
-    for step_name, transformer in reversed(steps):
+    legacy_step = None
+    for index in reversed(range(len(steps))):
+        step_name, transformer = steps[index]
         if hasattr(transformer, "get_representation_spec"):
             spec = transformer.get_representation_spec(input_features=None if columns is None else list(columns))
-            return spec.family, spec.component_kind, spec.uses_target, spec.is_interaction
+            return index, (spec.family, spec.component_kind, spec.uses_target, spec.is_interaction)
         registered = TRANSFORMER_REGISTRY.get(step_name)
         if (
             registered is not None
@@ -389,11 +397,16 @@ def _resolve_block_representation(pipeline, columns):
             # cross-fitting refits it per fold instead of reusing the all-data fit.
             uses_target = registered.target_usage == "required" or bool(getattr(transformer, "target_aware", False))
             component = "category" if registered.is_categorical else "basis"
-            return step_name, component, uses_target, registered.is_multivariate
-        if step_name in _STEP_FAMILY:
+            return index, (step_name, component, uses_target, registered.is_multivariate)
+        if step_name in _STEP_FAMILY and legacy_step is None:
             family, component = _STEP_FAMILY[step_name]
-            return family, component, False, False
-    return "passthrough", "raw", False, False
+            legacy_step = index, (family, component, False, False)
+    return legacy_step if legacy_step is not None else (None, ("passthrough", "raw", False, False))
+
+
+def _resolve_block_representation(pipeline, columns):
+    """Return ``(family, component, uses_target, is_interaction)`` for a block."""
+    return _locate_block_representation(pipeline, columns)[1]
 
 
 def block_uses_target(transformer) -> bool:
@@ -406,6 +419,38 @@ def block_uses_target(transformer) -> bool:
     separate_state = _separate_state_branches(transformer)
     representation = separate_state[0] if separate_state is not None else transformer
     return bool(_resolve_block_representation(representation, None)[2])
+
+
+def refit_block_representation(transformer, X, y) -> TransformerLike:
+    """Return a copy of a fitted per-column block whose representation is refit on ``(X, y)``.
+
+    Only the representation step and the steps after it are refit. The steps
+    before it (the imputer with its missing indicator, scalers) never use the
+    target, so they are kept from the all-data fit and transform ``X`` for the
+    refit: a ``SimpleImputer(add_indicator=True)`` refit on rows without missing
+    values would drop its indicator column and so change the block's width. For
+    a separate-state union the missing branch is kept as well. The fitted
+    ``transformer`` itself is left untouched.
+    """
+    separate_state = _separate_state_branches(transformer)
+    if separate_state is not None:
+        representation = refit_block_representation(separate_state[0], X, y)
+        union = copy.copy(transformer)
+        union.transformer_list = [
+            (name, representation if name == "representation" else branch)
+            for name, branch in transformer.transformer_list
+        ]
+        return union
+    index = _locate_block_representation(transformer, None)[0]
+    if not isinstance(transformer, Pipeline) or index is None or index == 0:
+        refit = cast(TransformerLike, clone(transformer))
+        refit.fit(X, y)
+        return refit
+    refit = cast(Pipeline, clone(transformer[index:]))
+    refit.fit(transformer[:index].transform(X), y)
+    block = copy.copy(transformer)
+    block.steps = [*transformer.steps[:index], *refit.steps]
+    return cast(TransformerLike, block)
 
 
 def _passthrough_source(columns, offset, feature_names_in):

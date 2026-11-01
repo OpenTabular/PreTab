@@ -80,14 +80,16 @@ held-out fold, so every training row is transformed by a model that never saw it
 the training data, since there is no leakage risk there.
 
 A wrapped `Preprocessor` is not refit from scratch on each fold: every fold reuses its all-data
-fit and refits only the blocks whose representations use `y`. Column types and the blocks that
-do not use `y`, including their category vocabularies, are shared. Their out-of-fold values match `transform` exactly;
+fit and refits only the target-aware representations and subsequent pipeline steps. Column
+types, target-free blocks and their category vocabularies, imputers, scalers before the
+representation, and missing-indicator branches are shared. Target-free values match `transform` exactly;
 target-aware values can differ because they exclude the held-out targets.
 
-The entire target-aware block is currently refit, including its imputer and missing-indicator
-branch. Each refitted block must retain its all-data output width. If adaptive sizing or
-fold-specific missing-indicator columns change that width, cross-fitting raises an error
-instead of mixing incompatible feature layouts.
+Missing indicators stay as raw columns next to the representation; they are not expanded into
+basis functions and do not disappear when a fold's training rows contain no missing values.
+Each refitted block must still retain its all-data output width. If a representation's
+data-dependent sizing changes that width, cross-fitting raises an error instead of mixing
+incompatible feature layouts.
 
 ```python
 import numpy as np

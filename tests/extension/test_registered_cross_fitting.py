@@ -12,11 +12,14 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.model_selection import KFold
-from sklearn.preprocessing import TargetEncoder
+from sklearn.base import BaseEstimator, TransformerMixin, clone
+from sklearn.impute import MissingIndicator, SimpleImputer
+from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.pipeline import FeatureUnion, Pipeline
+from sklearn.preprocessing import MinMaxScaler, TargetEncoder
 
 from pretab import CrossFittedTransformer, Preprocessor, register_representation
+from pretab.compose.inspection import block_uses_target, refit_block_representation
 from pretab.exceptions import IncompatibleParamsError
 
 
@@ -90,6 +93,27 @@ def test_registered_target_encoder_is_refit_per_fold(noise_target_data, cls, sup
     # all-data fit correlated at about 0.5.
     assert abs(np.corrcoef(out_of_fold[:, -1], y)[0, 1]) < 0.2
     assert lineage["cat_id"] is True
+
+
+def test_registered_target_encoder_keeps_its_missing_indicator():
+    """The registered encoder is refit on the imputed value; its raw indicator stays alongside it."""
+    rng = np.random.default_rng(0)
+    X = rng.choice(["a", "b", "c"], (200, 1)).astype(object)
+    X[7, 0] = np.nan
+    y = rng.normal(size=200)
+    register_representation("registered_encoder", TargetEncoder, feature_kind="categorical", supervision="supervised")
+    pre = Preprocessor(
+        categorical_method="registered_encoder", add_missing_indicator=True, output_format="dense", random_state=0
+    )
+
+    cross_fitted = CrossFittedTransformer(pre, n_folds=5, random_state=0)
+    out = cross_fitted.fit_transform(X, y)
+    full = cross_fitted.transform(X)
+
+    assert list(cross_fitted.get_feature_names_out()) == ["cat_feature_0", "cat_feature_0__missingindicator_feature_0"]
+    assert out.shape == full.shape == (200, 2)
+    assert not np.allclose(out, full)  # refit on every fold
+    np.testing.assert_array_equal(out[:, 1], pd.isna(X[:, 0]).astype(float))
 
 
 @pytest.mark.parametrize("target_aware", [False, True])
@@ -177,3 +201,119 @@ def test_opposite_block_width_changes_are_rejected_even_when_total_width_is_fixe
     # Full-data widths are (2, 2); fold widths (3, 1) keep the same total but move the feature boundary.
     with pytest.raises(IncompatibleParamsError, match=r"block 'num_a'.*expected 2, got 3"):
         cross_fitted.fit_transform(X, y)
+
+
+@pytest.mark.parametrize("leading_helpers", [False, True])
+@pytest.mark.parametrize("trailing_scaler", ["none", "suffix", "scaler"])
+@pytest.mark.parametrize("missing_union", [False, True])
+def test_refit_representation_shares_only_the_prefix_and_missing_branch(
+    leading_helpers, trailing_scaler, missing_union
+):
+    register_representation("pipeline_mean", _MeanEncoder, feature_kind="numerical", supervision="optional")
+    X = pd.DataFrame({"x": np.repeat(np.arange(20, dtype=float), 10)})
+    y = np.random.default_rng(0).normal(size=len(X))
+    steps = []
+    if leading_helpers:
+        X.loc[7, "x"] = np.nan
+        steps.extend([("imputer", SimpleImputer()), ("scale", MinMaxScaler())])
+    prefix_length = len(steps)
+    steps.append(("pipeline_mean", _MeanEncoder()))
+    if trailing_scaler != "none":
+        steps.append((trailing_scaler, MinMaxScaler()))
+    pipeline = Pipeline(steps)
+    fitted = (
+        FeatureUnion([("representation", pipeline), ("missing", MissingIndicator(features="all"))])
+        if missing_union
+        else pipeline
+    ).fit(X, y)
+    assert block_uses_target(fitted)
+    original = fitted.transform(X).copy()
+    original_input = X.copy(deep=True)
+    train, held_out = X.iloc[40:], X.iloc[:40]
+    refitted = refit_block_representation(fitted, train, y[40:])
+    assert refitted is not fitted
+    if missing_union:
+        assert isinstance(fitted, FeatureUnion)
+        assert isinstance(refitted, FeatureUnion)
+        old_branches = dict(fitted.transformer_list)
+        new_branches = dict(refitted.transformer_list)
+        assert new_branches["missing"] is old_branches["missing"]
+        new_pipeline = new_branches["representation"]
+        np.testing.assert_array_equal(refitted.transform(held_out)[:, -1], pd.isna(held_out["x"]).astype(float))
+    else:
+        new_pipeline = refitted
+    assert isinstance(new_pipeline, Pipeline)
+    for index, (_, step) in enumerate(pipeline.steps):
+        assert (new_pipeline.steps[index][1] is step) is (index < prefix_length)
+
+    prefix = pipeline[:prefix_length] if prefix_length else None
+    prepared_train = prefix.transform(train) if prefix is not None else train
+    prepared_test = prefix.transform(held_out) if prefix is not None else held_out
+    expected = clone(pipeline[prefix_length:])
+    assert isinstance(expected, Pipeline)
+    expected.fit(prepared_train, y[40:])
+    np.testing.assert_allclose(new_pipeline.transform(held_out), expected.transform(prepared_test))
+    np.testing.assert_array_equal(fitted.transform(X), original)
+    pd.testing.assert_frame_equal(X, original_input)
+    pd.testing.assert_frame_equal(train, original_input.iloc[40:])
+
+
+def test_refit_a_bare_encoder_does_not_change_its_all_data_fit(noise_target_data):
+    X, y = noise_target_data
+    values = X[["id"]]
+    fitted = _MeanEncoder().fit(values, y)
+    original = fitted.transform(values).copy()
+    refitted = refit_block_representation(fitted, values.iloc[80:], y[80:])
+    assert isinstance(refitted, _MeanEncoder)
+    assert refitted is not fitted
+    expected = _MeanEncoder().fit(values.iloc[80:], y[80:]).transform(values.iloc[:80])
+    np.testing.assert_array_equal(refitted.transform(values.iloc[:80]), expected)
+    np.testing.assert_array_equal(fitted.transform(values), original)
+
+
+@pytest.mark.parametrize("target_kind", ["continuous", "binary", "multiclass"])
+def test_named_boolean_target_encoder_keeps_its_indicator_and_excludes_held_out_targets(target_kind):
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"flag": rng.choice([True, False], size=200).astype(object)}, index=np.arange(200) + 1000)
+    X.iloc[7, 0] = np.nan
+    original = X.copy(deep=True)
+    if target_kind == "continuous":
+        y = rng.normal(size=len(X))
+        task = "regression"
+        splitter = KFold(5, shuffle=True, random_state=0)
+    else:
+        classes = np.array(["A", "B"] if target_kind == "binary" else ["A", "B", "C"])
+        y = classes[np.arange(len(X)) % len(classes)]
+        task = "classification"
+        splitter = StratifiedKFold(5, shuffle=True, random_state=0)
+    register_representation("registered_encoder", TargetEncoder, feature_kind="categorical", supervision="supervised")
+    cross_fitted = CrossFittedTransformer(
+        Preprocessor(
+            categorical_method="registered_encoder",
+            add_missing_indicator=True,
+            output_format="dense",
+            task=task,
+            random_state=0,
+        ),
+        n_folds=5,
+        task=task,
+        random_state=0,
+    )
+    out = cross_fitted.fit_transform(X, y)
+    width = 3 if target_kind == "multiclass" else 1
+    assert out.shape == cross_fitted.transform(X).shape == (len(X), width + 1)
+    fitted = cross_fitted.estimator_
+    assert isinstance(fitted, Preprocessor)
+    branches = dict(fitted.column_transformer_.named_transformers_["cat_flag"].transformer_list)
+    pipeline = branches["representation"]
+    prepared = pipeline[:-1].transform(X)
+    expected = np.empty((len(X), width))
+    for train_idx, test_idx in splitter.split(X, y):
+        encoder = clone(pipeline[-1])
+        assert isinstance(encoder, TargetEncoder)
+        encoder.fit(prepared[train_idx], y[train_idx])
+        expected[test_idx] = encoder.transform(prepared[test_idx])
+    np.testing.assert_allclose(out[:, :width], expected)
+    np.testing.assert_array_equal(out[:, -1], pd.isna(X["flag"]).astype(float))
+    assert [item.uses_target for item in fitted.get_feature_lineage()] == [True] * width + [False]
+    pd.testing.assert_frame_equal(X, original)
