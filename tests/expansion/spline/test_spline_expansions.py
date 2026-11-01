@@ -244,6 +244,62 @@ def test_spline_penalty_matrix_symmetric(data):
     assert np.allclose(P, P.T, atol=1e-9)
 
 
+# --- explicit knot_locations ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("knots", [[5.0], [2.0, 4.0, 6.0, 8.0], list(np.linspace(1, 9, 12))])
+def test_knot_locations_set_the_width_regardless_of_output_dim(cls, knots):
+    """knot_locations raised unless its length matched the default output_dim, although
+    the docstring says output_dim is ignored when knots are given."""
+    X = np.linspace(0, 10, 50).reshape(-1, 1)
+    transformer = cls(knot_locations=knots).fit(X)
+    np.testing.assert_allclose(transformer.knots_[0][4:-4], knots)
+    assert transformer.transform(X).shape == (50, len(knots) + 4)
+
+
+@pytest.mark.parametrize(
+    ("knots", "min_output_dim", "max_output_dim"),
+    [([2.0, 4.0, 6.0, 8.0], 5, 6), ([5.0], 7, 8)],
+    ids=["not-trimmed", "not-padded"],
+)
+def test_knot_locations_are_kept_in_adaptive_mode(knots, min_output_dim, max_output_dim):
+    X = np.linspace(0, 10, 50).reshape(-1, 1)
+    transformer = BSplineTransformer(
+        knot_locations=np.array(knots), adaptive=True, min_output_dim=min_output_dim, max_output_dim=max_output_dim
+    )
+    np.testing.assert_array_equal(transformer.fit(X).knots_[0][4:-4], knots)
+
+
+def test_knot_locations_outside_the_range_are_dropped_with_a_warning():
+    from pretab.exceptions import DataWarning
+
+    X = np.linspace(0, 10, 50).reshape(-1, 1)
+    with pytest.warns(DataWarning, match=r"\[-5\.0, 15\.0\] lie outside"):
+        transformer = BSplineTransformer(knot_locations=np.array([-5.0, 3.0, 3.0, 15.0])).fit(X)
+    np.testing.assert_array_equal(transformer.knots_[0][4:-4], [3.0])
+
+
+def test_knot_locations_on_the_boundary_are_dropped_instead_of_giving_a_dead_column():
+    """A knot on the boundary was kept and repeated the boundary knot, so one basis
+    function had zero-width support and was zero on all of the training data."""
+    from pretab.exceptions import DataWarning
+
+    X = np.linspace(0, 10, 50).reshape(-1, 1)
+    with pytest.warns(DataWarning, match=r"\[0\.0\] lie outside"):
+        transformer = BSplineTransformer(knot_locations=np.array([0.0, 5.0])).fit(X)
+    np.testing.assert_array_equal(transformer.knots_[0][4:-4], [5.0])
+    assert (transformer.transform(X).max(axis=0) > 0).all()
+
+
+@pytest.mark.parametrize("knots", [[[1.0, 2.0]], ["a"], [np.nan], [np.inf], [-np.inf], 5.0])
+def test_invalid_knot_locations_raise_a_typed_error(knots):
+    from pretab.exceptions import InvalidParamError
+
+    with pytest.raises(InvalidParamError, match="knot_locations"):
+        BSplineTransformer(knot_locations=knots).fit(np.linspace(0, 10, 50).reshape(-1, 1))
+
+
 # --- y is only read by the target-aware selector -------------------------------------
 
 
@@ -343,3 +399,98 @@ def test_adaptive_spline_width_is_not_capped_at_the_legacy_window(cls, low, high
         adaptive=True, min_output_dim=low, max_output_dim=high, target_aware=True, placement_strategy="cart"
     ).fit(x.reshape(-1, 1), y)
     assert max(15, low) < transformer.total_output_dim_ <= high
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"output_dim": 1},
+        {"output_dim": 100},
+        {"adaptive": True, "output_dim": 1, "min_output_dim": 100, "max_output_dim": 1},
+    ],
+)
+def test_explicit_knots_ignore_output_dim_and_adaptive_range_checks(cls, params):
+    X = np.linspace(0, 10, 50).reshape(-1, 1)
+    transformer = cls(knot_locations=[2.0, 4.0, 6.0, 8.0], **params).fit(X)
+    assert transformer.transform(X).shape == (50, 8)
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("placement_strategy", ["cart", "lightgbm"])
+def test_explicit_knots_fit_in_a_multi_output_pipeline_without_a_selector(cls, placement_strategy):
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+
+    X = np.linspace(0, 10, 200).reshape(-1, 1)
+    y = np.column_stack([np.sin(X[:, 0]), np.cos(X[:, 0])])
+    transformer = cls(
+        knot_locations=np.array([2.0, 4.0, 6.0, 8.0]),
+        output_dim=1,
+        target_aware=True,
+        placement_strategy=placement_strategy,
+    )
+    pipe = make_pipeline(transformer, Ridge()).fit(X, y)
+    assert pipe.predict(X).shape == (200, 2)
+    assert pipe.named_steps["ridge"].n_features_in_ == 8
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("degree", [1, 3])
+@pytest.mark.parametrize("knots", [[], [8.0, 2.0, 5.0, 5.0], list(np.linspace(1, 9, 60))])
+def test_explicit_knots_are_sorted_merged_and_never_refilled_or_capped(cls, degree, knots):
+    X = np.linspace(0, 10, 201).reshape(-1, 1)
+    requested = np.asarray(knots)
+    original = requested.copy()
+    expected = np.unique(requested)
+    transformer = cls(knot_locations=requested, degree=degree).fit(X)
+    boundary = degree + 1
+
+    np.testing.assert_array_equal(transformer.knots_[0][boundary:-boundary], expected)
+    assert transformer.transform(X).shape == (201, len(expected) + boundary)
+    np.testing.assert_array_equal(requested, original)
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("degree", [1, 3])
+@pytest.mark.parametrize("include_bias", [False, True])
+def test_explicit_knots_size_metadata_penalties_and_missing_blocks_per_feature(cls, degree, include_bias):
+    import pickle
+
+    from pretab.exceptions import DataWarning
+
+    X = np.column_stack([np.linspace(0, 10, 201), np.linspace(2, 8, 201), np.linspace(20, 30, 201)])
+    requested = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 4.0]
+    with pytest.warns(DataWarning) as caught:
+        transformer = cls(knot_locations=requested, degree=degree, include_bias=include_bias).fit(X)
+    assert len(caught) == 3
+    np.testing.assert_array_equal(transformer.n_knots_, [4, 2, 0])
+    sizes = [count + degree + 1 + int(include_bias) for count in [4, 2, 0]]
+    out = transformer.transform(X)
+    assert out.shape == (201, sum(sizes))
+    assert np.isfinite(out).all()
+    assert transformer.get_n_features_out() == sum(sizes)
+    spec = transformer.get_representation_spec(["a", "b", "c"])
+    assert spec.output_dim == sum(sizes)
+    assert spec.output_features == tuple(transformer.get_feature_names_out(["a", "b", "c"]))
+    restored = pickle.loads(pickle.dumps(transformer))  # noqa: S301 - only locally generated test data
+    np.testing.assert_array_equal(restored.transform(X), out)
+
+    probe = X.copy()
+    probe[7, 1] = np.nan
+    probe[9, 0] = np.nan
+    missing_out = transformer.transform(probe)
+    offset = 0
+    for i, size in enumerate(sizes):
+        basis = slice(offset + int(include_bias), offset + size)
+        assert (out[:, basis].max(axis=0) > 0).all()
+        missing = np.isnan(probe[:, i])
+        assert np.isnan(missing_out[missing, basis]).all()
+        np.testing.assert_array_equal(missing_out[~missing, basis], out[~missing, basis])
+        penalty = transformer.get_penalty_matrix(feature_index=i)
+        assert penalty.shape == (size, size)
+        np.testing.assert_array_equal(penalty, penalty.T)
+        if include_bias:
+            np.testing.assert_array_equal(missing_out[:, offset], 1.0)
+            np.testing.assert_array_equal(penalty[0], 0.0)
+        offset += size
