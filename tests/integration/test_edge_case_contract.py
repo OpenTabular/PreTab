@@ -84,9 +84,10 @@ CONSTANT_GRACEFUL = [
 ALL_FAMILIES = CONSTANT_RAISES + CONSTANT_GRACEFUL
 
 # Families that let missing values pass through the basis (NaN in -> NaN row out).
-# The B/M/I splines instead clip a missing value to the fitted boundary, so they
-# are intentionally excluded here.
 NAN_PROPAGATING = [
+    "BSpline",
+    "MSpline",
+    "ISpline",
     "RBF",
     "ReLU",
     "Sigmoid",
