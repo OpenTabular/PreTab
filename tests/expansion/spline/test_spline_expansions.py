@@ -244,6 +244,64 @@ def test_spline_penalty_matrix_symmetric(data):
     assert np.allclose(P, P.T, atol=1e-9)
 
 
+# --- y is only read by the target-aware selector -------------------------------------
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"placement_strategy": "uniform"},
+        {"target_aware": True, "placement_strategy": "cart", "knot_locations": [-0.5, 0.5]},
+    ],
+)
+def test_unsupervised_bmi_spline_ignores_a_multi_output_target(cls, params):
+    """The target was flattened and masked even when no selector used it, so a 2-D y
+    of n rows (2n values) raised an IndexError in fit."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(200, 2))
+    X[3, 0] = np.nan
+    Y = np.column_stack([np.sin(X[:, 0]), np.cos(X[:, 1])])
+    reference = cls(**params).fit(X)
+    fitted = cls(**params).fit(X, Y)
+    for knots, expected in zip(fitted.knots_, reference.knots_, strict=True):
+        np.testing.assert_array_equal(knots, expected)
+    np.testing.assert_array_equal(fitted.transform(X), reference.transform(X))
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("params", [{}, {"placement_strategy": "uniform"}])
+def test_unsupervised_bmi_spline_never_reads_y(cls, params):
+    X = np.linspace(0.0, 1.0, 50).reshape(-1, 1)
+    X[3, 0] = np.nan
+    reference = cls(**params).fit(X)
+    fitted = cls(**params).fit(X, np.zeros(10))  # a y that cannot be row-aligned with X
+    np.testing.assert_array_equal(fitted.knots_[0], reference.knots_[0])
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+def test_bmi_spline_fits_in_a_multi_output_pipeline(cls):
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(200, 1))
+    Y = np.column_stack([np.sin(X[:, 0]), np.cos(X[:, 0])])
+    assert make_pipeline(cls(), Ridge()).fit(X, Y).predict(X).shape == (200, 2)
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+def test_target_aware_bmi_spline_accepts_a_column_vector_target(cls):
+    rng = np.random.default_rng(1)
+    X = rng.uniform(0, 10, (1000, 1))
+    y = np.where(X[:, 0] > 5.0, 1.0, 0.0) + 0.3 * rng.normal(size=1000)
+    X[::50, 0] = np.nan
+    flat = cls(output_dim=6, target_aware=True, placement_strategy="cart").fit(X, y)
+    column = cls(output_dim=6, target_aware=True, placement_strategy="cart").fit(X, y.reshape(-1, 1))
+    np.testing.assert_array_equal(column.knots_[0], flat.knots_[0])
+
+
 # --- target-aware splines search their own knot window (issue #69) ------------
 
 

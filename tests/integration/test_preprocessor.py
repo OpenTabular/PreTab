@@ -383,6 +383,67 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
 
 
+@pytest.mark.parametrize("method", ["bspline", "mspline", "ispline", "pspline", "naturalspline", "rbf"])
+def test_unsupervised_numerical_method_accepts_a_multi_output_target(method):
+    """The B/M/I splines flattened y even when target_aware=False, so a 2-D target
+    raised an IndexError in fit while the other methods ignored it."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+    options = {"numerical_method": method, "target_aware": False, "placement_strategy": "uniform"}
+    reference = Preprocessor(**options).fit(frame).transform(frame)
+    np.testing.assert_array_equal(Preprocessor(**options).fit(frame, Y).transform(frame), reference)
+
+
+@pytest.mark.parametrize("method", ["bspline", "mspline", "ispline"])
+def test_multi_output_pipeline_imputes_before_unsupervised_spline(method):
+    from sklearn.linear_model import Ridge
+
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    targets = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+    frame.iloc[::10, 0] = np.nan
+    pipeline = Pipeline(
+        [
+            ("pre", Preprocessor(numerical_method=method, target_aware=False, placement_strategy="uniform")),
+            ("model", Ridge()),
+        ]
+    ).fit(frame, targets)
+    predictions = pipeline.predict(frame)
+    assert predictions.shape == targets.shape
+    assert np.isfinite(predictions).all()
+    assert np.isfinite(pipeline.named_steps["pre"].transform(frame)).all()
+
+
+@pytest.mark.parametrize("method", ["bspline", "naturalspline", "rbf", "ple"])
+def test_target_aware_numerical_method_rejects_a_multi_output_target(method):
+    """Target-aware placement fits one model on one target. A 2-D target was
+    flattened into twice as many values and failed with an unrelated IndexError /
+    broadcasting error; it now raises a clear error pointing to target_aware=False."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+
+    with pytest.raises(IncompatibleParamsError, match=r"single target, but y has shape \(200, 2\)"):
+        Preprocessor(numerical_method=method).fit(frame, Y)
+    # A column vector is a single target.
+    Preprocessor(numerical_method=method).fit(frame, Y[:, :1])
+
+
+@pytest.mark.parametrize(
+    "options", [{}, {"preset": "standard", "task": "regression"}], ids=["default-ple", "regression-preset-bspline"]
+)
+def test_preprocessor_defaults_reject_a_multi_output_target(options):
+    """The default method (PLE) reported "X and y must have same length" and the
+    regression preset (target-aware B-splines) an IndexError for a 2-D target."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+
+    with pytest.raises(IncompatibleParamsError, match=r"single target, but y has shape \(200, 2\)"):
+        Preprocessor(**options).fit(frame, Y)
+
+
 # --- input containers (issue #94) -------------------------------------------------
 
 
