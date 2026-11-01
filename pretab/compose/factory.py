@@ -10,14 +10,15 @@ all taken from :data:`~pretab.compose.registry.TRANSFORMER_REGISTRY`.
 
 import warnings
 
+import numpy as np
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
+from sklearn.impute import MissingIndicator, SimpleImputer
 from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
 from ..preprocessing.floats import ToFloatTransformer
-from ..preprocessing.missing import MissingStateIndicator
+from ..preprocessing.missing import MissingStateIndicator, _CategoricalMissingNormalizer
 from .config import PreprocessorConfig
 from .registry import (
     CATEGORICAL_ALIASES,
@@ -49,9 +50,35 @@ _BMI_SPLINE_METHODS = frozenset({"bspline", "mspline", "ispline"})
 _KNOT_SPLINE_METHODS = _BMI_SPLINE_METHODS | frozenset({"cubicspline", "naturalspline"})
 
 
+class _PositiveMinMaxScaler(MinMaxScaler):
+    """MinMaxScaler whose output is floored at ``feature_range[0]``.
+
+    Rescales into ``(1e-3, 1)`` ahead of Box-Cox, which requires strictly
+    positive input. Fitted on the training data, a plain MinMaxScaler maps an
+    unseen value below the training minimum to ``<= 0``; flooring only the lower
+    end makes such values transform like the training minimum while every other
+    output (including values above the training maximum) is unchanged.
+    """
+
+    def transform(self, X):
+        return np.maximum(super().transform(X), self.feature_range[0])
+
+
 def _filter_kwargs(allowed, kwargs):
     """Keep only the ``allowed`` keyword arguments that are present in ``kwargs``."""
     return {key: kwargs[key] for key in allowed if key in kwargs}
+
+
+def _imputer(strategy, add_indicator, imputer_kwargs):
+    """Build the leading :class:`~sklearn.impute.SimpleImputer` of a per-column pipeline.
+
+    A column with no observed value at fit is kept (``keep_empty_features=True``)
+    and filled with ``0``, or with ``fill_value`` for ``strategy="constant"``.
+    scikit-learn's default drops it, which leaves the rest of the pipeline an
+    input without columns: the block then fails to fit or vanishes from the output.
+    """
+    imputer_kwargs = {"keep_empty_features": True, **(imputer_kwargs or {})}
+    return SimpleImputer(strategy=strategy, add_indicator=add_indicator, **imputer_kwargs)
 
 
 def _clamp_spline_basis(output_dim):
@@ -117,10 +144,7 @@ def get_numerical_transformer_steps(
     steps = []
 
     if add_imputer:
-        imputer_kwargs = imputer_kwargs or {}
-        steps.append(
-            ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
-        )
+        steps.append(("imputer", _imputer(imputer_strategy, add_missing_indicator, imputer_kwargs)))
 
     # Optional scaling step, added only when it is not already the chosen method.
     scalers = {
@@ -155,7 +179,7 @@ def get_numerical_transformer_steps(
     placement = _placement_kwargs(spec, kwargs)
 
     if method == "box-cox":
-        steps.append(("scale_positive", MinMaxScaler(feature_range=(1e-3, 1))))
+        steps.append(("scale_positive", _PositiveMinMaxScaler(feature_range=(1e-3, 1))))
         steps.append(("boxcox", cls(method="box-cox", **filtered)))
     elif method == "yeo-johnson":
         steps.append(("yeojohnson", cls(method="yeo-johnson", **filtered)))
@@ -195,9 +219,9 @@ def get_categorical_transformer_steps(
 
     if add_imputer:
         imputer_kwargs = imputer_kwargs or {}
-        steps.append(
-            ("imputer", SimpleImputer(strategy=imputer_strategy, add_indicator=add_missing_indicator, **imputer_kwargs))
-        )
+        if "missing_values" not in imputer_kwargs:
+            steps.append(("normalize_missing", _CategoricalMissingNormalizer()))
+        steps.append(("imputer", _imputer(imputer_strategy, add_missing_indicator, imputer_kwargs)))
 
     if method not in CATEGORICAL_METHODS:
         raise invalid_param_error(
@@ -217,6 +241,17 @@ def get_categorical_transformer_steps(
         # Default to ignoring unseen categories so transform never crashes on
         # categories absent at fit time; callers can override via kwargs.
         onehot_kwargs = {"handle_unknown": "ignore", **kwargs}
+        categories = onehot_kwargs.get("categories", "auto")
+        drop = onehot_kwargs.get("drop")
+        if (
+            not add_imputer
+            and isinstance(categories, str)
+            and categories == "auto"
+            and (drop is None or isinstance(drop, str))
+        ):
+            # Explicit categories and dropped values keep sklearn's marker and
+            # numeric validation contracts; normalize only automatic encoding.
+            steps.append(("normalize_missing", _CategoricalMissingNormalizer()))
         steps.append(("onehot", cls(**onehot_kwargs)))
         steps.append(("to_float", ToFloatTransformer()))
     elif method == "pretrained":
@@ -264,7 +299,6 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             target_aware=config.target_aware,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
-            add_missing_indicator=plan["add_indicator"],
             output_dim=config.output_dim,
             adaptive=config.adaptive,
             min_output_dim=config.min_output_dim if config.adaptive else None,
@@ -294,7 +328,6 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             method,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
-            add_missing_indicator=plan["add_indicator"],
             **constructor_kwargs,
         )
 
@@ -303,7 +336,48 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
         # Emit a dedicated ``__missing`` column (built on the raw input) alongside
         # the imputed representation, so the indicator never enters the basis.
         return FeatureUnion([("representation", pipeline), ("missing", MissingStateIndicator())])
+    if plan["add_indicator"]:
+        # The imputer's missing indicator, built on the raw input next to the
+        # representation instead of being fed through the scaler and basis as a
+        # second feature. It keeps SimpleImputer(add_indicator=True)'s semantics
+        # (a column only for features with missing values at fit) and names.
+        indicator = MissingIndicator(error_on_new=False)
+        if is_numerical:
+            missing_branch = indicator
+        else:
+            missing_branch = Pipeline(
+                [("normalize_missing", _CategoricalMissingNormalizer()), ("indicator", indicator)]
+            )
+        return FeatureUnion(
+            [("representation", pipeline), ("missing", missing_branch)],
+            verbose_feature_names_out=False,
+        )
     return pipeline
+
+
+def _step_names(blocks) -> list[str]:
+    """Return one valid, unique ColumnTransformer step name per ``(kind, feature)`` block.
+
+    A step is named ``f"{kind}_{feature}"`` whenever scikit-learn accepts that
+    name. A label that would put scikit-learn's ``__`` parameter separator into it
+    (one starting with ``_`` or containing ``__``) gets a positional
+    ``f"{kind}_col{i}"`` name instead, made unique against every other step. The
+    public block / feature names never use these internal names: they are derived
+    from the step's kind and its column label (see :mod:`pretab.compose.inspection`).
+    """
+    natural = [f"{kind}_{feature}" for kind, feature in blocks]
+    taken = {name for name in natural if "__" not in name}
+    names = []
+    for position, name in enumerate(natural):
+        if "__" in name:
+            kind = blocks[position][0]
+            name, suffix = f"{kind}_col{position}", 0
+            while name in taken:
+                suffix += 1
+                name = f"{kind}_col{position}_{suffix}"
+            taken.add(name)
+        names.append(name)
+    return names
 
 
 def build_column_transformer(
@@ -315,19 +389,23 @@ def build_column_transformer(
 ) -> ColumnTransformer:
     """Assemble the per-column pipelines into the final ColumnTransformer.
 
-    Numerical features are prefixed ``num_`` and categorical features ``cat_`` to
-    match the transformer names the Preprocessor exposes; untransformed columns
-    pass through via ``remainder="passthrough"``.
+    Numerical steps are prefixed ``num_`` and categorical steps ``cat_`` to match
+    the block names the Preprocessor exposes (see :func:`_step_names` for labels
+    that cannot be embedded in a step name); untransformed columns pass through via
+    ``remainder="passthrough"``. Each step selects its column by
+    the label's string form: scikit-learn reads an integer selector as a
+    *position*, so the Preprocessor fits and transforms the ColumnTransformer on a
+    frame whose labels are strings (see
+    :func:`~pretab.compose.feature_detection.with_string_labels`).
     """
+    blocks = [("num", feature) for feature in numerical_features]
+    blocks += [("cat", feature) for feature in categorical_features]
     transformers = []
-    for feature in numerical_features:
-        method = config.method_for(feature, is_numerical=True)
-        pipeline = create_transformer(method, is_numerical=True, config=config)
-        transformers.append((f"num_{feature}", pipeline, [feature]))
-    for feature in categorical_features:
-        method = config.method_for(feature, is_numerical=False)
-        pipeline = create_transformer(method, is_numerical=False, config=config)
-        transformers.append((f"cat_{feature}", pipeline, [feature]))
+    for (kind, feature), name in zip(blocks, _step_names(blocks), strict=True):
+        is_numerical = kind == "num"
+        method = config.method_for(feature, is_numerical=is_numerical)
+        pipeline = create_transformer(method, is_numerical=is_numerical, config=config)
+        transformers.append((name, pipeline, [str(feature)]))
     return ColumnTransformer(
         transformers=transformers,
         remainder="passthrough",
