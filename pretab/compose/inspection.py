@@ -15,11 +15,13 @@ from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
+from .registry import TRANSFORMER_REGISTRY
 
 logger = get_logger(__name__)
 
 __all__ = [
     "block_name",
+    "block_uses_target",
     "build_feature_info",
     "build_feature_lineage",
     "build_transformer_summary",
@@ -366,18 +368,44 @@ def _resolve_block_representation(pipeline, columns):
     """Return ``(family, component, uses_target, is_interaction)`` for a block.
 
     The representation-bearing step is the last pipeline step exposing a
-    ``get_representation_spec`` (a PreTab transformer) or a known scikit-learn
-    step name; helper steps such as imputers and float casts are skipped.
+    ``get_representation_spec`` (a PreTab transformer), a known scikit-learn
+    step name, or a registered method that consumes the target; helper steps
+    such as imputers and float casts are skipped. ``columns`` names the spec's
+    inputs; with None the step names its own.
     """
     steps = pipeline.steps if hasattr(pipeline, "steps") else [("_", pipeline)]
     for step_name, transformer in reversed(steps):
         if hasattr(transformer, "get_representation_spec"):
-            spec = transformer.get_representation_spec(input_features=list(columns))
+            spec = transformer.get_representation_spec(input_features=None if columns is None else list(columns))
             return spec.family, spec.component_kind, spec.uses_target, spec.is_interaction
+        registered = TRANSFORMER_REGISTRY.get(step_name)
+        if (
+            registered is not None
+            and isinstance(transformer, registered.transformer_cls)
+            and registered.target_usage != "forbidden"
+        ):
+            # A registered class without a RepresentationSpec (e.g. scikit-learn's
+            # TargetEncoder): its declared supervision says whether it used y, so
+            # cross-fitting refits it per fold instead of reusing the all-data fit.
+            uses_target = registered.target_usage == "required" or bool(getattr(transformer, "target_aware", False))
+            component = "category" if registered.is_categorical else "basis"
+            return step_name, component, uses_target, registered.is_multivariate
         if step_name in _STEP_FAMILY:
             family, component = _STEP_FAMILY[step_name]
             return family, component, False, False
     return "passthrough", "raw", False, False
+
+
+def block_uses_target(transformer) -> bool:
+    """Whether a fitted per-column block's representation consumed the target ``y``.
+
+    For a separate-state / missing-indicator union the representation branch decides; helper steps
+    such as imputers and scalers never use the target. The spec is read without
+    input names, since only its target use matters here.
+    """
+    separate_state = _separate_state_branches(transformer)
+    representation = separate_state[0] if separate_state is not None else transformer
+    return bool(_resolve_block_representation(representation, None)[2])
 
 
 def _passthrough_source(columns, offset, feature_names_in):

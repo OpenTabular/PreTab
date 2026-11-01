@@ -1,10 +1,11 @@
+import copy
 import hashlib
 import json
 import logging
 import os
 import time
 import warnings
-from typing import Any, cast
+from typing import cast
 
 import numpy as np
 from scipy import sparse as sp
@@ -23,6 +24,7 @@ from .compose.feature_detection import (
 )
 from .compose.inspection import (
     block_name,
+    block_uses_target,
     build_feature_info,
     build_feature_lineage,
     build_transformer_summary,
@@ -39,6 +41,7 @@ from .compose.output import (
     validate_embedding_request,
 )
 from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
+from .core._typing import TransformerLike
 from .core.logging import configure_logging, get_logger
 from .core.parameters import UNSET, validate_task
 from .core.policy import RepresentationPolicy, apply_constant_policy
@@ -46,6 +49,7 @@ from .exceptions import (
     ConfigWarning,
     DataWarning,
     FrozenRepresentationError,
+    IncompatibleParamsError,
     OutputBudgetError,
     PretabConfigError,
     PretabDataError,
@@ -1113,6 +1117,43 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         n_rows, n_cols = self.estimate_output_shape(X)
         return int(n_rows * n_cols * self._output_itemsize())
 
+    def _cross_fit_fold(self, X, y):
+        """Return a copy of this fit whose target-aware blocks are refit on ``(X, y)``.
+
+        Used by :class:`~pretab.CrossFittedTransformer` for its out-of-fold
+        features. Only the blocks that consume the target are refit on the fold;
+        column types and target-free blocks, including their category vocabularies, are shared
+        with this all-data fit, so an out-of-fold row is encoded exactly like
+        ``transform`` encodes it, except that no target-aware placement has seen
+        that row's target. Refitting the whole preprocessor per fold would
+        re-detect column types and relearn categories on fewer rows, shifting
+        integer codes and one-hot columns between the folds and ``transform``.
+        """
+        check_is_fitted(self)
+        # Each block sees the fold rows exactly as the internal ColumnTransformer
+        # routed the training rows to it in ``fit``.
+        X_ct = self._column_transformer_input(self._align_input(X))
+        column_transformer = copy.copy(self.column_transformer_)
+        column_transformer.transformers_ = []
+        for name, transformer, columns in self.column_transformer_.transformers_:
+            fold_transformer = transformer
+            if name != "remainder" and block_uses_target(transformer):
+                fold_transformer = cast(TransformerLike, clone(transformer))
+                fold_transformer.fit(X_ct[list(columns)], y)
+                span = self.column_transformer_.output_indices_[name]
+                expected_width = span.stop - span.start
+                width = len(fold_transformer.get_feature_names_out(list(columns)))
+                if width != expected_width:
+                    raise IncompatibleParamsError(
+                        f"Cross-fitting requires a fixed output width for block {block_name(name, columns)!r}; "
+                        f"expected {expected_width}, got {width}. The block's width depends on the training rows; "
+                        "use a fixed-width representation and stable missing-indicator columns."
+                    )
+            column_transformer.transformers_.append((name, fold_transformer, columns))
+        fold = copy.copy(self)
+        fold.column_transformer_ = column_transformer
+        return fold
+
     def _reject_missing(self, X) -> None:
         """Raise when ``missing_policy="error"`` but ``X`` contains missing values."""
         na_columns = [col for col in X.columns if X[col].isna().any()]
@@ -1144,7 +1185,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             feature = empty[columns[0]]
             is_numerical = feature in self.numerical_features_
             try:
-                cast(Any, clone(transformer)).fit(X[columns], y)
+                cast(TransformerLike, clone(transformer)).fit(X[columns], y)
             except PretabConfigError:
                 continue  # a configuration problem, not one of the empty column
             except ValueError as exc:
@@ -1155,7 +1196,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                     else np.resize(np.array(["a", "b"], dtype=object), len(X))
                 )
                 try:
-                    cast(Any, clone(transformer)).fit(stand_in, y)
+                    cast(TransformerLike, clone(transformer)).fit(stand_in, y)
                 except ValueError:
                     continue  # the block fails with observed values too: not the emptiness
                 method = config.method_for(feature, is_numerical=is_numerical)
