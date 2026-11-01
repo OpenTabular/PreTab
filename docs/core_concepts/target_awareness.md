@@ -29,6 +29,13 @@ rather than silently producing an unsupervised result. Always pass `y` to a pipe
 contains PLE.
 ```
 
+Target-aware placement fits one decision tree or boosting model on a single target, so a
+multi-output `y` of shape `(n_samples, k)` with `k > 1` raises `IncompatibleParamsError` for
+`ple` and for an `optional` method with `target_aware=True`; a column vector of shape
+`(n_samples, 1)` counts as a single target. With `target_aware=False` the `optional` methods
+ignore `y`, so they also fit inside a multi-output pipeline. Explicit spline
+`knot_locations` also ignore `y`, because no target-aware selector runs.
+
 ## The fitted-usage flag
 
 After fitting, a transformer reports whether it actually consumed the target through
@@ -73,9 +80,16 @@ held-out fold, so every training row is transformed by a model that never saw it
 the training data, since there is no leakage risk there.
 
 A wrapped `Preprocessor` is not refit from scratch on each fold: every fold reuses its all-data
-fit and refits only the target-aware representations. Column types, category codes, imputers
-with their missing-value indicators, scalers and the blocks that do not use `y` are shared, so
-the out-of-fold features have exactly the columns and encoding `transform` produces.
+fit and refits only the target-aware representations and subsequent pipeline steps. Column
+types, target-free blocks and their category vocabularies, imputers, scalers before the
+representation, and missing-indicator branches are shared. Target-free values match `transform` exactly;
+target-aware values can differ because they exclude the held-out targets.
+
+Missing indicators stay as raw columns next to the representation; they are not expanded into
+basis functions and do not disappear when a fold's training rows contain no missing values.
+Each refitted block must still retain its all-data output width. If a representation's
+data-dependent sizing changes that width, cross-fitting raises an error instead of mixing
+incompatible feature layouts.
 
 ```python
 import numpy as np
@@ -117,6 +131,13 @@ need cross-fitting when you build the training features once and reuse them dire
 
 The fitted spec records `cross_fitted=True` and the number of folds, so the choice is
 visible and serializable.
+
+`CrossFittedTransformer` can also wrap a `Preprocessor`, `ColumnTransformer`, or
+`Pipeline`. Pandas DataFrames keep their column names, dtypes, and index labels when
+passed to the wrapped estimator; each fold is selected by row position. Polars
+DataFrames are converted once to pandas before selecting folds, so nullable column
+dtypes remain consistent. Other array-like inputs retain the NumPy conversion, with
+one-dimensional input treated as a single column.
 
 ```{note}
 Cross-fitting matters most for strongly supervised encodings such as PLE, where the target
