@@ -18,6 +18,7 @@ from sklearn.model_selection import BaseCrossValidator, check_cv
 from sklearn.utils.validation import check_is_fitted
 
 from ..core._typing import PredictorLike
+from ..core.validation import is_polars_frame, polars_to_pandas
 from ..exceptions import InvalidParamError
 from ..preprocessor import Preprocessor
 
@@ -80,13 +81,22 @@ class RepresentationSearchCV(BaseEstimator):
         return Preprocessor(numerical_method=method, **params)
 
     def fit(self, X, y=None):
-        """Search over ``methods`` and refit the best representation on all data."""
+        """Search over ``methods`` and refit the best representation on all data.
+
+        ``X`` may be a pandas or polars DataFrame or an array. A polars frame is
+        converted to pandas once, before the fold rows are taken, so every fold's
+        Preprocessor detects the same column types as the final refit.
+        """
         methods = list(self.methods)
         if not methods:
             raise InvalidParamError("methods must be a non-empty sequence of numerical methods.")
         if y is None:
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
         y_arr = np.asarray(y).ravel()
+        if is_polars_frame(X):
+            # Converted once, so every fold's rows carry the dtypes of the whole frame,
+            # as a pandas frame's do (see polars_to_pandas).
+            X = polars_to_pandas(X)
         n_samples = X.shape[0] if hasattr(X, "shape") else len(X)
         cv = cast(BaseCrossValidator, check_cv(self.cv, y_arr, classifier=is_classifier(self.estimator)))
         # Reuse the same held-out rows for every candidate, including splitters

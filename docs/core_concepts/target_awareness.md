@@ -29,6 +29,13 @@ rather than silently producing an unsupervised result. Always pass `y` to a pipe
 contains PLE.
 ```
 
+Target-aware placement fits one decision tree or boosting model on a single target, so a
+multi-output `y` of shape `(n_samples, k)` with `k > 1` raises `IncompatibleParamsError` for
+`ple` and for an `optional` method with `target_aware=True`; a column vector of shape
+`(n_samples, 1)` counts as a single target. With `target_aware=False` the `optional` methods
+ignore `y`, so they also fit inside a multi-output pipeline. Explicit spline
+`knot_locations` also ignore `y`, because no target-aware selector runs.
+
 ## The fitted-usage flag
 
 After fitting, a transformer reports whether it actually consumed the target through
@@ -112,6 +119,13 @@ need cross-fitting when you build the training features once and reuse them dire
 
 The fitted spec records `cross_fitted=True` and the number of folds, so the choice is
 visible and serializable.
+
+`CrossFittedTransformer` can also wrap a `Preprocessor`, `ColumnTransformer`, or
+`Pipeline`. Pandas DataFrames keep their column names, dtypes, and index labels when
+passed to the wrapped estimator; each fold is selected by row position. Polars
+DataFrames are converted once to pandas before selecting folds, so nullable column
+dtypes remain consistent. Other array-like inputs retain the NumPy conversion, with
+one-dimensional input treated as a single column.
 
 ```{note}
 Cross-fitting matters most for strongly supervised encodings such as PLE, where the target

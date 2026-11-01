@@ -30,7 +30,9 @@ from ..exceptions import (
     PretabDataError,
 )
 from ._typing import TransformerLike
+from .parameters import validate_task
 from .representation import RepresentationSpecMixin
+from .validation import is_polars_frame, polars_to_pandas
 
 __all__ = ["CrossFittedTransformer", "in_controlled_context", "warn_target_leakage"]
 
@@ -92,9 +94,13 @@ def _as_2d(X):
 
     A pandas DataFrame is passed through unchanged, so column names and per-column
     dtypes reach the wrapped estimator (e.g. a Preprocessor detecting numerical
-    vs categorical columns, or a name-based ColumnTransformer); any other input
-    is converted to a NumPy array, with 1D input reshaped to a single column.
+    vs categorical columns, or a name-based ColumnTransformer). A polars frame
+    is converted once to pandas, before selecting fold rows, so nullable column
+    dtypes remain consistent across folds. Other inputs are converted to NumPy,
+    with 1D input reshaped to a single column.
     """
+    if is_polars_frame(X):
+        return polars_to_pandas(X)
     if hasattr(X, "iloc") and getattr(X, "ndim", None) == 2:
         return X
     X = np.asarray(X)
@@ -120,7 +126,8 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         A supervised (target-aware) PreTab transformer to cross-fit, or an
         estimator such as a :class:`~pretab.Preprocessor` or ``Pipeline`` built from
         them. A pandas DataFrame ``X`` is passed to it unchanged (each fold is a row
-        subset), so column names and dtypes are preserved.
+        subset), so column names, dtypes and index labels are preserved. Polars
+        DataFrames are converted once to pandas before selecting fold rows.
     n_folds : int, default=5
         Number of cross-fitting folds. Must be at least 2.
     task : {"regression", "classification"}, default="regression"
@@ -156,13 +163,12 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         return KFold(n_splits=self.n_folds, shuffle=self.shuffle, random_state=seed)
 
     def _fit_full(self, X, y):
-        """Validate inputs and fit ``estimator_`` on all data; return arrays."""
+        """Validate inputs and fit ``estimator_``; return 2D input and target array."""
         if y is None:
             raise IncompatibleParamsError("CrossFittedTransformer requires y at fit time; got y=None.")
         if not isinstance(self.n_folds, (int, np.integer)) or self.n_folds < 2:
             raise InvalidParamError(f"n_folds must be an integer >= 2; got {self.n_folds!r}.")
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(f"task must be 'regression' or 'classification'; got {self.task!r}.")
+        validate_task(self.task, type(self).__name__)
         X_arr = _as_2d(X)
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):
@@ -218,6 +224,8 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     def get_representation_spec(self, input_features=None):
         """Return the wrapped spec, flagged as cross-fitted."""
         check_is_fitted(self, "estimator_")
+        if input_features is None:
+            input_features = getattr(self.estimator_, "feature_names_in_", None)
         spec_fn = getattr(self.estimator_, "get_representation_spec", None)
         if spec_fn is not None:
             base = spec_fn(input_features)

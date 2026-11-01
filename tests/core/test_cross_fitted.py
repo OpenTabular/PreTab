@@ -169,3 +169,88 @@ def test_one_dimensional_input_is_still_a_single_column():
     x = rng.normal(size=200)
     out = CrossFittedTransformer(PLETransformer(output_dim=4), n_folds=3, random_state=0).fit_transform(x, x**2)
     assert out.shape == (200, 4)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_cross_fitting_a_discrete_feature_keeps_a_fixed_width(seed):
+    """Regression guard for issue #57: tied features gave fold-dependent widths."""
+    from pretab.transformers import RBFExpansionTransformer
+
+    rng = np.random.default_rng(seed)
+    x = rng.integers(0, 6, size=200).astype(float).reshape(-1, 1)
+    y = np.sin(x[:, 0]) + rng.normal(0, 0.5, size=200)
+    out = CrossFittedTransformer(
+        RBFExpansionTransformer(output_dim=10, target_aware=True), n_folds=5, random_state=0
+    ).fit_transform(x, y)
+    assert out.shape == (200, 10)
+
+
+@pytest.mark.parametrize("wrapped_kind", ["preprocessor", "column_transformer", "pipeline"])
+def test_dataframe_representation_spec_defaults_to_fitted_names(mixed_frame, wrapped_kind):
+    from sklearn.compose import ColumnTransformer
+    from sklearn.pipeline import Pipeline
+
+    from pretab import Preprocessor
+
+    X, y = mixed_frame
+    if wrapped_kind == "preprocessor":
+        wrapped = Preprocessor(output_dim=4, random_state=0)
+    else:
+        wrapped = ColumnTransformer([("ple", PLETransformer(output_dim=4), ["num"])])
+        if wrapped_kind == "pipeline":
+            wrapped = Pipeline([("features", wrapped)])
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=3, random_state=0).fit(X, y)
+
+    spec = cross_fitted.get_representation_spec()
+    assert spec.input_features == ("num", "city")
+    assert spec.output_features == tuple(cross_fitted.get_feature_names_out())
+    assert spec.cross_fitted is True
+    assert spec.n_folds == 3
+    assert spec.uses_target is True
+    assert spec == type(spec).from_dict(spec.to_dict())
+    assert cross_fitted.get_representation_spec(["num", "city"]) == spec
+
+
+def test_dataframe_fold_rows_keep_index_dtypes_and_target_alignment(mixed_frame, monkeypatch):
+    import pandas as pd
+
+    from pretab import Preprocessor
+
+    X, y = mixed_frame
+    original = X.copy(deep=True)
+    fits, transforms = [], []
+    original_fit = Preprocessor.fit
+    original_transform = Preprocessor.transform
+
+    def record_fit(self, X, y=None):
+        assert isinstance(X, pd.DataFrame)
+        fits.append((X.copy(deep=True), np.asarray(y).copy()))
+        return original_fit(self, X, y)
+
+    def record_transform(self, X):
+        assert isinstance(X, pd.DataFrame)
+        transforms.append(X.copy(deep=True))
+        return original_transform(self, X)
+
+    monkeypatch.setattr(Preprocessor, "fit", record_fit)
+    monkeypatch.setattr(Preprocessor, "transform", record_transform)
+    cross_fitted = CrossFittedTransformer(
+        Preprocessor(output_dim=4, output_format="dense", random_state=0), n_folds=3, random_state=0
+    )
+    cross_fitted.fit_transform(X, y)
+    splits = list(KFold(n_splits=3, shuffle=True, random_state=0).split(X))
+
+    assert len(fits) == 4
+    pd.testing.assert_frame_equal(fits[0][0], X)
+    np.testing.assert_array_equal(fits[0][1], y)
+    for (actual_X, actual_y), (train_idx, _) in zip(fits[1:], splits, strict=True):
+        pd.testing.assert_frame_equal(actual_X, X.iloc[train_idx])
+        np.testing.assert_array_equal(actual_y, y[train_idx])
+    assert len(transforms) == 3
+    for actual_X, (_, test_idx) in zip(transforms, splits, strict=True):
+        pd.testing.assert_frame_equal(actual_X, X.iloc[test_idx])
+
+    unseen = X.iloc[:5][["city", "num"]]
+    cross_fitted.transform(unseen)
+    pd.testing.assert_frame_equal(transforms[-1], unseen)
+    pd.testing.assert_frame_equal(X, original)
