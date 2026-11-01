@@ -85,7 +85,9 @@ class MSplineTransformer(BaseSplineTransformer):
         n_coef = len(knots) - self.degree - 1
         coef = np.zeros(n_coef)
         coef[basis_idx] = 1.0
-        spline = BSpline(knots, coef, self.degree, extrapolate=False)
+        # In-range values are the same either way; out-of-range values only reach
+        # this point under an "extrapolate" / "warn" policy (the default clips).
+        spline = BSpline(knots, coef, self.degree, extrapolate=True)
         values = np.nan_to_num(spline(x), nan=0.0)
 
         knot_span = knots[basis_idx + self.degree + 1] - knots[basis_idx]

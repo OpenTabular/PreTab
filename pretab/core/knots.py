@@ -19,6 +19,7 @@ from ..exceptions import invalid_param_error
 __all__ = [
     "basis_to_knots",
     "bspline_basis",
+    "extrapolate_bspline_rows",
     "generate_internal_knots",
     "quantile_knots",
     "select_knots",
@@ -56,6 +57,23 @@ def bspline_basis(x: np.ndarray, knots: np.ndarray, degree: int, i: int, last: i
         else (knots[i + degree + 1] - x) / denom2 * bspline_basis(x, knots, degree - 1, i + 1, last)
     )
     return term1 + term2
+
+
+def extrapolate_bspline_rows(basis: np.ndarray, x: np.ndarray, knots: np.ndarray, degree: int) -> np.ndarray:
+    """Fill the rows of ``basis`` whose ``x`` lies outside the knot span by extrapolation.
+
+    :func:`bspline_basis` is zero outside ``[knots[0], knots[-1]]``. When a policy lets
+    out-of-range values through (``"extrapolate"`` / ``"warn"``), those rows are
+    evaluated instead by extending the boundary polynomial pieces, which keeps the
+    basis a partition of unity there. Rows inside the span are left untouched.
+    """
+    outside = (x < knots[0]) | (x > knots[-1])
+    if outside.any():
+        from scipy.interpolate import BSpline
+
+        n_basis = len(knots) - degree - 1
+        basis[outside] = BSpline(knots, np.eye(n_basis), degree, extrapolate=True)(x[outside])
+    return basis
 
 
 def basis_to_knots(n_basis: int, degree: int) -> int:

@@ -110,8 +110,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
         Overrides this family's default ``out_of_range`` behavior (unconditional
         clipping to the fitted knot range). Pass e.g.
         ``RepresentationPolicy(out_of_range="error")`` to raise instead, or
-        ``"warn"`` / ``"extrapolate"`` for the other supported reactions. Leaving
-        this at ``None`` preserves the historical clip-on-transform behavior.
+        ``"warn"`` / ``"extrapolate"`` for the other supported reactions, which
+        evaluate an out-of-range value on the extended boundary polynomial pieces
+        of the B/M-spline basis (an I-spline stays at 0 below and 1 above the
+        range). A mapping overrides only the axes it names, so ``{"constant": "warn"}``
+        keeps the clipping. Leaving this at ``None`` preserves the historical
+        clip-on-transform behavior.
 
     Attributes
     ----------

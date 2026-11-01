@@ -96,7 +96,11 @@ PreTab is explicit about degenerate inputs rather than failing silently.
   values beyond the fitted range by default; natural-cubic and cubic-regression extrapolate
   smoothly by default. Pass `policy=RepresentationPolicy(out_of_range=...)` directly to any
   of these transformers to override its default with `"clip"`, `"warn"`, or `"error"`
-  instead. This is standalone-transformer-only for now, not yet available through
+  instead, or with `"extrapolate"` for the clipping families: `"extrapolate"` and `"warn"`
+  evaluate an out-of-range value on the extended boundary polynomial pieces of the basis (an
+  I-spline stays at 0 below and 1 above the range). A mapping such as
+  `{"constant": "warn"}` changes only the axes it names and keeps the family's other
+  defaults. This is standalone-transformer-only for now, not yet available through
   `Preprocessor`.
 - **Unseen category**: `ContinuousOrdinalTransformer` (`"int"`) maps an unseen category to a
   reserved code rather than raising; one-hot encoding (`"one-hot"`) instead emits an all-zero
