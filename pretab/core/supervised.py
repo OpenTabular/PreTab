@@ -32,7 +32,9 @@ from ..exceptions import (
     PretabDataError,
 )
 from ._typing import TransformerLike
+from .parameters import validate_task
 from .representation import RepresentationSpecMixin
+from .validation import is_polars_frame, polars_to_pandas
 
 __all__ = ["CrossFittedTransformer", "in_controlled_context", "warn_target_leakage"]
 
@@ -112,15 +114,38 @@ def _stack_folds(blocks, test_indices, X) -> Any:
         stacked = pd.concat(blocks).iloc[order]
         index = getattr(X, "index", None)
         return stacked if index is not None and stacked.index.equals(index) else stacked.reset_index(drop=True)
-    if type(first).__module__.partition(".")[0] == "polars":
+    if is_polars_frame(first):
         import polars as pl  # type: ignore
 
         return pl.concat(blocks)[order]
     dense = [block.toarray() if sp.issparse(block) else np.asarray(block) for block in blocks]
-    out = np.empty((len(rows), first.shape[1]), dtype=np.result_type(*dense))
+    out = np.empty((len(rows), dense[0].shape[1]), dtype=np.result_type(*dense))
     for block, test_idx in zip(dense, test_indices, strict=True):
         out[test_idx] = block
     return out
+
+
+def _as_2d(X):
+    """Return ``X`` as 2D input for the wrapped transformer.
+
+    A pandas DataFrame is passed through unchanged, so column names and per-column
+    dtypes reach the wrapped estimator (e.g. a Preprocessor detecting numerical
+    vs categorical columns, or a name-based ColumnTransformer). A polars frame
+    is converted once to pandas, before selecting fold rows, so nullable column
+    dtypes remain consistent across folds. Other inputs are converted to NumPy,
+    with 1D input reshaped to a single column.
+    """
+    if is_polars_frame(X):
+        return polars_to_pandas(X)
+    if hasattr(X, "iloc") and getattr(X, "ndim", None) == 2:
+        return X
+    X = np.asarray(X)
+    return X.reshape(-1, 1) if X.ndim == 1 else X
+
+
+def _take_rows(X, indices):
+    """Select rows of a DataFrame or array by position."""
+    return X.iloc[indices] if hasattr(X, "iloc") else X[indices]
 
 
 class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
@@ -136,7 +161,17 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     Parameters
     ----------
     transformer : estimator
-        A supervised (target-aware) PreTab transformer to cross-fit.
+        A supervised (target-aware) PreTab transformer to cross-fit, or an
+        estimator such as a :class:`~pretab.Preprocessor` or ``Pipeline`` built
+        from them. For a :class:`~pretab.Preprocessor`, only its target-aware
+        representations and subsequent steps are refit per fold. Column types,
+        target-free blocks and their vocabularies, imputers, scalers before the
+        representation and missing-indicator branches come from the all-data fit.
+        Target-free feature values match :meth:`transform`; target-aware values
+        exclude the held-out targets. Any other estimator is cloned and refit
+        from scratch on each fold. A pandas DataFrame ``X`` is passed through
+        unchanged (each fold is a row subset), preserving column names, dtypes and index labels. Polars
+        DataFrames are converted once to pandas before selecting fold rows.
     n_folds : int, default=5
         Number of cross-fitting folds. Must be at least 2.
     task : {"regression", "classification"}, default="regression"
@@ -172,16 +207,13 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         return KFold(n_splits=self.n_folds, shuffle=self.shuffle, random_state=seed)
 
     def _fit_full(self, X, y):
-        """Validate inputs and fit ``estimator_`` on all data; return arrays."""
+        """Validate inputs and fit ``estimator_``; return 2D input and target array."""
         if y is None:
             raise IncompatibleParamsError("CrossFittedTransformer requires y at fit time; got y=None.")
         if not isinstance(self.n_folds, (int, np.integer)) or self.n_folds < 2:
             raise InvalidParamError(f"n_folds must be an integer >= 2; got {self.n_folds!r}.")
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(f"task must be 'regression' or 'classification'; got {self.task!r}.")
-        X_arr = np.asarray(X)
-        if X_arr.ndim == 1:
-            X_arr = X_arr.reshape(-1, 1)
+        validate_task(self.task, type(self).__name__)
+        X_arr = _as_2d(X)
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):
             raise PretabDataError(f"X and y must have same length. Got {len(X_arr)} and {len(y_arr)}")
@@ -203,10 +235,22 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     def transform(self, X):
         """Transform ``X`` using the transformer fit on all training data."""
         check_is_fitted(self, "estimator_")
-        X_arr = np.asarray(X)
-        if X_arr.ndim == 1:
-            X_arr = X_arr.reshape(-1, 1)
-        return self.estimator_.transform(X_arr)
+        return self.estimator_.transform(_as_2d(X))
+
+    def _fit_fold(self, X, y):
+        """Return the model that encodes one held-out fold, fit on the other rows.
+
+        A wrapped estimator that implements ``_cross_fit_fold`` (the
+        :class:`~pretab.Preprocessor`) derives the fold model from ``estimator_``
+        and refits only its target-aware parts, so the out-of-fold features share
+        the encoding ``transform`` uses. Any other estimator is cloned and refit.
+        """
+        cross_fit_fold = getattr(self.estimator_, "_cross_fit_fold", None)
+        if cross_fit_fold is not None:
+            return cast(TransformerLike, cross_fit_fold(X, y))
+        fold = cast(TransformerLike, clone(self.transformer))
+        fold.fit(X, y)
+        return fold
 
     def fit_transform(self, X, y=None):
         """Fit and return leakage-free out-of-fold features for the training data.
@@ -222,21 +266,20 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         Raises
         ------
         IncompatibleParamsError
-            If the wrapped transformer returns a dict of blocks (which cannot be
-            stacked), or if a fold's output has a different width, or DataFrame
-            columns other than the all-data fit's.
+            If the wrapped transformer returns an unsupported dict of blocks,
+            or if a fold's output has an invalid shape, a different width, or
+            DataFrame columns other than the all-data fit's.
         """
         X_arr, y_arr = self._fit_full(X, y)
-        names = [str(name) for name in self.estimator_.get_feature_names_out()]
+        names = list(self.estimator_.get_feature_names_out())
         width = len(names)
         blocks, test_indices = [], []
         splitter = self._make_splitter()
         token = _cross_fit_active.set(True)
         try:
             for train_idx, test_idx in splitter.split(X_arr, y_arr):
-                fold = cast(TransformerLike, clone(self.transformer))
-                fold.fit(X_arr[train_idx], y_arr[train_idx])
-                fold_out = fold.transform(X_arr[test_idx])
+                fold = self._fit_fold(_take_rows(X_arr, train_idx), y_arr[train_idx])
+                fold_out = fold.transform(_take_rows(X_arr, test_idx))
                 if isinstance(fold_out, dict):
                     raise IncompatibleParamsError(
                         "Cross-fitting stacks the out-of-fold features into one array; the "
@@ -245,20 +288,31 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
                     )
                 if not hasattr(fold_out, "shape"):
                     fold_out = np.asarray(fold_out)
+                if len(fold_out.shape) != 2 or fold_out.shape[0] != len(test_idx):
+                    raise IncompatibleParamsError(
+                        f"Cross-fitting received invalid output shape {fold_out.shape}; "
+                        f"expected a 2D output with {len(test_idx)} rows, one per held-out sample."
+                    )
                 if fold_out.shape[1] != width:
                     raise IncompatibleParamsError(
                         "Cross-fitting requires a fixed output width across folds; expected "
-                        f"{width}, got {fold_out.shape[1]}. Disable adaptive sizing on the "
-                        "wrapped transformer."
+                        f"{width}, got {fold_out.shape[1]}. The wrapped transformer's width "
+                        "depends on the rows it is fit on (e.g. adaptive sizing, or category / "
+                        "indicator columns learned from the data); configure it to produce the "
+                        "same columns on every fold."
                     )
                 # DataFrames are stacked by column label, so a fold that kept other
                 # columns at the same width (e.g. other top categories) cannot be aligned.
                 columns = getattr(fold_out, "columns", None)
-                if columns is not None and [str(column) for column in columns] != names:
-                    differing = sorted(set(map(str, columns)).symmetric_difference(names))
+                if columns is not None and list(columns) != names:
+                    differing = sorted(set(columns).symmetric_difference(names), key=str)
+                    detail = (
+                        f"columns differ from the all-data fit in {differing}"
+                        if differing
+                        else f"column order differs from the all-data fit: expected {names}, got {list(columns)}"
+                    )
                     raise IncompatibleParamsError(
-                        "Cross-fitting requires the same output columns across folds; a fold's "
-                        f"columns differ from the all-data fit in {differing}. The wrapped "
+                        f"Cross-fitting requires the same output columns across folds; a fold's {detail}. The wrapped "
                         "transformer learns its columns from the rows it is fit on; configure it "
                         "to produce the same columns on every fold."
                     )
@@ -276,6 +330,8 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
     def get_representation_spec(self, input_features=None):
         """Return the wrapped spec, flagged as cross-fitted."""
         check_is_fitted(self, "estimator_")
+        if input_features is None:
+            input_features = getattr(self.estimator_, "feature_names_in_", None)
         spec_fn = getattr(self.estimator_, "get_representation_spec", None)
         if spec_fn is not None:
             base = spec_fn(input_features)
