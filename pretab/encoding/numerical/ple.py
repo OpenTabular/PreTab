@@ -13,7 +13,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
-from ...core.parameters import UNSET, AliasResolverMixin
+from ...core.parameters import UNSET, AliasResolverMixin, validate_task
 from ...core.representation import RepresentationSpecMixin
 from ...core.supervised import warn_target_leakage
 from ...core.validation import single_target
@@ -190,8 +190,7 @@ class PLETransformer(
         max_bins_req = self._resolve_param("max_output_dim", default=None)
         min_bins, max_bins = self._resolve_bin_bounds(n_bins, min_bins_req, max_bins_req)
 
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(f"Unsupported task: {self.task}. Use 'regression' or 'classification'.")
+        task = validate_task(self.task, type(self).__name__)
 
         if self.placement_strategy not in ("cart", "lightgbm"):
             raise InvalidParamError(
@@ -206,7 +205,7 @@ class PLETransformer(
         # exactly ``output_dim`` bins, adaptive clamps it into ``[min, max]``.
         adapter = PLEPlacementAdapter(
             placement_strategy=self.placement_strategy,
-            task=self.task,
+            task=task,
             random_state=self.random_state,
         )
         min_thresholds = max(0, min_bins - 1)
@@ -284,7 +283,7 @@ class PLETransformer(
         if len(thresholds) == 0:
             lower, upper = edges[0], edges[-1]
             width = upper - lower
-            if width > 1e-10:
+            if width > 0:
                 values = np.clip((feature - lower) / width, 0.0, 1.0)
             else:
                 values = np.full(n_samples, 0.5)
@@ -305,7 +304,7 @@ class PLETransformer(
             upper_edge = edges[bin_idx + 1]
             bin_width = upper_edge - lower_edge
 
-            if bin_width > 1e-10:
+            if bin_width > 0:
                 ple_encoded[mask, bin_idx] = np.clip((values - lower_edge) / bin_width, 0.0, 1.0)
             else:
                 ple_encoded[mask, bin_idx] = 0.5

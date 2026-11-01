@@ -1,10 +1,14 @@
+import warnings
+
 import numpy as np
 import pytest
 
 from pretab.transformers import (
     BSplineTransformer,
+    CubicRegressionSplineTransformer,
     ISplineTransformer,
     MSplineTransformer,
+    NaturalCubicSplineTransformer,
 )
 
 
@@ -108,12 +112,96 @@ def test_mspline_non_negative(data):
 
 
 def test_mspline_handles_nan():
+    """A missing value is left out of knot placement and expands to a NaN row."""
     X = np.linspace(0, 1, 50).reshape(-1, 1)
     X[5] = np.nan
     transformer = MSplineTransformer(output_dim=6)
     Xt = transformer.fit_transform(X)
     assert Xt.shape == (50, 6)
-    assert np.isfinite(Xt).all()
+    assert np.isnan(Xt[5]).all()
+    assert np.isfinite(np.delete(Xt, 5, axis=0)).all()
+
+
+# --- missing values expand to NaN basis rows -------------------------------------------
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("include_bias", [False, True])
+@pytest.mark.parametrize("out_of_range", ["clip", "extrapolate", "warn", "error"])
+def test_bmi_spline_missing_value_expands_to_a_nan_row(cls, include_bias, out_of_range):
+    """A missing value became a finite all-zero basis row: impossible data for the
+    B/M-spline and, for the I-spline, the exact encoding of the training minimum."""
+    X = np.linspace(0.0, 10.0, 50).reshape(-1, 1)
+    transformer = cls(output_dim=5, include_bias=include_bias, policy={"out_of_range": out_of_range}).fit(X)
+    observed = np.array([[0.0], [2.5], [10.0]])
+    if out_of_range in ("clip", "extrapolate"):
+        observed = np.vstack([observed, [[-3.0], [14.0]]])
+    expected = transformer.transform(observed)
+
+    probe = np.insert(observed, [0, 2], np.nan, axis=0)
+    with warnings.catch_warnings():
+        # A missing value is not out of range: it must not trigger "warn" / "error".
+        warnings.simplefilter("error")
+        out = transformer.transform(probe)
+
+    missing = np.isnan(probe[:, 0])
+    basis = slice(1, None) if include_bias else slice(None)
+    assert np.isnan(out[missing, basis]).all()
+    if include_bias:
+        np.testing.assert_array_equal(out[:, 0], 1.0)
+    np.testing.assert_array_equal(out[~missing], expected)
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+def test_bmi_spline_missing_value_only_affects_its_own_feature_block(cls):
+    rng = np.random.default_rng(0)
+    X = rng.uniform(0.0, 10.0, size=(60, 2))
+    X[4, 0] = np.nan
+    X[9, 1] = np.nan
+    transformer = cls(output_dim=6).fit(X)
+    out = transformer.transform(X)
+    np.testing.assert_array_equal(np.isnan(out[:, :6]).any(axis=1), np.isnan(X[:, 0]))
+    np.testing.assert_array_equal(np.isnan(out[:, 6:]).any(axis=1), np.isnan(X[:, 1]))
+    assert np.isnan(out[4, :6]).all() and np.isnan(out[9, 6:]).all()
+
+
+@pytest.mark.parametrize("scale", [1.0, 1e-2, 1e-3, 1e-7])
+def test_mspline_basis_integrates_to_one_at_any_feature_scale(scale):
+    """Regression guard for issue #63: absolute clipping thresholds flattened the
+    basis on small-scale features and zeroed it on tiny-range ones."""
+    from scipy.integrate import trapezoid
+
+    X = np.random.default_rng(0).uniform(0, 1, (2000, 1)) * scale
+    transformer = MSplineTransformer(output_dim=8, placement_strategy="uniform").fit(X)
+    grid = np.linspace(X.min(), X.max(), 200_001)
+    integrals = trapezoid(transformer.transform(grid.reshape(-1, 1)), grid, axis=0)
+    np.testing.assert_allclose(integrals, 1.0, atol=1e-3)
+
+
+def test_mspline_basis_is_scale_equivariant():
+    X = np.random.default_rng(0).lognormal(0, 2, (2000, 1))
+    unit = MSplineTransformer(output_dim=8).fit(X).transform(X)
+    scaled = MSplineTransformer(output_dim=8).fit(X * 1e-4).transform(X * 1e-4)
+    # M-spline values scale like 1 / span, so rescaling x by c rescales M by 1 / c.
+    np.testing.assert_allclose(scaled * 1e-4, unit, rtol=1e-8)
+
+
+def test_mspline_basis_is_not_clipped_after_the_preprocessor_scaling():
+    """Tight quantile knots on a skewed feature, after the default min-max scaling to
+    [-1, 1], pushed M-spline peaks above the absolute clip at 1000."""
+    import pandas as pd
+    from scipy.integrate import trapezoid
+
+    from pretab import Preprocessor
+
+    x = np.random.default_rng(0).lognormal(0, 2, 2000)
+    pre = Preprocessor(numerical_method="mspline", target_aware=False, placement_strategy="quantile")
+    pre.fit(pd.DataFrame({"x": x}))
+    grid = np.linspace(x.min(), x.max(), 200_001)
+    basis = np.asarray(pre.transform(pd.DataFrame({"x": grid})))
+    scaled = (grid - x.min()) / (x.max() - x.min()) * 2.0 - 1.0
+    assert basis.max() > 1000.0
+    np.testing.assert_allclose(trapezoid(basis, scaled, axis=0), 1.0, atol=1e-3)
 
 
 def test_ispline_monotonic_increasing():
@@ -212,3 +300,46 @@ def test_target_aware_bmi_spline_accepts_a_column_vector_target(cls):
     flat = cls(output_dim=6, target_aware=True, placement_strategy="cart").fit(X, y)
     column = cls(output_dim=6, target_aware=True, placement_strategy="cart").fit(X, y.reshape(-1, 1))
     np.testing.assert_array_equal(column.knots_[0], flat.knots_[0])
+
+
+# --- target-aware splines search their own knot window (issue #69) ------------
+
+
+def _step_data(seed=1):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(0, 10, 1000)
+    y = np.where(x > 5.0, 1.0, 0.0) + 0.3 * rng.normal(size=1000)
+    return x.reshape(-1, 1), y
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, MSplineTransformer, ISplineTransformer])
+@pytest.mark.parametrize("output_dim", [5, 6])
+def test_target_aware_bmi_spline_keeps_the_dominant_split(cls, output_dim):
+    """Regression guard for issue #69: selector knots were trimmed by position, so
+    the split where the target changes was routinely discarded."""
+    X, y = _step_data()
+    transformer = cls(output_dim=output_dim, target_aware=True, placement_strategy="cart").fit(X, y)
+    interior = transformer.knots_[0][transformer.degree + 1 : -(transformer.degree + 1)]
+    assert len(interior) == output_dim - transformer.degree - 1
+    assert np.abs(interior - 5.0).min() < 0.1, interior
+
+
+@pytest.mark.parametrize("cls", [CubicRegressionSplineTransformer, NaturalCubicSplineTransformer])
+def test_target_aware_cubic_families_keep_the_dominant_split(cls):
+    X, y = _step_data()
+    knots = cls(output_dim=5, target_aware=True, placement_strategy="cart").fit(X, y).knots_[0]
+    assert np.abs(knots - 5.0).min() < 0.1, knots
+
+
+@pytest.mark.parametrize("cls", [BSplineTransformer, CubicRegressionSplineTransformer, NaturalCubicSplineTransformer])
+@pytest.mark.parametrize(("low", "high"), [(5, 40), (20, 50)])
+def test_adaptive_spline_width_is_not_capped_at_the_legacy_window(cls, low, high):
+    """The fixed 3-15 selector window capped the width at 15 (14 / 12 for the cubic
+    families), and a window entirely above it collapsed to ``min_output_dim``."""
+    rng = np.random.default_rng(0)
+    x = rng.uniform(0, 10, 3000)
+    y = np.sin(2 * x) * 3 + rng.normal(0, 0.3, 3000)
+    transformer = cls(
+        adaptive=True, min_output_dim=low, max_output_dim=high, target_aware=True, placement_strategy="cart"
+    ).fit(x.reshape(-1, 1), y)
+    assert max(15, low) < transformer.total_output_dim_ <= high

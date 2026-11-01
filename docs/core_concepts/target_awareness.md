@@ -33,7 +33,8 @@ Target-aware placement fits one decision tree or boosting model on a single targ
 multi-output `y` of shape `(n_samples, k)` with `k > 1` raises `IncompatibleParamsError` for
 `ple` and for an `optional` method with `target_aware=True`; a column vector of shape
 `(n_samples, 1)` counts as a single target. With `target_aware=False` the `optional` methods
-ignore `y`, so they also fit inside a multi-output pipeline.
+ignore `y`, so they also fit inside a multi-output pipeline. Explicit spline
+`knot_locations` also ignore `y`, because no target-aware selector runs.
 
 ## The fitted-usage flag
 
