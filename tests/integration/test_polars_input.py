@@ -207,3 +207,47 @@ def test_search_converts_a_polars_frame_once(frames_with_one_null_integer):
         return RepresentationSearchCV(Ridge(), ["minmax"], **params).fit(X, y)
 
     assert search(polars_frame).cv_results_ == pytest.approx(search(pandas_frame).cv_results_)
+
+
+@pytest.mark.parametrize("method", ["minmax", "ple", "bspline"])
+def test_cross_fitting_polars_input_matches_pandas_input(frames, method):
+    from pretab import CrossFittedTransformer
+
+    pandas_frame, polars_frame, y = frames
+    columns = ["income", "plan", "city", "flag"]
+    pandas_frame = pandas_frame[columns]
+    polars_frame = polars_frame.select(columns)
+
+    def cross_fit(X):
+        return CrossFittedTransformer(
+            Preprocessor(
+                numerical_method=method,
+                categorical_method="one-hot",
+                output_dim=6,
+                output_format="dense",
+                random_state=0,
+            ),
+            n_folds=3,
+            random_state=0,
+        ).fit_transform(X, y)
+
+    np.testing.assert_allclose(cross_fit(polars_frame), cross_fit(pandas_frame))
+
+
+def test_cross_fitting_converts_a_polars_frame_once(frames_with_one_null_integer):
+    from pretab import CrossFittedTransformer
+
+    pandas_frame, polars_frame, y = frames_with_one_null_integer
+
+    def cross_fit(X):
+        wrapped = CrossFittedTransformer(
+            Preprocessor(numerical_method="minmax", output_format="dense"), n_folds=5, random_state=0
+        )
+        return wrapped, wrapped.fit_transform(X, y)
+
+    from_pandas, expected = cross_fit(pandas_frame)
+    from_polars, actual = cross_fit(polars_frame)
+    np.testing.assert_allclose(actual, expected)
+    np.testing.assert_allclose(from_polars.transform(polars_frame), from_pandas.transform(pandas_frame))
+    np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
+    assert from_polars.get_representation_spec().input_features == ("x", "kids")

@@ -120,6 +120,13 @@ need cross-fitting when you build the training features once and reuse them dire
 The fitted spec records `cross_fitted=True` and the number of folds, so the choice is
 visible and serializable.
 
+`CrossFittedTransformer` can also wrap a `Preprocessor`, `ColumnTransformer`, or
+`Pipeline`. Pandas DataFrames keep their column names, dtypes, and index labels when
+passed to the wrapped estimator; each fold is selected by row position. Polars
+DataFrames are converted once to pandas before selecting folds, so nullable column
+dtypes remain consistent. Other array-like inputs retain the NumPy conversion, with
+one-dimensional input treated as a single column.
+
 ```{note}
 Cross-fitting matters most for strongly supervised encodings such as PLE, where the target
 directly determines the bins. For unsupervised methods it is unnecessary.
