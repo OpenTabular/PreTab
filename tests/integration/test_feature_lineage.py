@@ -130,11 +130,8 @@ def test_lineage_source_features_are_single_input_per_block(mixed_frame):
 
 
 @pytest.mark.parametrize(("method", "family"), [("ple", "piecewise_linear"), ("rbf", "rbf"), ("bspline", "bspline")])
-def test_lineage_of_a_representation_behind_the_imputer_indicator(method, family):
-    """``add_missing_indicator`` feeds the imputer's indicator column to the
-    representation, so its step has two inputs for a one-column block. The lineage
-    passed the single column name to ``get_feature_names_out``, which now validates
-    the number of input features."""
+def test_lineage_keeps_the_missing_indicator_separate_from_the_representation(method, family):
+    """The indicator keeps its own lineage without becoming a representation input."""
     rng = np.random.default_rng(0)
     a = rng.normal(size=120)
     a[::7] = np.nan
@@ -144,5 +141,5 @@ def test_lineage_of_a_representation_behind_the_imputer_indicator(method, family
     lineage = pre.get_feature_lineage()
 
     assert [record.output_feature for record in lineage] == list(pre.get_feature_names_out())
-    assert {record.family for record in lineage} == {family}
+    assert {record.family for record in lineage} == {family, "missing_state"}
     assert {record.source_features for record in lineage} == {("a",), ("b",)}

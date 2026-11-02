@@ -123,11 +123,8 @@ def test_representation_summary_names_each_block_after_its_column(frame, target,
     assert entries["a"]["output_features"] == [f"a_rbf{i}" for i in range(entries["a"]["output_dim"])]
 
 
-def test_representation_summary_of_a_leaf_behind_the_imputer_indicator(frame, target):
-    """``add_missing_indicator`` puts the imputer's built-in indicator in front of
-    the representation, so a column with missing values has a leaf with two inputs
-    for a one-column block. Its summary entry names its own inputs instead of
-    failing on the single column name."""
+def test_representation_summary_names_the_representation_beside_the_missing_indicator(frame, target):
+    """The summary names the representation's input, not the separate indicator."""
     X = frame.copy()
     X.loc[::7, "a"] = np.nan
     p = Preprocessor(
@@ -136,7 +133,7 @@ def test_representation_summary_of_a_leaf_behind_the_imputer_indicator(frame, ta
 
     entries = {entry["columns"][0]: entry for entry in p.to_spec()["representations"]}
 
-    assert entries["a"]["input_features"] == ["x0", "x1"]
+    assert entries["a"]["input_features"] == ["a"]
     assert entries["b"]["input_features"] == ["b"]
     assert p.reproducibility_report()["representations"] == {"a": "rbf", "b": "rbf", "c": "ordinal"}
     assert isinstance(p.fingerprint_, str)
@@ -202,6 +199,24 @@ def test_round_trip_reproduces_unseen_category_encoding(frame, target):
         np.asarray(restored.transform(unseen, return_array=True), dtype=float),
         equal_nan=True,
     )
+
+
+@pytest.mark.parametrize("categorical_method", ["int", "one-hot"])
+@pytest.mark.parametrize("impute", [True, False])
+@pytest.mark.parametrize("add_missing_indicator", [True, False])
+def test_round_trip_with_nullable_categorical_missing(categorical_method, impute, add_missing_indicator):
+    frame = pd.DataFrame({"c": ["a", None, "b", "a"]}).convert_dtypes()
+    options = {"categorical_method": categorical_method}
+    if not impute:
+        options["categorical_imputation"] = None
+    fitted = Preprocessor(add_missing_indicator=add_missing_indicator, **options).fit(frame)
+    original_fingerprint = fitted.fingerprint_
+    spec = json.loads(json.dumps(fitted.to_spec()))
+    restored = Preprocessor.from_spec(spec)
+
+    np.testing.assert_array_equal(restored.transform(frame), fitted.transform(frame))
+    assert restored.get_feature_names_out().tolist() == fitted.get_feature_names_out().tolist()
+    assert restored.fingerprint_ == original_fingerprint
 
 
 def test_to_spec_requires_fitted():

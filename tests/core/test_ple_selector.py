@@ -95,3 +95,29 @@ def test_lightgbm_selector_places_thresholds(data):
     t = PLETransformer(output_dim=5, task="regression", placement_strategy="lightgbm").fit(X, y)
     assert t.n_bins_per_feature_ == [5]
     assert np.all(np.diff(t.thresholds_[0]) > 0)
+
+
+@pytest.mark.parametrize("levels", [2, 3, 4, 5, 6])
+def test_ple_keeps_output_dim_and_no_constant_columns_on_discrete_features(levels):
+    """Regression guard for issue #57: thresholds on the range boundary produced a
+    constant column and a narrower-than-requested output."""
+    rng = np.random.default_rng(levels)
+    x = rng.integers(0, levels, size=400).astype(float).reshape(-1, 1)
+    y = np.sin(x[:, 0]) + rng.normal(0, 0.3, size=400)
+    out = PLETransformer(output_dim=7).fit(x, y).transform(x)
+    assert out.shape[1] == 7
+    assert (out.std(axis=0) > 0).all()
+
+
+def test_ple_encodes_the_position_inside_narrow_bins_on_a_tiny_range_feature():
+    """Regression guard for issue #57: PLE treated every bin narrower than an
+    absolute 1e-10 as zero-width and encoded all of its values as 0.5."""
+    rng = np.random.default_rng(0)
+    x = rng.uniform(0.0, 1e-11, size=200)
+    t = PLETransformer(output_dim=4).fit(x.reshape(-1, 1), rng.normal(size=200))
+    edges = t.edges_[0]
+    bins = np.searchsorted(t.thresholds_[0], x, side="right")
+    expected = (x - edges[bins]) / (edges[bins + 1] - edges[bins])
+    out = t.transform(x.reshape(-1, 1))
+    assert out.shape[1] == 4
+    np.testing.assert_allclose(out[np.arange(len(x)), bins], expected, rtol=1e-5, atol=1e-6)
