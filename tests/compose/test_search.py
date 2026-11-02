@@ -9,10 +9,19 @@ here is a controlled nonlinear signal (``sin``) where an expressive basis
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.base import BaseEstimator, RegressorMixin, is_classifier, is_regressor
 from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit, KFold, LeaveOneGroupOut
+from sklearn.model_selection import (
+    GroupKFold,
+    GroupShuffleSplit,
+    KFold,
+    LeaveOneGroupOut,
+    StratifiedKFold,
+    check_cv,
+    cross_val_score,
+)
+from sklearn.svm import SVC
 
 from pretab import RepresentationSearchCV
 from pretab.exceptions import InvalidParamError
@@ -213,6 +222,106 @@ def class_data():
     rng = np.random.default_rng(0)
     X = pd.DataFrame({"x": rng.uniform(-3, 3, 300)})
     return X, np.where(np.sin(X["x"]) > 0, "pos", "neg")
+
+
+_DELEGATED = ("classes_", "predict_proba", "predict_log_proba", "decision_function")
+# Target-aware placement of the "ple" candidate on string class labels.
+_CLASSIFICATION = {"task": "classification"}
+
+
+def test_search_takes_the_estimator_type(class_data):
+    """The search was neither a classifier nor a regressor, so nested cross-validation
+    of a classifier search used KFold instead of StratifiedKFold."""
+    _, y = class_data
+    classifier_search = RepresentationSearchCV(LogisticRegression(), methods=["minmax"])
+    regressor_search = RepresentationSearchCV(Ridge(), methods=["minmax"])
+
+    assert is_classifier(classifier_search) and not is_regressor(classifier_search)
+    assert is_regressor(regressor_search) and not is_classifier(regressor_search)
+    assert isinstance(check_cv(3, y, classifier=is_classifier(classifier_search)), StratifiedKFold)
+
+
+def test_classifier_search_delegates_to_the_best_estimator(class_data):
+    X, y = class_data
+    search = RepresentationSearchCV(
+        LogisticRegression(), methods=["minmax", "ple"], cv=3, preprocessor_params=_CLASSIFICATION, random_state=0
+    ).fit(X, y)
+    x = search.best_preprocessor_.transform(X, return_array=True)
+
+    np.testing.assert_array_equal(search.classes_, ["neg", "pos"])
+    np.testing.assert_allclose(search.predict_proba(X), search.best_estimator_.predict_proba(x))
+    np.testing.assert_allclose(search.predict_log_proba(X), search.best_estimator_.predict_log_proba(x))
+    np.testing.assert_allclose(search.decision_function(X), search.best_estimator_.decision_function(x))
+
+
+@pytest.mark.parametrize("frame_type", ["pandas", "polars"])
+def test_grouped_weighted_classifier_preserves_delegation_and_input_metadata(class_data, frame_type):
+    X, y = class_data
+    if frame_type == "polars":
+        pl = pytest.importorskip("polars")
+        X = pl.DataFrame({"x": X["x"].to_numpy()})
+    groups = np.repeat(np.arange(30), 10)
+    weights = np.linspace(0.1, 2.0, len(y))
+    search = _search(
+        LogisticRegression(), ["minmax", "ple"], cv=GroupKFold(3), scoring="roc_auc", preprocessor_params=None
+    ).fit(X, y, groups=groups, sample_weight=weights)
+
+    assert is_classifier(search)
+    assert search.best_preprocessor_.task == "classification"
+    assert search.best_score_ > 0.9
+    assert search.n_features_in_ == 1
+    np.testing.assert_array_equal(search.feature_names_in_, ["x"])
+    np.testing.assert_array_equal(search.classes_, ["neg", "pos"])
+    x_all = search.best_preprocessor_.transform(X, return_array=True)
+    expected = LogisticRegression().fit(x_all, y, sample_weight=weights)
+    np.testing.assert_allclose(search.best_estimator_.coef_, expected.coef_)
+    np.testing.assert_allclose(search.best_estimator_.intercept_, expected.intercept_)
+    np.testing.assert_allclose(search.predict_proba(X), expected.predict_proba(x_all))
+
+
+def test_delegated_methods_follow_the_wrapped_estimator(class_data, nonlinear_data):
+    X, y = class_data
+    # SVC without probability=True has a decision_function but no predict_proba.
+    svc_search = RepresentationSearchCV(SVC(), methods=["minmax"], cv=3)
+    assert hasattr(svc_search, "decision_function") and not hasattr(svc_search, "predict_proba")
+    svc_search.fit(X, y)
+    assert hasattr(svc_search, "decision_function") and not hasattr(svc_search, "predict_proba")
+
+    X_reg, y_reg = nonlinear_data
+    regressor_search = _search(Ridge(), ["minmax"]).fit(X_reg, y_reg)
+    assert not any(hasattr(regressor_search, attr) for attr in _DELEGATED)
+
+
+def test_unfitted_classifier_search_raises_not_fitted(class_data):
+    X, _ = class_data
+    search = RepresentationSearchCV(LogisticRegression(), methods=["minmax"])
+    assert not hasattr(search, "classes_")
+    with pytest.raises(NotFittedError):
+        search.predict_proba(X)
+
+
+def test_nested_cross_val_score_with_roc_auc(class_data):
+    """roc_auc needs classes_ and predict_proba / decision_function: every outer fold
+    scored nan."""
+    X, y = class_data
+    search = RepresentationSearchCV(
+        LogisticRegression(), methods=["minmax", "ple"], cv=3, preprocessor_params=_CLASSIFICATION, random_state=0
+    )
+    scores = cross_val_score(search, X, y, scoring="roc_auc", cv=3)
+    assert np.all(np.isfinite(scores))
+    assert scores.min() > 0.9
+
+
+def test_search_records_the_input_features(nonlinear_data):
+    X, y = nonlinear_data
+    search = _search(LinearRegression(), ["bspline"]).fit(X, y)
+    assert search.n_features_in_ == 1
+    np.testing.assert_array_equal(search.feature_names_in_, ["x"])
+
+    # Refitting on an array drops the stale names.
+    search.fit(X.to_numpy(), y)
+    assert search.n_features_in_ == 1
+    assert not hasattr(search, "feature_names_in_")
 
 
 def test_classifier_search_places_against_class_labels(class_data):
