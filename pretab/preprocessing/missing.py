@@ -2,7 +2,13 @@ import numpy as np
 import pandas as pd
 from scipy import sparse as sp
 from sklearn.base import BaseEstimator, OneToOneFeatureMixin, TransformerMixin
-from sklearn.utils.validation import check_array, check_is_fitted, validate_data
+from sklearn.utils.validation import (
+    _check_feature_names,
+    _check_feature_names_in,
+    check_array,
+    check_is_fitted,
+    validate_data,
+)
 
 
 class _CategoricalMissingNormalizer(OneToOneFeatureMixin, TransformerMixin, BaseEstimator):
@@ -48,6 +54,10 @@ class MissingStateIndicator(TransformerMixin, BaseEstimator):
     ----------
     n_features_in_ : int
         Number of input features seen during ``fit``.
+    feature_names_in_ : ndarray of str
+        Names of the input columns seen during ``fit``. Defined only when ``X``
+        was a DataFrame with string column names; ``transform`` then requires
+        the same columns in the same order.
 
     Examples
     --------
@@ -75,6 +85,7 @@ class MissingStateIndicator(TransformerMixin, BaseEstimator):
         self : object
             Fitted transformer.
         """
+        _check_feature_names(self, X, reset=True)
         X = np.asarray(X)
         self.n_features_in_ = X.shape[1] if X.ndim > 1 else 1
         return self
@@ -93,6 +104,7 @@ class MissingStateIndicator(TransformerMixin, BaseEstimator):
             The missingness indicator as ``float``.
         """
         check_is_fitted(self, "n_features_in_")
+        _check_feature_names(self, X, reset=False)
         X = np.asarray(X)
         if X.ndim == 1:
             X = X.reshape(-1, 1)
@@ -103,19 +115,26 @@ class MissingStateIndicator(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        input_features : list of str or None
-            The names of the input features. When ``None``, names of the form
-            ``x0, x1, ...`` are generated.
+        input_features : array-like of str or None, default=None
+            Input feature names. ``None`` uses ``feature_names_in_`` when the
+            transformer was fitted on a DataFrame, else ``x0, x1, ...``. Explicit
+            names need one entry per input feature and, after a DataFrame fit,
+            must equal ``feature_names_in_``.
 
         Returns
         -------
         feature_names : ndarray of shape (n_features,)
             The output feature names.
+
+        Raises
+        ------
+        ValueError
+            If ``input_features`` does not have one entry per input feature, or
+            differs from ``feature_names_in_``.
         """
         check_is_fitted(self, "n_features_in_")
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
-        return np.asarray([f"{name}__missing" for name in input_features], dtype=object)
+        names = np.asarray(_check_feature_names_in(self, input_features))
+        return np.asarray([f"{name}__missing" for name in names], dtype=object)
 
     def __sklearn_tags__(self):
         """Declare that missing values are expected (they are the signal)."""

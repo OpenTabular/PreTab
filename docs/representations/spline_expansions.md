@@ -23,8 +23,9 @@ knot positions by `placement_strategy` (see
 Without explicit knots, `output_dim` is the number of output columns for a univariate spline
 **per input feature**, not the total. A `(n_samples, 3)` input produces
 `(n_samples, 3 * output_dim)` output (plus one extra column per feature if
-`include_bias=True`). Feature names are suffixed per input, for example `x0_bs0, x0_bs1, ...`
-for a B-spline on column `x0`. For B/M/I splines with explicit `knot_locations`, a feature
+`include_bias=True`). Feature names are suffixed per input, for example `age_bs0, age_bs1, ...`
+for a B-spline fitted on a DataFrame column `age` (`x0_bs0, x0_bs1, ...` for array input).
+For B/M/I splines with explicit `knot_locations`, a feature
 with `K` retained unique interior knots instead gets `K + degree + 1` non-bias columns;
 different feature ranges can therefore produce different widths.
 ```

@@ -885,7 +885,7 @@ def test_cross_fitting_a_discrete_feature_keeps_a_fixed_width(seed):
     assert out.shape == (200, 10)
 
 
-@pytest.mark.parametrize("wrapped_kind", ["preprocessor", "column_transformer", "pipeline"])
+@pytest.mark.parametrize("wrapped_kind", ["ple", "preprocessor", "column_transformer", "pipeline"])
 def test_dataframe_representation_spec_defaults_to_fitted_names(mixed_frame, wrapped_kind):
     from sklearn.compose import ColumnTransformer
     from sklearn.pipeline import Pipeline
@@ -893,7 +893,10 @@ def test_dataframe_representation_spec_defaults_to_fitted_names(mixed_frame, wra
     from pretab import Preprocessor
 
     X, y = mixed_frame
-    if wrapped_kind == "preprocessor":
+    if wrapped_kind == "ple":
+        X = X[["num"]]
+        wrapped = PLETransformer(output_dim=4)
+    elif wrapped_kind == "preprocessor":
         wrapped = Preprocessor(output_dim=4, random_state=0)
     else:
         wrapped = ColumnTransformer([("ple", PLETransformer(output_dim=4), ["num"])])
@@ -902,13 +905,13 @@ def test_dataframe_representation_spec_defaults_to_fitted_names(mixed_frame, wra
     cross_fitted = CrossFittedTransformer(wrapped, n_folds=3, random_state=0).fit(X, y)
 
     spec = cross_fitted.get_representation_spec()
-    assert spec.input_features == ("num", "city")
+    assert spec.input_features == tuple(X.columns)
     assert spec.output_features == tuple(cross_fitted.get_feature_names_out())
     assert spec.cross_fitted is True
     assert spec.n_folds == 3
     assert spec.uses_target is True
     assert spec == type(spec).from_dict(spec.to_dict())
-    assert cross_fitted.get_representation_spec(["num", "city"]) == spec
+    assert cross_fitted.get_representation_spec(list(X.columns)) == spec
 
 
 def test_dataframe_fold_rows_keep_index_dtypes_and_target_alignment(mixed_frame, monkeypatch):

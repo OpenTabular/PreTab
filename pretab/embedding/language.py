@@ -1,6 +1,8 @@
+from typing import cast
+
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.validation import _check_feature_names, _check_feature_names_in, check_is_fitted
 
 from ..exceptions import OptionalDependencyError, PretabConfigError, PretabDataError
 
@@ -27,6 +29,10 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         ``fit`` from ``model`` or by loading ``model_name``.
     n_features_in_ : int
         Number of input features seen during ``fit``.
+    feature_names_in_ : ndarray of str
+        Names of the input columns seen during ``fit``. Defined only when ``X``
+        was a DataFrame with string column names; ``transform`` then requires
+        the same columns in the same order.
     embedding_dim_ : int
         Dimensionality of the embeddings produced by ``model_``.
 
@@ -76,6 +82,7 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         self : object
             Fitted transformer.
         """
+        _check_feature_names(self, X, reset=True)
         X = np.asarray(X)
         self.n_features_in_ = X.shape[1] if X.ndim > 1 else 1
         self.model_ = self._resolve_model()
@@ -115,6 +122,7 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
         """
         if getattr(self, "model_", None) is None:
             raise PretabConfigError("Model is not initialized. Call `fit` before `transform`.")
+        _check_feature_names(self, X, reset=False)
 
         # Normalise to a 2D array of strings so each column is encoded on its own
         # and the row count is preserved (a flat encode would return
@@ -143,16 +151,23 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        input_features : array-like of str or None
-            Input feature names. When ``None``, names of the form ``x0, x1, ...``
-            are generated.
+        input_features : array-like of str or None, default=None
+            Input feature names. ``None`` uses ``feature_names_in_`` when the
+            transformer was fitted on a DataFrame, else ``x0, x1, ...``. Explicit
+            names need one entry per input feature and, after a DataFrame fit,
+            must equal ``feature_names_in_``.
 
         Returns
         -------
         feature_names_out : ndarray of str, shape (n_features_in_ * embedding_dim_,)
+
+        Raises
+        ------
+        ValueError
+            If ``input_features`` does not have one entry per input feature, or
+            differs from ``feature_names_in_``.
         """
         check_is_fitted(self, ["n_features_in_", "embedding_dim_"])
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
-        names = [f"{col}_emb{j}" for col in input_features for j in range(self.embedding_dim_)]
+        columns = cast(np.ndarray, _check_feature_names_in(self, input_features))
+        names = [f"{col}_emb{j}" for col in columns for j in range(self.embedding_dim_)]
         return np.asarray(names, dtype=object)

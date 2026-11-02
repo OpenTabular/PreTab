@@ -127,3 +127,19 @@ def test_lineage_source_features_are_single_input_per_block(mixed_frame):
         # column traces back to exactly one source feature.
         assert len(record.source_features) == 1
         assert not record.is_interaction
+
+
+@pytest.mark.parametrize(("method", "family"), [("ple", "piecewise_linear"), ("rbf", "rbf"), ("bspline", "bspline")])
+def test_lineage_keeps_the_missing_indicator_separate_from_the_representation(method, family):
+    """The indicator keeps its own lineage without becoming a representation input."""
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=120)
+    a[::7] = np.nan
+    X = pd.DataFrame({"a": a, "b": rng.normal(size=120)})
+    pre = _fit(X, rng.normal(size=120), numerical_method=method, add_missing_indicator=True)
+
+    lineage = pre.get_feature_lineage()
+
+    assert [record.output_feature for record in lineage] == list(pre.get_feature_names_out())
+    assert {record.family for record in lineage} == {family, "missing_state"}
+    assert {record.source_features for record in lineage} == {("a",), ("b",)}

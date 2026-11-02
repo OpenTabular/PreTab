@@ -6,6 +6,7 @@ Regression guards for issue #55: integer labels were read as *positions* by
 scikit-learn's ColumnTransformer, silently swapping columns.
 """
 
+import warnings
 from typing import cast
 
 import numpy as np
@@ -16,6 +17,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import make_pipeline
 
 from pretab import Preprocessor
+from pretab.core.supervised import CrossFittedTransformer
 from pretab.exceptions import PretabDataError
 
 
@@ -90,6 +92,48 @@ def test_preprocessor_chains_after_a_pandas_column_transformer():
     pipe = make_pipeline(upstream, Preprocessor(numerical_method="minmax")).fit(X, rng.normal(size=50))
     assert cast(Preprocessor, pipe[-1]).get_feature_names_out().tolist() == ["num_imp__age", "num_imp__income"]
     assert np.asarray(pipe.transform(X)).shape == (50, 2)
+
+
+@pytest.mark.parametrize("method", ["ple", "rbf", "bspline"])
+@pytest.mark.parametrize("numerical_imputation", [None, "median"])
+def test_named_representation_paths_align_columns_without_feature_name_warnings(method, numerical_imputation):
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(
+        {
+            "age": rng.normal(40, 10, 120),
+            "income": rng.normal(50, 10, 120),
+            "city": rng.choice(["a", "b", "c"], 120),
+        }
+    )
+    y = X["age"].to_numpy() + rng.normal(size=len(X))
+    if numerical_imputation is not None:
+        X.loc[::7, "age"] = np.nan
+    reordered = X[["city", "income", "age"]]
+    pre = Preprocessor(
+        numerical_method=method,
+        categorical_method="one-hot",
+        output_dim=5,
+        scaling="none",
+        numerical_imputation=numerical_imputation,
+        add_missing_indicator=True,
+        random_state=0,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        pre.fit(X, y)
+        expected = np.asarray(pre.transform(X, return_array=True))
+        np.testing.assert_allclose(np.asarray(pre.transform(reordered, return_array=True)), expected)
+        numerical, categorical, _ = pre.get_feature_info(verbose=False)
+        dimensions = [info["dimension"] for info in [*numerical.values(), *categorical.values()]]
+        assert sum(dimensions) == expected.shape[1]
+        assert [record.output_feature for record in pre.get_feature_lineage()] == list(pre.get_feature_names_out())
+        restored = Preprocessor.from_spec(pre.to_spec())
+        np.testing.assert_allclose(np.asarray(restored.transform(reordered, return_array=True)), expected)
+        cross_fitted = CrossFittedTransformer(pre, n_folds=3, random_state=0)
+        assert cross_fitted.fit_transform(X, y).shape == expected.shape
+        assert cross_fitted.get_representation_spec().input_features == tuple(X.columns)
+        np.testing.assert_allclose(cross_fitted.transform(reordered), expected)
 
 
 def test_integer_labels_route_each_column_to_its_own_block(int_labelled):
