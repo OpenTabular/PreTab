@@ -383,6 +383,34 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
 
 
+# --- positional width check at transform (issue #72) ------------------------------
+
+
+@pytest.mark.parametrize("as_list", [False, True], ids=["ndarray", "list"])
+@pytest.mark.parametrize("width", [2, 4])
+def test_transform_rejects_positional_input_of_a_different_width(width, as_list):
+    """Regression guard for issue #72: an extra array column silently shifted features."""
+    rng = np.random.default_rng(0)
+    X, y = rng.normal(size=(60, 3)), rng.normal(size=60)
+    pre = Preprocessor(random_state=0).fit(X, y)
+    incoming = rng.normal(size=(5, width))
+    with pytest.raises(
+        PretabDataError, match=rf"^X has {width} features, but Preprocessor is expecting 3 features as input\.$"
+    ):
+        pre.transform(incoming.tolist() if as_list else incoming)
+
+
+@pytest.mark.parametrize("as_list", [False, True], ids=["ndarray", "list"])
+def test_transform_accepts_positional_input_of_the_fitted_width(as_list):
+    rng = np.random.default_rng(0)
+    X, y = rng.normal(size=(60, 3)), rng.normal(size=60)
+    pre = Preprocessor(random_state=0).fit(X, y)
+    expected = np.asarray(pre.transform(X))
+    actual = np.asarray(pre.transform(X.tolist() if as_list else X))
+    assert actual.shape == (len(X), pre.total_output_dim_)
+    np.testing.assert_array_equal(actual, expected)
+
+
 @pytest.mark.parametrize("method", ["bspline", "mspline", "ispline", "pspline", "naturalspline", "rbf"])
 def test_unsupervised_numerical_method_accepts_a_multi_output_target(method):
     """The B/M/I splines flattened y even when target_aware=False, so a 2-D target
