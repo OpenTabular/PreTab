@@ -14,6 +14,7 @@ Each concrete transformer only implements how a single column is turned into a
 basis matrix through the ``_design_matrix`` hook.
 """
 
+import warnings
 from typing import ClassVar, Literal
 
 import numpy as np
@@ -23,17 +24,17 @@ from ...core.base import BasePreTabTransformer
 from ...core.knots import (
     basis_to_knots,
     generate_internal_knots,
-    quantile_knots,
     select_knots,
-    uniform_knots,
+    supplement_interior_knots,
 )
-from ...core.parameters import UNSET, validate_placement
+from ...core.parameters import UNSET, validate_placement, validate_task
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...core.supervised import warn_target_leakage
 from ...exceptions import (
-    IncompatibleParamsError,
+    DataWarning,
     InvalidParamError,
     PretabDataError,
+    invalid_param_error,
 )
 from ...placement.adapters import SplinePlacementAdapter
 
@@ -65,25 +66,42 @@ class BaseSplineTransformer(BasePreTabTransformer):
     knot_locations : ndarray or None, default=None
         Explicit internal knot locations applied to every feature. Takes priority
         over ``target_aware`` placement and the automatic strategy, and overrides
-        ``output_dim``.
+        ``output_dim`` and the adaptive bounds. Repeated knots are merged; knots
+        on or outside a feature's fitted range are dropped for that feature with
+        a :class:`~pretab.exceptions.DataWarning`, without adding replacements.
+        A feature with ``K`` retained unique interior knots gets
+        ``K + degree + 1`` non-bias basis functions.
 
     target_aware : bool, default=False
         If True, knots are placed by a target-aware selector built from
-        ``placement_strategy`` (requires ``y`` during fit). If False, knots are
-        placed by the unsupervised ``placement_strategy`` spacing.
+        ``placement_strategy`` (requires a single-target ``y`` during fit; a
+        multi-output ``y`` raises
+        :class:`~pretab.exceptions.IncompatibleParamsError`). If False, knots are
+        placed by the unsupervised ``placement_strategy`` spacing and ``y`` is
+        ignored (as it is with explicit ``knot_locations``).
 
     placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, default="quantile"
         When ``target_aware=True``, the selector: ``"cart"`` or ``"lightgbm"``.
         When ``target_aware=False``, the spacing rule: ``"uniform"`` spaces knots
         evenly across the range, ``"quantile"`` places them at data quantiles.
+        Interior knots are always unique and strictly inside the feature's range.
+        On tied data (top-coded, zero-inflated or low-cardinality features)
+        quantiles repeat or fall on the boundary; such knots are replaced by
+        strictly interior quantile / uniform knots, so no basis function
+        collapses to a point.
 
     task : {"regression", "classification"} or None, default=None
-        Task passed to the target-aware selector when ``target_aware=True``.
+        Task passed to the target-aware selector when ``target_aware=True``. ``None`` is
+        treated as ``"regression"``; any other value raises
+        :class:`~pretab.exceptions.InvalidParamError` at ``fit``.
 
     adaptive : bool, default=False
         If True, the per-feature output dimension may vary within
         ``[min_output_dim, max_output_dim]``. When both bounds are set,
         ``output_dim`` is ignored entirely.
+        A target-aware selector searches exactly this window (the width set by
+        ``output_dim`` when ``adaptive=False``) and keeps its most informative
+        splits.
 
     min_output_dim : int or None, default=None
         Lower bound on the per-feature output dimension used in adaptive mode.
@@ -98,8 +116,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
         Overrides this family's default ``out_of_range`` behavior (unconditional
         clipping to the fitted knot range). Pass e.g.
         ``RepresentationPolicy(out_of_range="error")`` to raise instead, or
-        ``"warn"`` / ``"extrapolate"`` for the other supported reactions. Leaving
-        this at ``None`` preserves the historical clip-on-transform behavior.
+        ``"warn"`` / ``"extrapolate"`` for the other supported reactions, which
+        evaluate an out-of-range value on the extended boundary polynomial pieces
+        of the B/M-spline basis (an I-spline stays at 0 below and 1 above the
+        range). A mapping overrides only the axes it names, so ``{"constant": "warn"}``
+        keeps the clipping. Leaving this at ``None`` preserves the historical
+        clip-on-transform behavior.
 
     Attributes
     ----------
@@ -126,6 +148,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
     precedence over target-aware ``placement_strategy`` selection, which in turn
     takes precedence over the automatic ``output_dim`` strategy. Multi-column input
     is expanded column by column and stacked horizontally.
+
+    Missing values are ignored for knot placement; at transform time a missing value
+    expands to a row of NaN in its feature's basis block (an optional bias column
+    stays 1), as in the other spline families.
 
     Examples
     --------
@@ -195,30 +221,22 @@ class BaseSplineTransformer(BasePreTabTransformer):
     def _adjust_internal_knots(
         self, x: np.ndarray, internal_knots: np.ndarray, min_knots: int, max_knots: int
     ) -> np.ndarray:
-        """Clip, deduplicate and rebalance internal knots to the allowed count."""
-        internal_knots = np.clip(internal_knots, x.min(), x.max())
-        internal_knots = np.unique(np.sort(internal_knots))
-        if len(internal_knots) < min_knots:
-            internal_knots = self._supplement_knots(x, internal_knots, min_knots)
+        """Restrict, deduplicate and rebalance internal knots to the allowed count.
+
+        Interior knots must lie strictly inside the data range and be unique: a
+        knot on the boundary or a repeated knot collapses a basis function's
+        support to a point, giving a dead column (and, at the boundary, all-zero
+        B/M-spline rows at ``x_max``). Such knots are dropped and the set is
+        topped up to ``min_knots`` before an overfull set is trimmed.
+        """
+        internal_knots = self._supplement_knots(x, internal_knots, min_knots)
         if len(internal_knots) > max_knots:
             internal_knots = select_knots(internal_knots, max_knots)
         return internal_knots
 
     def _supplement_knots(self, x: np.ndarray, internal_knots: np.ndarray, target_count: int) -> np.ndarray:
-        """Add quantile and uniform candidates until ``target_count`` knots exist."""
-        if target_count <= len(internal_knots):
-            return internal_knots
-
-        candidates = [internal_knots]
-        if target_count > 0:
-            candidates.append(quantile_knots(x, target_count))
-            candidates.append(uniform_knots(x, target_count))
-
-        combined = np.unique(np.concatenate(candidates))
-        combined = np.sort(combined)
-        if len(combined) < target_count:
-            combined = uniform_knots(x, target_count)
-        return select_knots(np.asarray(combined), target_count)
+        """Keep the strictly interior, unique knots and top them up to ``target_count``."""
+        return supplement_interior_knots(x, internal_knots, target_count)
 
     def _column_knots(
         self,
@@ -231,52 +249,86 @@ class BaseSplineTransformer(BasePreTabTransformer):
         max_basis_req: int | None,
     ) -> np.ndarray:
         """Build the full knot vector for a single feature."""
+        x_min = x_valid.min()
+        x_max = x_valid.max()
+        boundary_left = np.repeat(x_min, self.degree + 1)
+        boundary_right = np.repeat(x_max, self.degree + 1)
+
+        if self.knot_locations is not None:
+            internal_knots = self._explicit_knots(x_min, x_max)
+            return np.concatenate([boundary_left, internal_knots, boundary_right])
+
         min_basis, max_basis = self._resolve_basis_bounds(n_basis, min_basis_req, max_basis_req)
         min_knots = self._basis_to_knots(min_basis)
         max_knots = self._basis_to_knots(max_basis)
         if self.adaptive:
             max_knots = min(max_knots, max(0, np.unique(x_valid).size - 2))
 
-        x_min = x_valid.min()
-        x_max = x_valid.max()
-
-        if self.knot_locations is not None:
-            expected_knots = self._basis_to_knots(n_basis)
-            if not self.adaptive and len(self.knot_locations) != expected_knots:
-                raise IncompatibleParamsError(
-                    "knot_locations length must match output_dim - degree - 1 when adaptive=False"
-                )
-            internal_knots = self._adjust_internal_knots(x_valid, np.asarray(self.knot_locations), min_knots, max_knots)
-        elif selector is not None:
-            selected = selector.get_knot_locations(x_valid.reshape(-1, 1), y_valid, task=self.task)
+        if selector is not None:
+            # Search exactly the window this feature needs, so the selector's own
+            # importance ranking picks the knots instead of a positional trim.
+            min_knots = min(min_knots, max_knots)
+            selected = selector.get_knot_locations(
+                x_valid.reshape(-1, 1), y_valid, task=self.task, min_knots=min_knots, max_knots=max_knots
+            )
             internal_knots = self._adjust_internal_knots(x_valid, np.asarray(selected), min_knots, max_knots)
         else:
             n_internal = self._basis_to_knots(n_basis)
             internal_knots = self._generate_knots(x_valid, n_internal, strategy)
             internal_knots = self._adjust_internal_knots(x_valid, internal_knots, min_knots, max_knots)
 
-        internal_knots = np.clip(internal_knots, x_min, x_max)
-        internal_knots = np.unique(np.sort(internal_knots))
-
-        boundary_left = np.repeat(x_min, self.degree + 1)
-        boundary_right = np.repeat(x_max, self.degree + 1)
         return np.concatenate([boundary_left, internal_knots, boundary_right])
+
+    def _explicit_knots(self, x_min: float, x_max: float) -> np.ndarray:
+        """Return the user's ``knot_locations`` that are valid interior knots for one feature.
+
+        Repeated knots are merged. A knot on or beyond the fitted range would give
+        a basis function with zero-width support, so such knots are dropped with
+        a :class:`~pretab.exceptions.DataWarning` instead of being replaced.
+        """
+        requested = np.unique(np.asarray(self.knot_locations, dtype=float))
+        inside = (requested > x_min) & (requested < x_max)
+        if not inside.all():
+            warnings.warn(
+                f"knot_locations {requested[~inside].tolist()} lie outside the open feature range "
+                f"({float(x_min)!r}, {float(x_max)!r}) and were dropped: a knot on or beyond the "
+                "boundary gives a basis function with zero-width support.",
+                DataWarning,
+                stacklevel=4,
+            )
+        return requested[inside]
+
+    def _validate_knot_locations(self) -> None:
+        """Reject ``knot_locations`` that are not a 1-D sequence of finite numbers."""
+        try:
+            knots = np.asarray(self.knot_locations, dtype=float)
+        except (TypeError, ValueError):
+            knots = None
+        if knots is None or knots.ndim != 1 or not np.isfinite(knots).all():
+            raise invalid_param_error(
+                type(self).__name__,
+                "knot_locations",
+                self.knot_locations,
+                "must be a 1-D sequence of finite numbers (the interior knots shared by every feature)",
+            )
 
     def fit(self, X, y=None):
         """Determine per-feature knot vectors."""
         warn_target_leakage(self, y)
         validate_placement(self.target_aware, self.placement_strategy)
+        validate_task(self.task, type(self).__name__, allow_none=True)
         n_basis = self._resolve_param("output_dim", default=6)
         min_basis_req = self._resolve_param("min_output_dim", default=None)
         max_basis_req = self._resolve_param("max_output_dim", default=None)
-        if n_basis < self.degree + 1:
+        if self.knot_locations is not None:
+            # Explicit knots fix the width; output_dim and the adaptive bounds are ignored.
+            self._validate_knot_locations()
+        elif n_basis < self.degree + 1:
             raise InvalidParamError(f"output_dim must be >= degree + 1 = {self.degree + 1}, got {n_basis}")
-        if n_basis > 50:
+        elif n_basis > 50:
             raise InvalidParamError(f"output_dim should be <= 50, got {n_basis}")
 
         X = self._validate(X, reset=True)
-
-        y_arr = None if y is None else np.asarray(y).ravel()
 
         # Knot placement priority: explicit knot_locations win, then a target-aware
         # selector built from placement_strategy, then the automatic (unsupervised)
@@ -292,6 +344,10 @@ class BaseSplineTransformer(BasePreTabTransformer):
         else:
             selector = None
             strategy = self.placement_strategy if not self.target_aware else "quantile"
+        # Only the target-aware selector reads y; the unsupervised and explicit-knot
+        # paths ignore it, so any target shape (e.g. multi-output) can pass through
+        # a Pipeline. For the selector, y is sliced by rows like X, not flattened.
+        y_arr = None if y is None or selector is None else np.asarray(y)
 
         self.knots_ = []
         for i in range(X.shape[1]):
@@ -323,7 +379,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
         for i in range(X.shape[1]):
             knots = self.knots_[i]
             xi = resolve_out_of_range(X[:, i], knots[0], knots[-1], self._resolved_policy(), estimator=self)
-            design = self._design_matrix(xi, knots)
+            # A missing value has no position on the basis: only the observed rows
+            # are evaluated and the missing ones stay NaN (the "propagate" contract
+            # of the other spline families) instead of becoming a finite basis row.
+            observed = ~np.isnan(xi)
+            design = np.full((len(xi), self.n_basis_[i]), np.nan)
+            design[observed] = self._design_matrix(xi[observed], knots)
             if self.include_bias:
                 design = np.hstack([np.ones((design.shape[0], 1)), design])
             transformed.append(design)
@@ -335,7 +396,12 @@ class BaseSplineTransformer(BasePreTabTransformer):
         return self.fit(X, y).transform(X)
 
     def _design_matrix(self, x: np.ndarray, knots: np.ndarray) -> np.ndarray:
-        """Return the basis matrix for a single feature (without the bias column)."""
+        """Return the basis matrix for a single feature (without the bias column).
+
+        ``x`` holds only the observed (non-missing) values, already resolved
+        against the out-of-range policy; :meth:`transform` fills the rows of
+        missing values with NaN.
+        """
         raise NotImplementedError
 
     def _feature_suffix(self) -> str:

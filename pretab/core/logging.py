@@ -34,9 +34,29 @@ def get_logger(name: str = "pretab") -> logging.Logger:
     return logging.getLogger(name)
 
 
+# Marks the handler :func:`configure_logging` attaches, so later calls can tell
+# PreTab's own handler apart from one owned by the host application.
+_OWN_HANDLER_FLAG = "_pretab_own_handler"
+
+
+def _is_host_handler(handler: logging.Handler) -> bool:
+    """Whether ``handler`` belongs to the host (neither a ``NullHandler`` nor PreTab's own)."""
+    return not isinstance(handler, logging.NullHandler) and not getattr(handler, _OWN_HANDLER_FLAG, False)
+
+
 def _has_real_handler(logger: logging.Logger) -> bool:
-    """Whether ``logger`` already carries a handler other than ``NullHandler``."""
-    return any(not isinstance(handler, logging.NullHandler) for handler in logger.handlers)
+    """Whether ``logger`` itself carries a host handler (one PreTab did not attach)."""
+    return any(_is_host_handler(handler) for handler in logger.handlers)
+
+
+def _ancestor_has_real_handler(logger: logging.Logger) -> bool:
+    """Whether a host handler on an ancestor receives ``logger``'s records through propagation."""
+    current = logger
+    while current.propagate and current.parent is not None:
+        current = current.parent
+        if _has_real_handler(current):
+            return True
+    return False
 
 
 def set_verbosity(level: int = 1) -> None:
@@ -57,8 +77,15 @@ def configure_logging(level: int = 1, handler: "logging.Handler | None" = None) 
 
     Sets the ``"pretab"`` logger level and attaches a stream handler so PreTab's
     messages become visible. This never touches the root logger, and it is a
-    no-op when a real (non-``NullHandler``) handler is already attached -- so an
-    embedding host (such as DeepTab) that owns handler/level policy always wins.
+    no-op when the host has attached a real (non-``NullHandler``) handler to the
+    ``"pretab"`` logger -- so an embedding host (such as DeepTab) that owns
+    handler/level policy always wins.
+
+    Repeated calls update the level (the handler PreTab attached earlier is
+    reused, never duplicated). When a host handler on an ancestor logger -- such
+    as a root handler from :func:`logging.basicConfig` -- already receives
+    PreTab's records, no handler is attached (and one attached earlier is
+    removed), so every message is printed once.
 
     Parameters
     ----------
@@ -71,7 +98,15 @@ def configure_logging(level: int = 1, handler: "logging.Handler | None" = None) 
     if _has_real_handler(_LOGGER):
         return
     set_verbosity(level)
+    own_handlers = [existing for existing in _LOGGER.handlers if getattr(existing, _OWN_HANDLER_FLAG, False)]
+    if _ancestor_has_real_handler(_LOGGER):
+        for existing in own_handlers:
+            _LOGGER.removeHandler(existing)
+        return
+    if own_handlers:
+        return
     if handler is None:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    setattr(handler, _OWN_HANDLER_FLAG, True)
     _LOGGER.addHandler(handler)

@@ -33,9 +33,9 @@ __all__ = [
     "SplinePlacementAdapter",
 ]
 
-# The spline knot selectors have always searched a fixed basis-function window,
-# independent of the requested output_dim (the transformer clamps to output_dim
-# afterwards). These reproduce ``CART/LightGBMKnotSelector``'s defaults.
+# Default basis-function search window of a standalone adapter, reproducing the
+# historical ``CART/LightGBMKnotSelector`` defaults. The spline transformers do
+# not rely on it: they pass their own resolved knot window per call.
 _SPLINE_MIN_BASIS = 3
 _SPLINE_MAX_BASIS = 15
 # Historical default seed used by the spline knot selectors when random_state is
@@ -67,8 +67,10 @@ class SplinePlacementAdapter:
         Random state forwarded to the strategy. When unset the historical spline
         default seed (51) is used.
     min_basis_functions, max_basis_functions : int
-        Basis-function search window (defaults 3 and 15, matching the old
-        selectors).
+        Default basis-function search window (defaults 3 and 15, matching the old
+        selectors). It applies only when :meth:`get_knot_locations` is called
+        without ``min_knots`` / ``max_knots``; the spline transformers always pass
+        their own window.
     """
 
     def __init__(
@@ -101,14 +103,39 @@ class SplinePlacementAdapter:
         X: np.ndarray,
         y: np.ndarray | None = None,
         task: Task | None = "regression",
+        *,
+        min_knots: int | None = None,
+        max_knots: int | None = None,
     ) -> np.ndarray:
-        """Return sorted internal knot locations for a single feature."""
+        """Return sorted internal knot locations for a single feature.
+
+        Parameters
+        ----------
+        X : ndarray of shape (n_samples, 1)
+            Values of the feature.
+        y : ndarray of shape (n_samples,) or None, default=None
+            Target the selector places the knots against.
+        task : {"regression", "classification"} or None, default="regression"
+            Prediction task passed to the selector.
+        min_knots, max_knots : int or None, default=None
+            Interior-knot window for this call, overriding the adapter's default
+            window. The spline transformers pass the window resolved from their
+            own ``output_dim`` (or adaptive bounds), so that the selector's
+            importance ranking -- not a positional down-sample afterwards --
+            decides which knots are kept.
+
+        Returns
+        -------
+        ndarray
+            Sorted internal knot locations, usually ``min_knots`` to
+            ``max_knots`` of them.
+        """
         seed = self.random_state if self.random_state is not None else _SPLINE_DEFAULT_SEED
         strategy = create_placement_strategy(
             target_aware=True,
             placement_strategy=self.placement_strategy,
-            min_count=self.min_knots,
-            max_count=self.max_knots,
+            min_count=self.min_knots if min_knots is None else min_knots,
+            max_count=self.max_knots if max_knots is None else max_knots,
             task=task,
             random_state=seed,
         )

@@ -50,5 +50,5 @@ def test_tanh_invalid_strategy_raises():
 
 
 def test_tanh_invalid_task_raises():
-    with pytest.raises(ValueError, match="Invalid task"):
+    with pytest.raises(ValueError, match=r"TanhExpansionTransformer\.task = 'invalid' is invalid"):
         TanhExpansionTransformer(task="invalid").fit(np.random.rand(5, 1))

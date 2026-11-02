@@ -18,6 +18,7 @@ from sklearn.model_selection import BaseCrossValidator, check_cv
 from sklearn.utils.validation import _check_method_params, check_is_fitted
 
 from ..core._typing import PredictorLike
+from ..core.validation import is_polars_frame, polars_to_pandas
 from ..exceptions import InvalidParamError
 from ..preprocessor import Preprocessor
 
@@ -49,7 +50,9 @@ class RepresentationSearchCV(BaseEstimator):
         Scoring passed to :func:`sklearn.metrics.check_scoring`; ``None`` uses the
         estimator's ``score`` method.
     preprocessor_params : dict or None, default=None
-        Extra keyword arguments forwarded to every :class:`Preprocessor`.
+        Extra keyword arguments forwarded to every :class:`Preprocessor`. When
+        ``estimator`` is a classifier, ``task`` defaults to ``"classification"`` so
+        target-aware placement treats ``y`` as class labels.
     random_state : int or None, default=None
         Seed forwarded to each :class:`Preprocessor`.
 
@@ -76,17 +79,27 @@ class RepresentationSearchCV(BaseEstimator):
         self.random_state = random_state
 
     def _make_preprocessor(self, method):
-        """Build a Preprocessor for ``method`` with the shared parameters."""
+        """Build a Preprocessor for ``method`` with the shared parameters.
+
+        Target-aware placement follows the downstream estimator: a classifier makes
+        it ``task="classification"`` unless ``preprocessor_params`` sets ``task``.
+        """
         params = dict(self.preprocessor_params or {})
         params.setdefault("random_state", self.random_state)
+        if is_classifier(self.estimator):
+            params.setdefault("task", "classification")
         return Preprocessor(numerical_method=method, **params)
 
     def fit(self, X, y=None, *, groups=None, **fit_params):
         """Search over ``methods`` and refit the best representation on all data.
 
+        ``X`` may be a pandas or polars DataFrame or an array. A polars frame is
+        converted to pandas once, before the fold rows are taken, so every fold's
+        Preprocessor detects the same column types as the final refit.
+
         Parameters
         ----------
-        X : pandas.DataFrame or array-like of shape (n_samples, n_features)
+        X : pandas.DataFrame, polars.DataFrame or array-like of shape (n_samples, n_features)
             Input features, transformed by each candidate :class:`Preprocessor`.
         y : array-like of shape (n_samples,)
             Target values. Required.
@@ -114,6 +127,10 @@ class RepresentationSearchCV(BaseEstimator):
         if y is None:
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
         y_arr = np.asarray(y).ravel()
+        if is_polars_frame(X):
+            # Converted once, so every fold's rows carry the dtypes of the whole frame,
+            # as a pandas frame's do (see polars_to_pandas).
+            X = polars_to_pandas(X)
         n_samples = X.shape[0] if hasattr(X, "shape") else len(X)
         # As in scikit-learn's searches: per-sample fit params are made indexable
         # so each fold can take its training rows.

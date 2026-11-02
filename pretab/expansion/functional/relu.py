@@ -22,7 +22,9 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
     placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, optional
         Selector when `target_aware=True` (`"cart"` or `"lightgbm"`); spacing when
         `target_aware=False` (`"uniform"` or `"quantile"`). If left unset, resolves
-        to `"cart"` on the target-aware path and `"quantile"` otherwise.
+        to `"cart"` on the target-aware path and `"quantile"` otherwise. On tied
+        data the `"quantile"` centers stay distinct: the range endpoints are kept
+        once and repeated quantiles are replaced by strictly interior points.
 
     task : {"regression", "classification"}, default="regression"
         Task type for the target-aware selector used to place centers.
@@ -63,6 +65,12 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
     producing ``output_dim`` new features per original feature on the
     non-target-aware path; the target-aware default may place a data-driven number.
 
+    On the unsupervised (``"uniform"`` / ``"quantile"``) path the centers are the
+    first ``output_dim`` of ``output_dim + 1`` range-spanning locations: the first
+    center is the training minimum (a linear term), and the right endpoint is
+    dropped because a ramp starting at the training maximum is zero on every
+    training row.
+
     Examples
     --------
     >>> import numpy as np
@@ -77,6 +85,16 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
 
     _feature_suffix_value = "relu"
     _representation_family = "relu"
+
+    def _unsupervised_centers(self, adapter, x, n_centers):
+        """Return ``n_centers`` centers that each start a ramp inside the data.
+
+        A ramp ``max(0, x - c)`` centered at the training maximum is identically
+        zero on the training data, so ``n_centers + 1`` range-spanning locations
+        are placed and the right endpoint is dropped (the first center stays at
+        the minimum, giving the linear term).
+        """
+        return adapter.get_centers(x, None, n_centers + 1, n_centers + 1)[:-1]
 
     def __init__(
         self,

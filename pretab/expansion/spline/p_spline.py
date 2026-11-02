@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
-from ...core.knots import bspline_basis
+from ...core.knots import bspline_basis, extrapolate_bspline_rows
 from ...core.parameters import UNSET
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...exceptions import InvalidParamError
@@ -71,8 +71,11 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
     policy : RepresentationPolicy, dict, or None, default=None
         Overrides this family's default ``out_of_range`` behavior (unconditional
         clipping to the fitted knot range). Pass e.g.
-        ``RepresentationPolicy(out_of_range="error")`` to raise instead. Leaving
-        this at ``None`` preserves the historical clip-on-transform behavior.
+        ``RepresentationPolicy(out_of_range="error")`` to raise instead, or
+        ``"warn"`` / ``"extrapolate"`` to evaluate an out-of-range value on the
+        extended boundary polynomial pieces. A mapping overrides only the axes it
+        names, so ``{"constant": "warn"}`` keeps the clipping. Leaving this at
+        ``None`` preserves the historical clip-on-transform behavior.
 
     Attributes
     ----------
@@ -210,6 +213,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
             basis = np.zeros((len(x), nb))
             for j in range(nb):
                 basis[:, j] = bspline_basis(x, knots, self.degree, j)
+            basis = extrapolate_bspline_rows(basis, x, knots, self.degree)
             if self.include_bias:
                 basis = np.hstack([np.ones((len(x), 1)), basis])
             all_basis.append(basis)
