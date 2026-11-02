@@ -330,7 +330,7 @@ def test_stacking_sparse_folds_preserves_format_dtype_and_values_without_densify
         out = _stack_folds(blocks, rows, values)
     assert sp.issparse(out)
     assert out.format == sparse_format
-    assert isinstance(out, sp.sparray) is sparse_array
+    assert type(out) is type(blocks[0])
     assert out.dtype == np.float32
     np.testing.assert_array_equal(out.toarray(), values)
 

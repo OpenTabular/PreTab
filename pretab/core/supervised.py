@@ -109,7 +109,8 @@ def _stack_folds(blocks, test_indices, X) -> Any:
     order[rows] = np.arange(len(rows))
     first = blocks[0]
     if all(sp.issparse(block) for block in blocks):
-        return sp.vstack(blocks).tocsr()[order].asformat(first.format)
+        # Older SciPy vstack returns a matrix even when its inputs are sparse arrays.
+        return type(first)(sp.vstack(blocks).tocsr()[order])
     if all(isinstance(block, pd.DataFrame) for block in blocks):
         stacked = pd.concat(blocks).iloc[order]
         index = getattr(X, "index", None)
