@@ -9,10 +9,18 @@ here is a controlled nonlinear signal (``sin``) where an expressive basis
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.base import is_classifier, is_regressor
+from sklearn.base import BaseEstimator, RegressorMixin, is_classifier, is_regressor
 from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
-from sklearn.model_selection import KFold, StratifiedKFold, check_cv, cross_val_score
+from sklearn.model_selection import (
+    GroupKFold,
+    GroupShuffleSplit,
+    KFold,
+    LeaveOneGroupOut,
+    StratifiedKFold,
+    check_cv,
+    cross_val_score,
+)
 from sklearn.svm import SVC
 
 from pretab import RepresentationSearchCV
@@ -128,6 +136,87 @@ def test_get_params_and_clone_preserve_config():
     assert cloned.get_params()["cv"] == 3
 
 
+class _RowRecorder(RegressorMixin, BaseEstimator):
+    """Mean regressor whose ``fit`` records the ``row_id`` fit parameter it gets."""
+
+    def fit(self, X, y, row_id=None):
+        self.row_id_ = row_id
+        self.mean_ = float(np.mean(y))
+        return self
+
+    def predict(self, X):
+        return np.full(len(X), self.mean_)
+
+
+def _recording_scorer(fold_rows):
+    """Scorer that stores the ``row_id`` of each fold's fitted estimator."""
+
+    def score(est, x_test, y_test):
+        fold_rows.append(np.asarray(est.row_id_))
+        return 0.0
+
+    return score
+
+
+@pytest.fixture
+def grouped_data(nonlinear_data):
+    """``nonlinear_data`` with 20 groups of 10 rows (e.g. 20 patients)."""
+    X, y = nonlinear_data
+    return X, y, np.repeat(np.arange(20), 10)
+
+
+@pytest.mark.parametrize(
+    "cv",
+    [GroupKFold(n_splits=4), LeaveOneGroupOut(), GroupShuffleSplit(n_splits=3, test_size=0.25, random_state=0)],
+    ids=["group_kfold", "leave_one_group_out", "group_shuffle_split"],
+)
+def test_group_splitter_receives_groups(grouped_data, cv):
+    """Group splitters always failed: fit() took no groups and split() got none."""
+    X, y, groups = grouped_data
+    fold_rows = []
+    search = _search(_RowRecorder(), ["minmax"], cv=cv, scoring=_recording_scorer(fold_rows))
+    search.fit(X, y, groups=groups, row_id=np.arange(len(X)))
+
+    for rows, (train, test) in zip(fold_rows, cv.split(X, y, groups), strict=True):
+        np.testing.assert_array_equal(rows, train)
+        # No group is on both sides of a train/validation split.
+        assert set(groups[rows]).isdisjoint(groups[test])
+
+
+@pytest.mark.filterwarnings("ignore:The groups parameter is ignored:UserWarning")
+def test_groups_leave_non_group_splits_unchanged(grouped_data):
+    X, y, groups = grouped_data
+    plain = _search(LinearRegression(), ["standardization", "bspline"]).fit(X, y)
+    grouped = _search(LinearRegression(), ["standardization", "bspline"]).fit(X, y, groups=groups)
+    assert grouped.cv_results_ == plain.cv_results_
+
+
+def test_fit_params_are_split_per_fold_and_passed_to_the_refit(nonlinear_data):
+    X, y = nonlinear_data
+    row_id = np.arange(len(X))
+    cv = KFold(n_splits=4, shuffle=True, random_state=0)
+    fold_rows = []
+    search = _search(_RowRecorder(), ["minmax"], cv=cv, scoring=_recording_scorer(fold_rows))
+    search.fit(X, y, row_id=row_id)
+
+    # Each fold's estimator sees only its training rows; the refit sees all rows.
+    for rows, (train, _) in zip(fold_rows, cv.split(X), strict=True):
+        np.testing.assert_array_equal(rows, train)
+    np.testing.assert_array_equal(search.best_estimator_.row_id_, row_id)
+
+
+def test_sample_weight_reaches_the_estimator(nonlinear_data):
+    X, y = nonlinear_data
+    weights = np.linspace(0.1, 2.0, len(X))
+    search = _search(Ridge(), ["bspline"]).fit(X, y, sample_weight=weights)
+
+    x_all = search.best_preprocessor_.transform(X, return_array=True)
+    expected = Ridge().fit(x_all, y, sample_weight=weights)
+    np.testing.assert_allclose(search.best_estimator_.coef_, expected.coef_)
+    # The fold fits are weighted as well, so the validation scores change.
+    assert search.cv_results_ != _search(Ridge(), ["bspline"]).fit(X, y).cv_results_
+
+
 @pytest.fixture
 def class_data():
     rng = np.random.default_rng(0)
@@ -163,6 +252,31 @@ def test_classifier_search_delegates_to_the_best_estimator(class_data):
     np.testing.assert_allclose(search.predict_proba(X), search.best_estimator_.predict_proba(x))
     np.testing.assert_allclose(search.predict_log_proba(X), search.best_estimator_.predict_log_proba(x))
     np.testing.assert_allclose(search.decision_function(X), search.best_estimator_.decision_function(x))
+
+
+@pytest.mark.parametrize("frame_type", ["pandas", "polars"])
+def test_grouped_weighted_classifier_preserves_delegation_and_input_metadata(class_data, frame_type):
+    X, y = class_data
+    if frame_type == "polars":
+        pl = pytest.importorskip("polars")
+        X = pl.DataFrame({"x": X["x"].to_numpy()})
+    groups = np.repeat(np.arange(30), 10)
+    weights = np.linspace(0.1, 2.0, len(y))
+    search = _search(
+        LogisticRegression(), ["minmax", "ple"], cv=GroupKFold(3), scoring="roc_auc", preprocessor_params=None
+    ).fit(X, y, groups=groups, sample_weight=weights)
+
+    assert is_classifier(search)
+    assert search.best_preprocessor_.task == "classification"
+    assert search.best_score_ > 0.9
+    assert search.n_features_in_ == 1
+    np.testing.assert_array_equal(search.feature_names_in_, ["x"])
+    np.testing.assert_array_equal(search.classes_, ["neg", "pos"])
+    x_all = search.best_preprocessor_.transform(X, return_array=True)
+    expected = LogisticRegression().fit(x_all, y, sample_weight=weights)
+    np.testing.assert_allclose(search.best_estimator_.coef_, expected.coef_)
+    np.testing.assert_allclose(search.best_estimator_.intercept_, expected.intercept_)
+    np.testing.assert_allclose(search.predict_proba(X), expected.predict_proba(x_all))
 
 
 def test_delegated_methods_follow_the_wrapped_estimator(class_data, nonlinear_data):
@@ -208,3 +322,26 @@ def test_search_records_the_input_features(nonlinear_data):
     search.fit(X.to_numpy(), y)
     assert search.n_features_in_ == 1
     assert not hasattr(search, "feature_names_in_")
+
+
+def test_classifier_search_places_against_class_labels(class_data):
+    """A classifier made the search keep task="regression": string labels crashed the
+    target-aware placement and integer labels were treated as a regression target."""
+    X, y = class_data
+    search = RepresentationSearchCV(LogisticRegression(), methods=["minmax", "ple"], cv=3, random_state=0).fit(X, y)
+    assert search.best_preprocessor_.task == "classification"
+    assert set(search.predict(X)) <= {"pos", "neg"}
+
+
+def test_classifier_search_keeps_an_explicit_task(class_data):
+    X, y = class_data
+    search = RepresentationSearchCV(
+        LogisticRegression(), methods=["minmax"], cv=3, preprocessor_params={"task": "regression"}
+    ).fit(X, (y == "pos").astype(int))
+    assert search.best_preprocessor_.task == "regression"
+
+
+def test_regressor_search_keeps_the_regression_task(nonlinear_data):
+    X, y = nonlinear_data
+    search = RepresentationSearchCV(LinearRegression(), methods=["minmax"], cv=3).fit(X, y)
+    assert search.best_preprocessor_.task == "regression"

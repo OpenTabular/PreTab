@@ -7,21 +7,54 @@ collects per-feature preprocessing / dimension / category metadata, and
 :func:`build_transformer_summary` renders that metadata as an aligned table.
 """
 
-import numpy as np
-from sklearn.pipeline import FeatureUnion
+import copy
+from typing import Any, cast
 
+import numpy as np
+from sklearn.base import clone
+from sklearn.pipeline import FeatureUnion, Pipeline
+
+from ..core._typing import TransformerLike
 from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
+from .registry import TRANSFORMER_REGISTRY
 
 logger = get_logger(__name__)
 
 __all__ = [
+    "block_name",
+    "block_uses_target",
     "build_feature_info",
     "build_feature_lineage",
     "build_transformer_summary",
     "clean_feature_names",
+    "feature_names_out",
     "get_output_slices",
+    "refit_block_representation",
+    "representation_leaf",
 ]
+
+
+def _block(step_name, columns):
+    """Return ``(kind, feature)`` for a per-column ``num_*`` / ``cat_*`` step, else ``None``."""
+    if step_name == "remainder" or len(columns) != 1:
+        return None
+    kind, sep, _ = str(step_name).partition("_")
+    if not sep or kind not in ("num", "cat"):
+        return None
+    return kind, str(columns[0])
+
+
+def block_name(step_name, columns):
+    """Return the public block name (``"num_<label>"`` / ``"cat_<label>"``) of a step.
+
+    The name is built from the step's kind and its column label rather than read
+    from the step name itself, which differs for labels scikit-learn cannot embed
+    in a step name (see :func:`pretab.compose.factory._step_names`). Steps that are
+    not per-column representation blocks keep their own name.
+    """
+    block = _block(step_name, columns)
+    return step_name if block is None else f"{block[0]}_{block[1]}"
 
 
 def get_output_slices(column_transformer):
@@ -29,10 +62,11 @@ def get_output_slices(column_transformer):
 
     Reads widths from ``output_indices_`` — the fitted index map that
     ``ColumnTransformer`` already maintains — so no second transform is needed.
+    ``name`` is the public block name (see :func:`block_name`).
     """
     indices = column_transformer.output_indices_
     slices = []
-    for name, transformer, _columns in column_transformer.transformers_:
+    for name, transformer, columns in column_transformer.transformers_:
         if transformer == "drop":
             continue
         span = indices.get(name)
@@ -41,22 +75,79 @@ def get_output_slices(column_transformer):
         width = span.stop - span.start
         if width == 0:
             continue
-        slices.append((name, span.start, width))
+        slices.append((block_name(name, columns), span.start, width))
     return slices
 
 
-def clean_feature_names(column_transformer, names):
+def feature_names_out(column_transformer, input_features=None):
+    """Return the cleaned output feature names of a fitted ColumnTransformer.
+
+    ``input_features`` -- one name per input column, in input order -- replaces the
+    column labels the ColumnTransformer was fitted on (e.g. the synthetic
+    ``feature_i`` labels of an array input), following scikit-learn's contract
+    for an estimator fitted without feature names. Each step's names are rebuilt
+    from its fitted transformer with the new labels, so names that embed a label
+    anywhere (e.g. polynomial terms) are renamed consistently.
+    """
+    fitted_labels = getattr(column_transformer, "feature_names_in_", None)
+    if input_features is None or fitted_labels is None:
+        raw_names = column_transformer.get_feature_names_out(input_features)
+        return clean_feature_names(column_transformer, [str(name) for name in raw_names])
+
+    rename = {str(label): str(name) for label, name in zip(fitted_labels, input_features, strict=True)}
+    raw_names = []
+    for name, transformer, columns in column_transformer.transformers_:
+        if transformer == "drop" or len(columns) == 0:
+            continue
+        labels = [rename[str(column)] for column in columns]
+        if transformer == "passthrough":
+            inner = labels
+        else:
+            inner = _without_feature_names(transformer).get_feature_names_out(labels)
+        raw_names.extend(f"{name}__{inner_name}" for inner_name in inner)
+    return clean_feature_names(column_transformer, raw_names, rename=rename)
+
+
+def _without_feature_names(estimator) -> Any:
+    """Return a shallow copy of a fitted step that accepts any input feature names.
+
+    The ColumnTransformer hands each step a DataFrame column, so scikit-learn
+    estimators inside it record ``feature_names_in_`` and only accept those exact
+    names in ``get_feature_names_out``. Dropping the attribute on a shallow copy
+    (and on copies of any nested pipeline / union steps) makes them fall back to
+    the length check scikit-learn applies to estimators fitted without feature
+    names, while the fitted step itself is left untouched.
+    """
+    if not hasattr(estimator, "get_params"):
+        return estimator
+    stripped = copy.copy(estimator)
+    stripped.__dict__.pop("feature_names_in_", None)
+    if isinstance(stripped, Pipeline):
+        stripped.steps = [(name, _without_feature_names(step)) for name, step in stripped.steps]
+    elif isinstance(stripped, FeatureUnion):
+        stripped.transformer_list = [
+            (name, _without_feature_names(transformer)) for name, transformer in stripped.transformer_list
+        ]
+    return stripped
+
+
+def clean_feature_names(column_transformer, names, *, rename=None):
     """Collapse the per-feature name that sklearn's ColumnTransformer duplicates.
 
-    Each per-column step is named ``f"{kind}_{feature}"`` (see ``compose/factory.py``),
-    and every PreTab transformer's own ``get_feature_names_out`` already bakes the
-    input feature name into each output column, so sklearn's default
-    ``f"{step}__{inner}"`` naming doubles it, e.g. ``"num_age__age_bs0"``. This
-    collapses that back to ``"num_age_bs0"``, leaving passthrough/remainder columns
-    and any name it cannot confidently match unchanged.
+    Each per-column step is a ``num_*`` / ``cat_*`` block for one feature (see
+    ``compose/factory.py``), and every PreTab transformer's own
+    ``get_feature_names_out`` already bakes the input feature name into each output
+    column, so sklearn's default ``f"{step}__{inner}"`` naming doubles it, e.g.
+    ``"num_age__age_bs0"``. This collapses that back to ``"num_age_bs0"``. Other
+    names of a block keep the public block name as their prefix, and
+    passthrough/remainder columns are left unchanged. ``rename`` maps fitted
+    column labels to the input feature names ``names`` were built from (see
+    :func:`feature_names_out`); a step of a renamed column is then reported under
+    the new name, e.g. ``num_feature_0`` as ``num_age``.
     """
-    step_to_feature = {
-        name: columns[0]
+    rename = rename or {}
+    step_to_columns = {
+        name: [rename.get(str(column), column) for column in columns]
         for name, _transformer, columns in column_transformer.transformers_
         if name != "remainder" and len(columns) == 1
     }
@@ -64,15 +155,22 @@ def clean_feature_names(column_transformer, names):
     for raw in names:
         raw = str(raw)
         step_name, sep, inner_name = raw.partition("__")
-        feature = step_to_feature.get(step_name)
-        if not sep or feature is None:
+        columns = step_to_columns.get(step_name)
+        if not sep or columns is None:
             cleaned.append(raw)
             continue
-        if inner_name == feature or inner_name.startswith(f"{feature}_"):
+        block = _block(step_name, columns)
+        if block is not None:
+            kind_prefix, feature = block
+            public_name = f"{kind_prefix}_{feature}"
+        else:
+            feature = str(columns[0])
             kind_prefix = step_name[: -(len(feature) + 1)] if step_name.endswith(f"_{feature}") else ""
+            public_name = step_name
+        if inner_name == feature or inner_name.startswith(f"{feature}_"):
             cleaned.append(f"{kind_prefix}_{inner_name}" if kind_prefix else inner_name)
         else:
-            cleaned.append(raw)
+            cleaned.append(f"{public_name}__{inner_name}")
     return cleaned
 
 
@@ -84,6 +182,19 @@ def _separate_state_branches(transformer):
     if "representation" not in branches or "missing" not in branches:
         return None
     return branches["representation"], branches["missing"]
+
+
+def representation_leaf(transformer):
+    """Return the last step of a fitted per-column block's representation.
+
+    For a separate-state / missing-indicator union this is the last step of its
+    ``"representation"`` pipeline (the raw missing indicator beside it is not
+    part of the representation); for a pipeline it is the last step, and any
+    other block is returned unchanged.
+    """
+    separate_state = _separate_state_branches(transformer)
+    representation = transformer if separate_state is None else separate_state[0]
+    return representation.steps[-1][1] if hasattr(representation, "steps") else representation
 
 
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
@@ -160,8 +271,11 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
 
             elif "continuous_ordinal" in steps:
                 step = representation_pipeline.named_steps["continuous_ordinal"]
-                categories = len(step.mapping_[columns.index(feature_name)])
-                dimension = separate_state_dimension if separate_state_dimension is not None else 1
+                position = columns.index(feature_name)
+                # An encoder that received no column (a 0-width block) has no mapping.
+                has_mapping = position < len(step.mapping_)
+                categories = len(step.mapping_[position]) if has_mapping else None
+                dimension = separate_state_dimension if separate_state_dimension is not None else int(has_mapping)
                 categorical_feature_info[feature_name] = {
                     "preprocessing": preprocessing_type,
                     "dimension": dimension,
@@ -253,22 +367,90 @@ _STEP_FAMILY = {
 }
 
 
-def _resolve_block_representation(pipeline, columns):
-    """Return ``(family, component, uses_target, is_interaction)`` for a block.
+def _locate_block_representation(pipeline, columns):
+    """Return ``(step_index, (family, component, uses_target, is_interaction))`` for a block.
 
     The representation-bearing step is the last pipeline step exposing a
-    ``get_representation_spec`` (a PreTab transformer) or a known scikit-learn
-    step name; helper steps such as imputers and float casts are skipped.
+    ``get_representation_spec`` (a PreTab transformer), a known scikit-learn
+    step name, or a registered method that consumes the target; helper steps
+    such as imputers and float casts are skipped. ``columns`` names the spec's
+    inputs; with None the step names its own. ``step_index`` is that step's
+    position in ``pipeline.steps`` (0 for a bare transformer), or None when the
+    block has no representation step. Known scikit-learn names are a fallback:
+    trailing scalers must not hide a representation's declared target use.
     """
     steps = pipeline.steps if hasattr(pipeline, "steps") else [("_", pipeline)]
-    for step_name, transformer in reversed(steps):
+    legacy_step = None
+    for index in reversed(range(len(steps))):
+        step_name, transformer = steps[index]
         if hasattr(transformer, "get_representation_spec"):
-            spec = transformer.get_representation_spec(input_features=list(columns))
-            return spec.family, spec.component_kind, spec.uses_target, spec.is_interaction
-        if step_name in _STEP_FAMILY:
+            spec = transformer.get_representation_spec(input_features=None if columns is None else list(columns))
+            return index, (spec.family, spec.component_kind, spec.uses_target, spec.is_interaction)
+        registered = TRANSFORMER_REGISTRY.get(step_name)
+        if (
+            registered is not None
+            and isinstance(transformer, registered.transformer_cls)
+            and registered.target_usage != "forbidden"
+        ):
+            # A registered class without a RepresentationSpec (e.g. scikit-learn's
+            # TargetEncoder): its declared supervision says whether it used y, so
+            # cross-fitting refits it per fold instead of reusing the all-data fit.
+            uses_target = registered.target_usage == "required" or bool(getattr(transformer, "target_aware", False))
+            component = "category" if registered.is_categorical else "basis"
+            return index, (step_name, component, uses_target, registered.is_multivariate)
+        if step_name in _STEP_FAMILY and legacy_step is None:
             family, component = _STEP_FAMILY[step_name]
-            return family, component, False, False
-    return "passthrough", "raw", False, False
+            legacy_step = index, (family, component, False, False)
+    return legacy_step if legacy_step is not None else (None, ("passthrough", "raw", False, False))
+
+
+def _resolve_block_representation(pipeline, columns):
+    """Return ``(family, component, uses_target, is_interaction)`` for a block."""
+    return _locate_block_representation(pipeline, columns)[1]
+
+
+def block_uses_target(transformer) -> bool:
+    """Whether a fitted per-column block's representation consumed the target ``y``.
+
+    For a separate-state / missing-indicator union the representation branch decides; helper steps
+    such as imputers and scalers never use the target. The spec is read without
+    input names, since only its target use matters here.
+    """
+    separate_state = _separate_state_branches(transformer)
+    representation = separate_state[0] if separate_state is not None else transformer
+    return bool(_resolve_block_representation(representation, None)[2])
+
+
+def refit_block_representation(transformer, X, y) -> TransformerLike:
+    """Return a copy of a fitted per-column block whose representation is refit on ``(X, y)``.
+
+    Only the representation step and the steps after it are refit. The steps
+    before it (the imputer with its missing indicator, scalers) never use the
+    target, so they are kept from the all-data fit and transform ``X`` for the
+    refit: a ``SimpleImputer(add_indicator=True)`` refit on rows without missing
+    values would drop its indicator column and so change the block's width. For
+    a separate-state union the missing branch is kept as well. The fitted
+    ``transformer`` itself is left untouched.
+    """
+    separate_state = _separate_state_branches(transformer)
+    if separate_state is not None:
+        representation = refit_block_representation(separate_state[0], X, y)
+        union = copy.copy(transformer)
+        union.transformer_list = [
+            (name, representation if name == "representation" else branch)
+            for name, branch in transformer.transformer_list
+        ]
+        return union
+    index = _locate_block_representation(transformer, None)[0]
+    if not isinstance(transformer, Pipeline) or index is None or index == 0:
+        refit = cast(TransformerLike, clone(transformer))
+        refit.fit(X, y)
+        return refit
+    refit = cast(Pipeline, clone(transformer[index:]))
+    refit.fit(transformer[:index].transform(X), y)
+    block = copy.copy(transformer)
+    block.steps = [*transformer.steps[:index], *refit.steps]
+    return cast(TransformerLike, block)
 
 
 def _passthrough_source(columns, offset, feature_names_in):
@@ -318,12 +500,12 @@ def build_feature_lineage(column_transformer):
 
         separate_state = _separate_state_branches(transformer)
         if separate_state is not None:
-            representation_pipeline, _missing_indicator = separate_state
-            union_names = [str(value) for value in transformer.get_feature_names_out(list(columns))]
-            representation_width = sum(value.startswith("representation__") for value in union_names)
-            missing_width = sum(value.startswith("missing__") for value in union_names)
-            if representation_width + missing_width != width:
-                representation_width = width - missing_width
+            representation_pipeline, missing_indicator = separate_state
+            # The missing branch comes last in the union; read its width from the
+            # fitted indicator, which may emit no column (MissingIndicator only
+            # marks features that had missing values at fit).
+            missing_width = len(missing_indicator.get_feature_names_out([str(column) for column in columns]))
+            representation_width = width - missing_width
 
             family, component, uses_target, is_interaction = _resolve_block_representation(
                 representation_pipeline, columns

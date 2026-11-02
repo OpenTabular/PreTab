@@ -20,11 +20,13 @@ knot positions by `placement_strategy` (see
 [Resolution and placement](../core_concepts/resolution_and_placement.md)).
 
 ```{important}
-For every univariate spline in this section, `output_dim` is the number of output columns
+Without explicit knots, `output_dim` is the number of output columns for a univariate spline
 **per input feature**, not the total. A `(n_samples, 3)` input produces
 `(n_samples, 3 * output_dim)` output (plus one extra column per feature if
 `include_bias=True`). Feature names are suffixed per input, for example `x0_bs0, x0_bs1, ...`
-for a B-spline on column `x0`.
+for a B-spline on column `x0`. For B/M/I splines with explicit `knot_locations`, a feature
+with `K` retained unique interior knots instead gets `K + degree + 1` non-bias columns;
+different feature ranges can therefore produce different widths.
 ```
 
 ## B-spline
@@ -49,20 +51,24 @@ t.fit_transform(X).shape
 ```
 
 Constructor highlights: `output_dim`, `degree=3`, `include_bias=False`, `knot_locations=None`
-(pass explicit knots to override placement), `target_aware=False`, `placement_strategy="quantile"`,
+(pass explicit interior knots to override placement, `output_dim`, and the adaptive bounds:
+repeated knots are merged, and knots on or outside a feature's fitted range are dropped with
+a warning rather than replaced), `target_aware=False`, `placement_strategy="quantile"`,
 `adaptive`, `random_state`.
 
 **Parameter impact.**
 
 `degree`
-: Sets the minimum usable `output_dim`: PreTab requires `output_dim >= degree + 1` (a cubic,
+: For automatic placement, sets the minimum usable `output_dim`: PreTab requires
+`output_dim >= degree + 1` (a cubic,
 `degree=3`, needs at least 4 columns) and raises a typed error otherwise. Higher degree gives
 smoother, wider-support basis functions at the same `output_dim`; `degree=1` recovers
 piecewise-linear segments.
 
 `output_dim`
 : The exact per-feature output width (unlike the cubic/natural/tensor families below, no
-conversion is applied). More columns track finer local detail and increase overfitting risk.
+conversion is applied). Ignored when `knot_locations` is provided. More columns track finer
+local detail and increase overfitting risk.
 
 `include_bias`
 : Defaults to `False`. A B-spline basis over a clamped knot vector already sums to 1 in every
@@ -77,7 +83,8 @@ Increase `output_dim` for more wiggle, decrease it to regularize.
 
 ```{note}
 Every spline in this family exposes `get_penalty_matrix(feature_index=0, diff_order=2)`, a
-`D^T D` second-difference penalty matrix of shape `(output_dim, output_dim)` (plus the bias
+`D^T D` second-difference penalty matrix of shape `(m, m)`, where `m` is the fitted non-bias
+width (plus the bias
 row/column left unpenalized when `include_bias=True`). It is not limited to the "penalized"
 splines further down this page. Note that `diff_order` is specific to this B/M/I family; the
 cubic, natural cubic, P-spline, tensor-product, and thin-plate variants expose

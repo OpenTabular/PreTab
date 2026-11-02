@@ -96,6 +96,14 @@ def test_invalid_preset_raises():
         Preprocessor(preset="nope").get_resolved_config()
 
 
+@pytest.mark.parametrize("preset", [None, "standard", "expanded", "adaptive"])
+def test_invalid_task_raises_instead_of_resolving(preset):
+    """``task="Regression"`` used to resolve the classification preset method "ple"."""
+    pre = Preprocessor(preset=preset, task="Regression")  # validated lazily, like fit
+    with pytest.raises(InvalidParamError, match=r"Preprocessor\.task = 'Regression' is invalid"):
+        pre.get_resolved_config()
+
+
 def test_presets_fit_with_distinct_widths(data):
     X, y = data
     widths = {}

@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
@@ -7,20 +8,15 @@ from ...exceptions import PretabDataError
 
 
 def _is_missing_value(value) -> bool:
-    """Return True for ``None`` or a NaN float; False for any other value."""
-    if value is None:
-        return True
-    try:
-        return bool(np.isnan(value))
-    except TypeError:
-        return False
+    """Return whether a scalar category is missing according to pandas."""
+    return bool(pd.isna(value))
 
 
 class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
     """Encode categorical features as continuous integer values.
 
     Each unique category within a feature is assigned an integer based on its
-    sorted order. Unknown, missing (``None`` or NaN), or unseen categories are
+    sorted order. Unknown, missing (``None``, ``pd.NA`` or NaN), or unseen categories are
     mapped to ``0``. This is useful for models that can only handle numerical
     input.
 
@@ -32,7 +28,7 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
     Notes
     -----
     Categories are numbered starting at ``1`` in sorted order; the value ``0`` is
-    reserved for categories not seen during ``fit`` (and for ``None`` / NaN).
+    reserved for categories not seen during ``fit`` (and for ``None`` / ``pd.NA`` / NaN).
 
     Examples
     --------
@@ -69,7 +65,7 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         self.mapping_ = []
         for j in range(X.shape[1]):
             column = X[:, j]
-            # Missing values (None / NaN) are excluded before sorting: np.unique
+            # Missing values are excluded before sorting: np.unique
             # cannot compare a NaN or None against a string category.
             non_missing = np.array([v for v in column if not _is_missing_value(v)], dtype=object)
             categories = np.unique(non_missing) if non_missing.size else np.array([], dtype=object)
@@ -104,7 +100,7 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
             )
         out = np.zeros(X.shape, dtype=int)
         for j, mapping in enumerate(self.mapping_):
-            out[:, j] = [mapping.get(v, 0) for v in X[:, j]]
+            out[:, j] = [0 if _is_missing_value(v) else mapping.get(v, 0) for v in X[:, j]]
         return out
 
     def get_feature_names_out(self, input_features=None):

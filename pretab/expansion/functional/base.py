@@ -13,7 +13,7 @@ import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
 from ...core.base import BasePreTabTransformer
-from ...core.parameters import UNSET, validate_placement
+from ...core.parameters import UNSET, validate_placement, validate_task
 from ...core.supervised import warn_target_leakage
 from ...exceptions import (
     IncompatibleParamsError,
@@ -84,8 +84,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         warn_target_leakage(self, y)
         placement_strategy = self._resolve_placement_strategy()
         validate_placement(self.target_aware, placement_strategy)
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(f"Invalid task. Choose 'regression' or 'classification'. Got {self.task!r}.")
+        task = validate_task(self.task, type(self).__name__)
         n_centers = self._resolve_param("output_dim", default=6)
         min_req = self._resolve_param("min_output_dim", default=None)
         max_req = self._resolve_param("max_output_dim", default=None)
@@ -105,7 +104,7 @@ class BaseCenterExpansion(BasePreTabTransformer):
         adapter = RBFPlacementAdapter(
             target_aware=self.target_aware,
             placement_strategy=placement_strategy,
-            task=self.task,
+            task=task,
             random_state=self.random_state,
         )
         if self.target_aware and self.adaptive:
@@ -117,8 +116,16 @@ class BaseCenterExpansion(BasePreTabTransformer):
         for i in range(X.shape[1]):
             if np.isnan(X[:, i]).all():
                 raise PretabDataError(f"Feature at index {i} has only NaN values")
-            self.centers_.append(adapter.get_centers(X[:, i], y_place, min_centers, max_centers))
+            if self.target_aware:
+                centers = adapter.get_centers(X[:, i], y_place, min_centers, max_centers)
+            else:
+                centers = self._unsupervised_centers(adapter, X[:, i], n_centers)
+            self.centers_.append(centers)
         return self
+
+    def _unsupervised_centers(self, adapter, x, n_centers):
+        """Return ``n_centers`` quantile / uniform centers spanning the feature range."""
+        return adapter.get_centers(x, None, n_centers, n_centers)
 
     def transform(self, X):
         """Expand every feature against its centers and stack the results."""

@@ -18,9 +18,10 @@ from sklearn.metrics import check_scoring
 from sklearn.model_selection import BaseCrossValidator, check_cv
 from sklearn.utils import get_tags
 from sklearn.utils.metaestimators import available_if
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.validation import _check_method_params, check_is_fitted
 
 from ..core._typing import PredictorLike
+from ..core.validation import is_polars_frame, polars_to_pandas
 from ..exceptions import InvalidParamError
 from ..preprocessor import Preprocessor
 
@@ -66,12 +67,16 @@ class RepresentationSearchCV(BaseEstimator):
         Candidate ``numerical_method`` values to search over.
     cv : int or cross-validation generator, default=5
         Cross-validation splitting strategy passed to
-        :func:`sklearn.model_selection.check_cv`.
+        :func:`sklearn.model_selection.check_cv`. A group splitter such as
+        :class:`~sklearn.model_selection.GroupKFold` needs ``groups`` at
+        :meth:`fit`.
     scoring : str or callable or None, default=None
         Scoring passed to :func:`sklearn.metrics.check_scoring`; ``None`` uses the
         estimator's ``score`` method.
     preprocessor_params : dict or None, default=None
-        Extra keyword arguments forwarded to every :class:`Preprocessor`.
+        Extra keyword arguments forwarded to every :class:`Preprocessor`. When
+        ``estimator`` is a classifier, ``task`` defaults to ``"classification"`` so
+        target-aware placement treats ``y`` as class labels.
     random_state : int or None, default=None
         Seed forwarded to each :class:`Preprocessor`.
 
@@ -105,24 +110,66 @@ class RepresentationSearchCV(BaseEstimator):
         self.random_state = random_state
 
     def _make_preprocessor(self, method):
-        """Build a Preprocessor for ``method`` with the shared parameters."""
+        """Build a Preprocessor for ``method`` with the shared parameters.
+
+        Target-aware placement follows the downstream estimator: a classifier makes
+        it ``task="classification"`` unless ``preprocessor_params`` sets ``task``.
+        """
         params = dict(self.preprocessor_params or {})
         params.setdefault("random_state", self.random_state)
+        if is_classifier(self.estimator):
+            params.setdefault("task", "classification")
         return Preprocessor(numerical_method=method, **params)
 
-    def fit(self, X, y=None):
-        """Search over ``methods`` and refit the best representation on all data."""
+    def fit(self, X, y=None, *, groups=None, **fit_params):
+        """Search over ``methods`` and refit the best representation on all data.
+
+        ``X`` may be a pandas or polars DataFrame or an array. A polars frame is
+        converted to pandas once, before the fold rows are taken, so every fold's
+        Preprocessor detects the same column types as the final refit.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame, polars.DataFrame or array-like of shape (n_samples, n_features)
+            Input features, transformed by each candidate :class:`Preprocessor`.
+        y : array-like of shape (n_samples,)
+            Target values. Required.
+        groups : array-like of shape (n_samples,), default=None
+            Group labels passed to ``cv.split``, so a group splitter (for example
+            :class:`~sklearn.model_selection.GroupKFold`) keeps every group on one
+            side of each train/validation split. Ignored by splitters that do not
+            use groups, and not passed to the estimator.
+        **fit_params : dict
+            Parameters passed to the ``fit`` method of ``estimator`` on every fold
+            and on the final refit, for example ``sample_weight``. Array-like values
+            of length ``n_samples`` are restricted to the training rows of each fold.
+            They are not passed to the :class:`Preprocessor` (its target-aware
+            placement is unweighted) or to the scorer (validation scores are
+            unweighted).
+
+        Returns
+        -------
+        self : RepresentationSearchCV
+            Fitted search.
+        """
         methods = list(self.methods)
         if not methods:
             raise InvalidParamError("methods must be a non-empty sequence of numerical methods.")
         if y is None:
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
         y_arr = np.asarray(y).ravel()
+        if is_polars_frame(X):
+            # Converted once, so every fold's rows carry the dtypes of the whole frame,
+            # as a pandas frame's do (see polars_to_pandas).
+            X = polars_to_pandas(X)
         n_samples = X.shape[0] if hasattr(X, "shape") else len(X)
+        # As in scikit-learn's searches: per-sample fit params are made indexable
+        # so each fold can take its training rows.
+        fit_params = _check_method_params(X, params=fit_params)
         cv = cast(BaseCrossValidator, check_cv(self.cv, y_arr, classifier=is_classifier(self.estimator)))
         # Reuse the same held-out rows for every candidate, including splitters
         # whose random state advances on each call to split().
-        splits = list(cv.split(np.zeros(n_samples), y_arr))
+        splits = list(cv.split(np.zeros(n_samples), y_arr, groups))
 
         cv_results: dict[str, float] = {}
         best_score = -np.inf
@@ -133,7 +180,8 @@ class RepresentationSearchCV(BaseEstimator):
                 pre = self._make_preprocessor(method)
                 est = cast(PredictorLike, clone(self.estimator))
                 x_train = pre.fit_transform(_row_subset(X, train_idx), y_arr[train_idx], return_array=True)
-                est.fit(x_train, y_arr[train_idx])
+                fold_params = _check_method_params(X, params=fit_params, indices=train_idx)
+                est.fit(x_train, y_arr[train_idx], **fold_params)
                 scorer = cast("Callable[..., float]", check_scoring(est, scoring=self.scoring))
                 x_test = pre.transform(_row_subset(X, test_idx), return_array=True)
                 fold_scores.append(scorer(est, x_test, y_arr[test_idx]))
@@ -148,7 +196,7 @@ class RepresentationSearchCV(BaseEstimator):
         self.best_score_ = best_score
         self.best_preprocessor_ = self._make_preprocessor(best_method)
         x_all = self.best_preprocessor_.fit_transform(X, y_arr, return_array=True)
-        self.best_estimator_ = cast(PredictorLike, clone(self.estimator)).fit(x_all, y_arr)
+        self.best_estimator_ = cast(PredictorLike, clone(self.estimator)).fit(x_all, y_arr, **fit_params)
         self.n_features_in_ = self.best_preprocessor_.n_features_in_
         # scikit-learn convention: feature names are recorded only for input whose
         # column labels are all strings.

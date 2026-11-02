@@ -24,7 +24,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from ..core.knots import quantile_knots, spanning_knots, uniform_knots
+from ..core.knots import quantile_knots, spanning_knots, supplement_interior_knots, uniform_knots
 from .base import BasePlacementStrategy, PlacementResult
 
 __all__ = ["QuantilePlacement", "UniformPlacement"]
@@ -80,11 +80,26 @@ class UniformPlacement(_UnsupervisedPlacement):
 
 
 class QuantilePlacement(_UnsupervisedPlacement):
-    """Locations at evenly spaced data quantiles of a feature."""
+    """Locations at evenly spaced data quantiles of a feature.
+
+    On tied data (zero-inflated, top-coded or discrete features) several quantiles
+    coincide, which would repeat a location and duplicate an output column. The
+    locations are therefore made distinct: the endpoints (when included) are kept
+    once and the remaining locations are topped up with strictly interior
+    quantile / uniform candidates (see
+    :func:`pretab.core.knots.supplement_interior_knots`). A zero-range feature,
+    which has no interior, keeps its repeated location so the count still holds.
+    """
 
     name: ClassVar[str] = "quantile"
 
     def _place(self, x: np.ndarray, n_units: int) -> np.ndarray:
-        if self.include_endpoints:
-            return spanning_knots(x, n_units, "quantile")
-        return quantile_knots(x, n_units)
+        if x.size == 0 or x.max() <= x.min():
+            return spanning_knots(x, n_units, "quantile") if self.include_endpoints else quantile_knots(x, n_units)
+        if not self.include_endpoints:
+            return supplement_interior_knots(x, quantile_knots(x, n_units), n_units)
+        locations = spanning_knots(x, n_units, "quantile")
+        if n_units <= 2:
+            return locations
+        interior = supplement_interior_knots(x, locations[1:-1], n_units - 2)
+        return np.concatenate([[x.min()], interior, [x.max()]])

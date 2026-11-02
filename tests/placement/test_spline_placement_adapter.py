@@ -99,3 +99,18 @@ def test_lightgbm_adapter_reproducible(data):
     a = SplinePlacementAdapter(placement_strategy="lightgbm", degree=3).get_knot_locations(X, y)
     b = SplinePlacementAdapter(placement_strategy="lightgbm", degree=3).get_knot_locations(X, y)
     np.testing.assert_array_equal(a, b)
+
+
+def _step_data(seed=1):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(0, 10, 1000)
+    y = np.where(x > 5.0, 1.0, 0.0) + 0.3 * rng.normal(size=1000)
+    return x.reshape(-1, 1), y
+
+
+def test_get_knot_locations_window_override():
+    X, y = _step_data()
+    adapter = SplinePlacementAdapter(placement_strategy="cart", degree=3)
+    knots = adapter.get_knot_locations(X, y, min_knots=1, max_knots=1)
+    assert len(knots) == 1
+    assert abs(knots[0] - 5.0) < 0.1
