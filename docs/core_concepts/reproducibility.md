@@ -47,7 +47,9 @@ compatibility is not guaranteed.
 
 Supported built-in representations reproduce `transform` bit-for-bit in the same environment.
 Third-party representations and pretrained language models are not supported by the JSON
-serializer; unsupported state raises `PretabSerializationError`.
+serializer; unsupported state raises `PretabSerializationError` when the spec is built. The
+spec is serialized before `to_spec(path)` opens the file, so a failed save leaves an existing
+spec at that path untouched.
 
 ## Fingerprint
 
