@@ -33,6 +33,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -47,7 +48,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-docs-${{ runner.os }}-3.12-${{ hashFiles('poetry.lock') }}
+          key: venv-docs-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
 
       - name: Install package and docs dependencies
         run: poetry install --with docs

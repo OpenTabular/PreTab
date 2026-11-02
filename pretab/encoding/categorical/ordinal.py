@@ -1,26 +1,23 @@
 import numpy as np
+import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.validation import _check_feature_names, check_is_fitted
 
 from ...core.representation import RepresentationSpecMixin
+from ...core.validation import resolve_input_features
 from ...exceptions import PretabDataError
 
 
 def _is_missing_value(value) -> bool:
-    """Return True for ``None`` or a NaN float; False for any other value."""
-    if value is None:
-        return True
-    try:
-        return bool(np.isnan(value))
-    except TypeError:
-        return False
+    """Return whether a scalar category is missing according to pandas."""
+    return bool(pd.isna(value))
 
 
 class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, BaseEstimator):
     """Encode categorical features as continuous integer values.
 
     Each unique category within a feature is assigned an integer based on its
-    sorted order. Unknown, missing (``None`` or NaN), or unseen categories are
+    sorted order. Unknown, missing (``None``, ``pd.NA`` or NaN), or unseen categories are
     mapped to ``0``. This is useful for models that can only handle numerical
     input.
 
@@ -28,11 +25,17 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
     ----------
     mapping_ : list of dict
         One dictionary per feature mapping original categories to integers.
+    n_features_in_ : int
+        Number of input features seen during ``fit``.
+    feature_names_in_ : ndarray of str
+        Names of the input columns seen during ``fit``. Defined only when ``X``
+        was a DataFrame with string column names; ``transform`` then requires
+        the same columns in the same order.
 
     Notes
     -----
     Categories are numbered starting at ``1`` in sorted order; the value ``0`` is
-    reserved for categories not seen during ``fit`` (and for ``None`` / NaN).
+    reserved for categories not seen during ``fit`` (and for ``None`` / ``pd.NA`` / NaN).
 
     Examples
     --------
@@ -62,6 +65,7 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         self : object
             Fitted transformer.
         """
+        _check_feature_names(self, X, reset=True)
         # Coerce to 2-D ndarray so DataFrame.T / DataFrame row-iteration work correctly
         X = np.asarray(X, dtype=object)
         if X.ndim == 1:
@@ -69,7 +73,7 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         self.mapping_ = []
         for j in range(X.shape[1]):
             column = X[:, j]
-            # Missing values (None / NaN) are excluded before sorting: np.unique
+            # Missing values are excluded before sorting: np.unique
             # cannot compare a NaN or None against a string category.
             non_missing = np.array([v for v in column if not _is_missing_value(v)], dtype=object)
             categories = np.unique(non_missing) if non_missing.size else np.array([], dtype=object)
@@ -93,6 +97,7 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
             The transformed data with integer values.
         """
         check_is_fitted(self, "mapping_")
+        _check_feature_names(self, X, reset=False)
         # Coerce to 2-D ndarray so DataFrame row-iteration and empty-input shape both work
         X = np.asarray(X, dtype=object)
         if X.ndim == 1:
@@ -104,7 +109,7 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
             )
         out = np.zeros(X.shape, dtype=int)
         for j, mapping in enumerate(self.mapping_):
-            out[:, j] = [mapping.get(v, 0) for v in X[:, j]]
+            out[:, j] = [0 if _is_missing_value(v) else mapping.get(v, 0) for v in X[:, j]]
         return out
 
     def get_feature_names_out(self, input_features=None):
@@ -112,19 +117,26 @@ class ContinuousOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
 
         Parameters
         ----------
-        input_features : list of str or None
-            The names of the input features. When ``None``, names of the form
-            ``x0, x1, ...`` are generated.
+        input_features : array-like of str or None, default=None
+            Input feature names. ``None`` uses ``feature_names_in_`` when the
+            transformer was fitted on a DataFrame, else ``x0, x1, ...``. Explicit
+            names need one entry per input feature and, after a DataFrame fit,
+            must equal ``feature_names_in_``.
 
         Returns
         -------
         feature_names : ndarray of shape (n_features,)
             The names of the output features after transformation.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``input_features`` does not have one entry per input feature.
+        ValueError
+            If ``input_features`` differs from ``feature_names_in_``.
         """
         check_is_fitted(self, "mapping_")
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
-        return np.asarray(input_features, dtype=object)
+        return np.asarray(resolve_input_features(self, input_features), dtype=object)
 
     def __sklearn_tags__(self):
         """Declare that missing/unknown categories are handled (mapped to 0)."""

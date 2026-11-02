@@ -17,7 +17,8 @@ from __future__ import annotations
 import warnings
 from typing import Any, ClassVar
 
-from ..exceptions import InvalidParamError
+from ..exceptions import InvalidParamError, invalid_param_error
+from ._typing import Task
 
 
 class _Unset:
@@ -74,6 +75,50 @@ def validate_placement(target_aware: bool, placement_strategy: str) -> None:
         raise InvalidParamError("When target_aware=True, placement_strategy must be 'cart' or 'lightgbm'.")
     if not target_aware and placement_strategy not in UNSUPERVISED_STRATEGIES:
         raise InvalidParamError("When target_aware=False, placement_strategy must be 'uniform' or 'quantile'.")
+
+
+#: Supervised tasks accepted by every ``task`` parameter.
+TASKS: tuple[Task, ...] = ("regression", "classification")
+
+
+def validate_task(task, estimator: str, *, allow_none: bool = False) -> Task | None:
+    """Check that ``task`` names a supported supervised task and return it.
+
+    The match is exact, so a near miss such as ``"Regression"`` is rejected
+    instead of being treated as classification by the target-aware placement.
+    Like :func:`validate_placement`, this is called at ``fit`` time, not at
+    construction.
+
+    Parameters
+    ----------
+    task : object
+        The ``task`` value to check.
+    estimator : str
+        Name of the estimator owning the parameter, used in the error message.
+    allow_none : bool, default=False
+        Whether ``None`` is accepted (the spline families and location selectors
+        treat it as ``"regression"``).
+
+    Returns
+    -------
+    {"regression", "classification"} or None
+        The validated ``task``.
+
+    Raises
+    ------
+    InvalidParamError
+        If ``task`` is not ``"regression"`` or ``"classification"`` (or ``None``
+        when ``allow_none`` is True).
+    """
+    if task is None and allow_none:
+        return None
+    if isinstance(task, str) and task in TASKS:
+        return task
+    if allow_none:
+        constraint = "must be 'regression', 'classification', or None (treated as 'regression')"
+    else:
+        constraint = "must be 'regression' or 'classification'"
+    raise invalid_param_error(estimator, "task", task, constraint, valid=TASKS)
 
 
 #: Shared parameter names with a short description of what each one controls.

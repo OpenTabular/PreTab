@@ -100,3 +100,17 @@ def test_lightgbm_selector_places_centers(Cls, data):
     t = Cls(output_dim=5, target_aware=True, task="regression", placement_strategy="lightgbm").fit(X, y)
     assert all(len(c) == 5 for c in t.centers_)
     assert all(np.all(np.diff(c) > 0) for c in t.centers_)
+
+
+@pytest.mark.parametrize("strategy", ["cart", "lightgbm"])
+def test_target_aware_centers_keep_output_dim_on_a_discrete_feature(strategy):
+    """Regression guard for issue #57: tied features returned fewer, duplicate centers."""
+    if strategy == "lightgbm":
+        pytest.importorskip("lightgbm")
+    rng = np.random.default_rng(0)
+    x = rng.integers(0, 5, size=300).astype(float).reshape(-1, 1)
+    y = (x[:, 0] >= 1) + rng.normal(0, 0.1, size=300)
+    transformer = RBFExpansionTransformer(output_dim=10, target_aware=True, placement_strategy=strategy).fit(x, y)
+    centers = transformer.centers_[0]
+    assert transformer.transform(x).shape[1] == 10
+    assert len(np.unique(centers)) == 10

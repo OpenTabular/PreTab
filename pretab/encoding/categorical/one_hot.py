@@ -2,9 +2,10 @@ import warnings
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.validation import _check_feature_names, check_is_fitted
 
 from ...core.representation import RepresentationSpecMixin
+from ...core.validation import resolve_input_features
 from ...exceptions import PretabDataError
 
 _NOT_ORDINAL_MSG = (
@@ -33,6 +34,12 @@ class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
     max_bins_ : ndarray of shape (n_features,)
         Array containing the maximum bin index (plus one) for each feature, which
         determines the width of the one-hot block for that feature.
+    n_features_in_ : int
+        Number of input features seen during ``fit``.
+    feature_names_in_ : ndarray of str
+        Names of the input columns seen during ``fit``. Defined only when ``X``
+        was a DataFrame with string column names; ``transform`` then requires
+        the same columns in the same order.
 
     Notes
     -----
@@ -77,6 +84,7 @@ class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         self : object
             Fitted transformer.
         """
+        _check_feature_names(self, X, reset=True)
         X = np.asarray(X)
         try:
             codes = X.astype(int)
@@ -108,6 +116,7 @@ class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
         all-zero row, mirroring scikit-learn's ``handle_unknown="ignore"``.
         """
         check_is_fitted(self, "max_bins_")
+        _check_feature_names(self, X, reset=False)
         X = np.asarray(X)
         try:
             X = X.astype(int)
@@ -132,17 +141,29 @@ class OneHotFromOrdinalTransformer(RepresentationSpecMixin, TransformerMixin, Ba
 
         Parameters
         ----------
-        input_features : list of str
-            The names of the input features that were ordinal-encoded.
+        input_features : array-like of str or None, default=None
+            Input feature names. ``None`` uses ``feature_names_in_`` when the
+            transformer was fitted on a DataFrame, else ``x0, x1, ...``. Explicit
+            names need one entry per input feature and, after a DataFrame fit,
+            must equal ``feature_names_in_``.
 
         Returns
         -------
         feature_names : ndarray of shape (n_output_features,)
             The names of the one-hot encoded features.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``input_features`` does not have one entry per input feature.
+        ValueError
+            If ``input_features`` differs from ``feature_names_in_``.
         """
+        check_is_fitted(self, "max_bins_")
+        input_features = resolve_input_features(self, input_features)
         feature_names = []
-        for i, max_bins in enumerate(self.max_bins_):
-            feature_names.extend([f"{input_features[i]}_bin_{j}" for j in range(int(max_bins))])  # type: ignore
+        for name, max_bins in zip(input_features, self.max_bins_, strict=True):
+            feature_names.extend([f"{name}_bin_{j}" for j in range(int(max_bins))])
         return np.array(feature_names)
 
     def __sklearn_tags__(self):

@@ -26,7 +26,9 @@ class SigmoidExpansionTransformer(BaseCenterExpansion):
     placement_strategy : {"cart", "lightgbm", "uniform", "quantile"}, optional
         Selector when `target_aware=True` (`"cart"` or `"lightgbm"`); spacing when
         `target_aware=False` (`"uniform"` or `"quantile"`). If left unset, resolves
-        to `"cart"` on the target-aware path and `"quantile"` otherwise.
+        to `"cart"` on the target-aware path and `"quantile"` otherwise. On tied
+        data the `"quantile"` centers stay distinct: the range endpoints are kept
+        once and repeated quantiles are replaced by strictly interior points.
 
     task : {"regression", "classification"}, default="regression"
         Task type for the target-aware selector used to place centers.

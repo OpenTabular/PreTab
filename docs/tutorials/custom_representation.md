@@ -14,7 +14,9 @@ A complete, installable version of this example lives in the repository under
 
 `BaseRepresentation` gives you the shared scikit-learn contract: NaN-aware validation, estimator
 tags, `get_feature_names_out`, and a typed `RepresentationSpec`. You implement `fit`,
-`transform`, and one sizing hook, and declare a small amount of metadata.
+`transform`, and one sizing hook, and declare a small amount of metadata. Fitted on a DataFrame,
+`self._validate` records the column names as `feature_names_in_` and checks them at `transform`,
+and the output names use them (`length_f0` rather than `x0_f0`).
 
 ```python
 import numpy as np
@@ -71,7 +73,9 @@ The four class attributes are the declarative contract.
 
 `supervision`
 : `"unsupervised"`, `"optional"` (uses `y` only when `target_aware=True`), or `"supervised"`
-(always needs `y`).
+(always needs `y`). An `"optional"` class must take a `target_aware` constructor parameter:
+`Preprocessor` sets it from its own `target_aware`, and registration rejects a class without
+one.
 
 ```{tip}
 Implement `_output_sizes` to return the number of output columns each input contributes. The

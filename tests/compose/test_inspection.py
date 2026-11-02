@@ -1,10 +1,14 @@
 """Unit tests for :mod:`pretab.compose.inspection`."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
-from pretab.compose.factory import build_column_transformer
+from pretab.compose.factory import build_column_transformer, get_categorical_transformer_steps
 from pretab.compose.inspection import (
     build_feature_info,
     build_transformer_summary,
@@ -54,6 +58,37 @@ def test_build_feature_info_does_not_infer_kind_from_cat_in_feature_name(make_co
 
     assert feature in numerical
     assert feature not in categorical
+
+
+@pytest.mark.parametrize(("method", "dimension"), [("rbf", 3), ("standardization", 1)])
+def test_build_feature_info_probes_a_step_fitted_on_the_frame_without_warning(
+    make_config, sample_frame, method, dimension
+):
+    """Without an imputer the representation is fitted on the DataFrame column and
+    records ``feature_names_in_``; probing it with a bare array warned that X does
+    not have valid feature names."""
+    config = make_config(numerical_method=method, numerical_imputation=None, output_dim=3)
+    ct = build_column_transformer(config, ["age"], ["city"]).fit(sample_frame)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        numerical, _, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert numerical["age"]["dimension"] == dimension
+
+
+def test_build_feature_info_reports_a_zero_width_block():
+    # scikit-learn's imputer default drops a column without observed values, so
+    # the encoder after it receives no column at all.
+    steps = get_categorical_transformer_steps("int", imputer_kwargs={"keep_empty_features": False})
+    ct = ColumnTransformer([("cat_city", Pipeline(steps), ["city"])])
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Skipping features without any observed values", UserWarning)
+        ct.fit(pd.DataFrame({"city": pd.Series([np.nan] * 4, dtype=object)}))
+
+    _, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert categorical["city"]["dimension"] == 0
 
 
 def test_build_transformer_summary_has_header_and_rows():
