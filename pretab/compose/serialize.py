@@ -29,6 +29,7 @@ from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
 from ..exceptions import PretabError, PretabSerializationError
 from ..placement.base import PlacementResult
+from .inspection import representation_leaf
 from .registry import TransformerSpec
 
 SCHEMA_VERSION = 1
@@ -227,7 +228,13 @@ def _library_versions() -> dict:
 
 
 def _representation_summary(preprocessor) -> list:
-    """Best-effort declarative per-representation summary (family/columns/locations)."""
+    """Best-effort declarative per-representation summary (family/columns/locations).
+
+    One entry per block whose representation ends in a PreTab transformer. For a
+    missing-indicator / separate-state block that is the last step of its
+    representation branch (see :func:`~pretab.compose.inspection.representation_leaf`),
+    not the union itself.
+    """
     summary: list = []
     column_transformer = getattr(preprocessor, "column_transformer_", None)
     if column_transformer is None:
@@ -235,7 +242,7 @@ def _representation_summary(preprocessor) -> list:
     for name, transformer, columns in column_transformer.transformers_:
         if name == "remainder":
             continue
-        leaf = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
+        leaf = representation_leaf(transformer)
         spec_fn = getattr(leaf, "get_representation_spec", None)
         if spec_fn is None:
             continue

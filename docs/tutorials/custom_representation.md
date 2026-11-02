@@ -71,7 +71,9 @@ The four class attributes are the declarative contract.
 
 `supervision`
 : `"unsupervised"`, `"optional"` (uses `y` only when `target_aware=True`), or `"supervised"`
-(always needs `y`).
+(always needs `y`). An `"optional"` class must take a `target_aware` constructor parameter:
+`Preprocessor` sets it from its own `target_aware`, and registration rejects a class without
+one.
 
 ```{tip}
 Implement `_output_sizes` to return the number of output columns each input contributes. The

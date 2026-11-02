@@ -124,3 +124,20 @@ def test_tprs_transform_requires_fit():
         transformer.transform(np.random.rand(5, 1))
     with pytest.raises(NotFittedError):
         transformer.get_penalty_matrix()
+
+
+@pytest.mark.parametrize("n_features", [1, 2, 3])
+def test_tprs_expands_a_missing_value_to_a_nan_row(n_features):
+    """The two-feature kernel used to map a NaN distance to 0, turning a missing
+    coordinate into an all-zero row; every input dimension now gives NaN, as the
+    other spline families do."""
+    rng = np.random.default_rng(0)
+    X = rng.uniform(size=(80, n_features))
+    transformer = ThinPlateSplineTransformer(n_components=5, random_state=0).fit(X)
+    probe = X[:3].copy()
+    probe[1, 0] = np.nan
+
+    out = transformer.transform(probe)
+
+    assert np.isnan(out[1]).all()
+    np.testing.assert_allclose(out[[0, 2]], transformer.transform(X[[0, 2]]), rtol=1e-12, atol=1e-12)
