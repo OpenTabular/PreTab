@@ -112,9 +112,9 @@ _PRESET_PARAM_DEFAULTS = {
 
 
 def _spec_json(spec: dict, **kwargs) -> str:
-    """Serialize a spec to JSON text, raising a typed error for unsupported state."""
+    """Serialize a spec to strict JSON, raising a typed error for unsupported state."""
     try:
-        return json.dumps(spec, **kwargs)
+        return json.dumps(spec, allow_nan=False, **kwargs)
     except (TypeError, ValueError) as exc:
         raise PretabSerializationError(f"The fitted state cannot be written as JSON: {exc}") from exc
 
@@ -1355,7 +1355,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         path : str, os.PathLike, or None, default=None
-            When given, the spec is also written to this path as UTF-8 JSON.
+            When given, the spec is also written to this path as strict UTF-8 JSON:
+            non-finite floats are stored as ``{"__float__": "nan"}`` (or ``"inf"`` /
+            ``"-inf"``), so the file contains no ``NaN`` / ``Infinity`` tokens and
+            any standard JSON parser reads it.
 
         Returns
         -------
@@ -1387,7 +1390,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Parameters
         ----------
         source : str, os.PathLike, or dict
-            A path to a JSON spec file, or the spec dictionary itself.
+            A path to a JSON spec file, or the spec dictionary itself. Specs written
+            by PreTab 1.0.0, which store non-finite floats as bare ``NaN`` tokens,
+            still load.
 
         Returns
         -------

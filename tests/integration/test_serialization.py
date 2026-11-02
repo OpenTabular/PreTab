@@ -7,6 +7,8 @@ policy preservation, and the security allow-list that keeps loading a spec safe
 """
 
 import json
+import math
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -328,6 +330,124 @@ def test_from_spec_rejects_bad_source_type():
         Preprocessor.from_spec(12345)
 
 
+# --- strict JSON: no NaN / Infinity tokens (issue #80) -----------------------------
+
+
+def _strict_loads(text):
+    def reject(token):
+        raise ValueError(f"non-standard JSON token {token}")
+
+    return json.loads(text, parse_constant=reject)
+
+
+@pytest.fixture
+def frame_with_missing():
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=80)
+    a[:6] = np.nan
+    X = pd.DataFrame({"a": a, "b": rng.exponential(size=80), "c": rng.choice(["x", "y"], 80)})
+    return X, rng.normal(size=80)
+
+
+def test_default_spec_file_is_strict_json(frame_with_missing, tmp_path):
+    """The imputers' NaN missing-value marker was written as a bare NaN token,
+    which strict JSON parsers (JavaScript, Go, Rust, ...) reject."""
+    X, y = frame_with_missing
+    pre = Preprocessor(random_state=0).fit(X, y)
+    path = tmp_path / "spec.json"
+    fingerprint = pre.fingerprint_
+    pre.to_spec(path)
+    text = path.read_text(encoding="utf-8")
+    pre.to_spec(path)
+    assert path.read_text(encoding="utf-8") == text
+    assert pre.fingerprint_ == fingerprint
+    assert "NaN" not in text and "Infinity" not in text
+    loaded = Preprocessor.from_spec(_strict_loads(text))
+    np.testing.assert_array_equal(np.asarray(loaded.transform(X)), np.asarray(pre.transform(X)))
+    assert loaded.fingerprint_ == pre.fingerprint_
+
+
+def test_nan_category_in_an_object_array_is_strict_json():
+    """A NaN category of an un-imputed one-hot encoder sits in an object array."""
+    rng = np.random.default_rng(0)
+    city = rng.choice(["x", "y", "z"], 80).astype(object)
+    city[:5] = np.nan
+    X = pd.DataFrame({"a": rng.normal(size=80), "city": city})
+    pre = Preprocessor(categorical_method="one-hot", categorical_imputation=None, random_state=0).fit(X, X["a"])
+    text = json.dumps(pre.to_spec(), allow_nan=False)
+    assert '{"__float__": "nan"}' in text
+    loaded = Preprocessor.from_spec(_strict_loads(text))
+    np.testing.assert_array_equal(np.asarray(loaded.transform(X)), np.asarray(pre.transform(X)))
+    assert loaded.fingerprint_ == pre.fingerprint_
+
+
+def test_non_finite_floats_round_trip():
+    from pretab.compose.serialize import _decode, _encode
+
+    array = np.array([[1.0, np.nan], [np.inf, -np.inf]])
+    decoded = _decode(_strict_loads(json.dumps(_encode(array), allow_nan=False)))
+    assert isinstance(decoded, np.ndarray)
+    np.testing.assert_array_equal(decoded, array)
+    assert decoded.dtype == array.dtype
+    nan, neg_inf = (
+        float(cast(float, _decode(_strict_loads(json.dumps(_encode(value), allow_nan=False)))))
+        for value in (np.nan, -np.inf)
+    )
+    assert math.isnan(nan) and neg_inf == -math.inf
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("shape", [(), (4,), (2, 2), (0, 2)])
+def test_strict_json_float_array_shapes_and_dtypes_round_trip(dtype, shape):
+    from pretab.compose.serialize import _decode, _encode
+
+    array = np.resize(np.array([np.nan, np.inf, -np.inf, 1.0], dtype=dtype), shape)
+    decoded = _decode(_strict_loads(json.dumps(_encode(array), allow_nan=False)))
+
+    assert isinstance(decoded, np.ndarray)
+    assert decoded.shape == shape
+    assert decoded.dtype == array.dtype
+    np.testing.assert_array_equal(decoded, array)
+
+
+@pytest.mark.parametrize("shape", [(), (6,), (2, 3), (0, 2)])
+def test_strict_json_object_arrays_preserve_nested_elements(shape):
+    from pretab.compose.serialize import _decode, _encode
+
+    elements = [
+        [np.bool_(True), np.float32(np.nan)],
+        (np.int64(7), np.float64(np.inf)),
+        np.array([np.nan, -np.inf], dtype=np.float32),
+        {"missing": np.float32(np.nan)},
+        np.bool_(False),
+        np.int64(3),
+    ]
+    array = np.empty(shape, dtype=object)
+    for index in range(array.size):
+        array.flat[index] = elements[index]
+    decoded = _decode(_strict_loads(json.dumps(_encode(array), allow_nan=False)))
+
+    assert isinstance(decoded, np.ndarray)
+    assert decoded.shape == shape
+    assert decoded.dtype == object
+    for actual, expected in zip(decoded.flat, array.flat, strict=True):
+        assert type(actual) is type(expected) or isinstance(expected, np.generic)
+        np.testing.assert_equal(actual, expected)
+        if isinstance(expected, np.ndarray):
+            assert actual.dtype == expected.dtype
+
+
+def test_specs_with_bare_nan_tokens_still_load(frame_with_missing):
+    X, y = frame_with_missing
+    pre = Preprocessor(random_state=0).fit(X, y)
+    spec = json.loads(json.dumps(pre.to_spec()))
+    # Rewrite the tagged floats the way older versions wrote them: as bare NaN.
+    legacy_text = json.dumps(spec).replace('{"__float__": "nan"}', "NaN")
+    assert "NaN" in legacy_text
+    loaded = Preprocessor.from_spec(json.loads(legacy_text))
+    np.testing.assert_array_equal(np.asarray(loaded.transform(X)), np.asarray(pre.transform(X)))
+
+
 # --- object arrays and builtin dtypes (issue #66) ---------------------------------
 
 
@@ -362,7 +482,8 @@ def test_builtin_and_numpy_dtypes_round_trip(dtype):
     assert loaded.fingerprint_ == pre.fingerprint_
 
 
-def test_failed_save_leaves_an_existing_spec_untouched(tmp_path, monkeypatch):
+@pytest.mark.parametrize("unsupported", [object(), np.nan, np.inf, -np.inf], ids=["object", "nan", "inf", "neg_inf"])
+def test_failed_save_leaves_an_existing_spec_untouched(tmp_path, monkeypatch, unsupported):
     import pretab.preprocessor as preprocessor_module
 
     frame = pd.DataFrame({"age": np.linspace(20.0, 60.0, 30)})
@@ -375,11 +496,13 @@ def test_failed_save_leaves_an_existing_spec_untouched(tmp_path, monkeypatch):
     # already-opened file used to leave a truncated, invalid spec behind.
     spec = pre.to_spec()
     monkeypatch.setattr(
-        preprocessor_module, "preprocessor_to_spec", lambda _: {**spec, "state": {"unsupported_": object()}}
+        preprocessor_module, "preprocessor_to_spec", lambda _: {**spec, "state": {"unsupported_": unsupported}}
     )
     with pytest.raises(PretabSerializationError, match="cannot be written as JSON"):
         pre.to_spec(path)
     assert path.read_text(encoding="utf-8") == saved
+    with pytest.raises(PretabSerializationError, match="cannot be written as JSON"):
+        _ = pre.fingerprint_
 
 
 def test_types_a_spec_cannot_load_are_rejected_at_save_time():
