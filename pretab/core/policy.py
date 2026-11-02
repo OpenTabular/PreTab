@@ -10,6 +10,8 @@ to the recurring edge cases that would otherwise diverge silently per family:
 The defaults reproduce each family's historical behaviour (B/M/I-spline, P-spline, and
 tensor-product clip out-of-range inputs; natural-cubic and cubic-regression extrapolate;
 constant columns pass through everywhere), so leaving ``policy`` unset changes nothing.
+A transformer's ``policy`` given as a mapping overrides only the axes it names on top of
+those family defaults; a :class:`RepresentationPolicy` instance is used verbatim.
 Transformers may narrow specific axes through class-level override attributes without
 exposing a new constructor parameter (see :class:`~pretab.core.base.BasePreTabTransformer`).
 

@@ -94,7 +94,9 @@ Two parameters control the physical layout of the stacked output.
 
 `output_format`
 : One of `"dense"`, `"sparse"`, or `"auto"`. `"auto"` picks sparse when it saves memory (for
-example wide one-hot blocks) and dense otherwise. Default `"dense"`.
+example wide one-hot blocks) and dense otherwise. The choice is made once at `fit`, from the
+training output, and stored in `output_format_`, so every `transform` returns the same container,
+even for a single row. Default `"dense"`.
 
 `dtype`
 : The floating-point precision of the output, for example `numpy.float32` to halve memory.
@@ -118,6 +120,10 @@ PreTab honours the scikit-learn output API, so you can request pandas or polars 
 ```python
 pre.set_output(transform="pandas")   # or "polars"
 ```
+
+A global `sklearn.set_config(transform_output="pandas")` (or `"polars"`) is honoured the same
+way. It applies to the `Preprocessor`'s own output only: the internal per-column steps always
+produce arrays, so every method, including the sparse one-hot encoding, works under it.
 
 ```{note}
 Polars output requires the optional `polars` extra (`pip install "pretab[polars]"`) and is
@@ -290,6 +296,30 @@ Every representation names its output columns, and the names are stable and desc
 pre.get_feature_names_out()
 ```
 
+As in scikit-learn, a `Preprocessor` fitted on string-labelled columns (a `DataFrame` or a
+dict) records them as `feature_names_in_`, and `get_feature_names_out(input_features)` accepts
+only those names. One fitted on a NumPy array has no feature names: `get_feature_names_out`
+then accepts any `n_features_in_` names and uses them in place of `feature_0`, `feature_1`,
+.... A frame with non-string column labels also has no `feature_names_in_`, so it accepts
+any names of the right length, including its original labels. Non-string labels are
+converted to strings in output names. This is what `Pipeline.get_feature_names_out()`
+relies on when an upstream step, such as a `SimpleImputer`, outputs arrays:
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import make_pipeline
+
+X = pd.DataFrame({"age": [25.0, np.nan, 47.0, 33.0], "income": [3.1e4, 5.2e4, np.nan, 4.4e4]})
+pipe = make_pipeline(SimpleImputer(), Preprocessor(numerical_method="minmax"))
+list(pipe.fit(X, [0.0, 1.0, 1.0, 0.0]).get_feature_names_out())
+```
+
+```text
+['num_age', 'num_income']
+```
+
 Use `get_feature_info(verbose=True)` for a human-readable table of the resolved per-feature
 pipeline, output width, and category count.
 
@@ -353,6 +383,11 @@ Preprocessor(numerical_method="ple", verbose=1).fit(df, y)
 ```text
 fit complete: 2 numerical (ple) + 1 categorical (int) feature(s) -> 15 output columns in 0.02s
 ```
+
+Each fit applies its own level, so a later `verbose=2` fit in the same process or notebook logs
+the table even after a `verbose=1` fit. PreTab attaches its own stream handler only when no host
+handler receives its records. A handler on the `"pretab"` logger, or on an ancestor such as the
+root handler that `logging.basicConfig` installs, takes over, so every line is printed once.
 
 ```{note}
 When `feature_preprocessing` overrides make columns of the same kind resolve to different

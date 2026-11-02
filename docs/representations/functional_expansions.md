@@ -60,7 +60,10 @@ $$
 $$
 
 ReLU
-: Piecewise-linear ramps. Excellent for sharp, threshold-like effects.
+: Piecewise-linear ramps. Excellent for sharp, threshold-like effects. With unsupervised
+placement the centers are the first `output_dim` of `output_dim + 1` range-spanning points: the
+first ramp starts at the training minimum, and the right endpoint is dropped because a ramp
+starting at the training maximum is zero on every training row.
 
 Sigmoid and Tanh
 : Smooth saturating steps. `scale` controls the steepness of the transition: **smaller** values

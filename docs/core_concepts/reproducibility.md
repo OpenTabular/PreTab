@@ -33,6 +33,9 @@ The spec is strict JSON, so any standard parser (JavaScript, Go, Rust, JSON sche
 reads it. Non-finite floats, such as the imputers' `missing_values=np.nan`, are stored as a
 tagged value, `{"__float__": "nan"}` (or `"inf"`, `"-inf"`), instead of a bare `NaN` token.
 Specs written by PreTab 1.0.0, which contain bare `NaN` tokens, still load.
+The reverse is not supported: older readers cannot decode the new float tags.
+The tagged encoding also changes fingerprints for fitted state containing non-finite
+values, including the default imputers; this change does not alter transformed values.
 
 ```python
 spec = pre.to_spec()                 # returns a dict
@@ -52,7 +55,9 @@ compatibility is not guaranteed.
 
 Supported built-in representations reproduce `transform` bit-for-bit in the same environment.
 Third-party representations and pretrained language models are not supported by the JSON
-serializer; unsupported state raises `PretabSerializationError`.
+serializer; unsupported state raises `PretabSerializationError` when the spec is built. The
+spec is serialized before `to_spec(path)` opens the file, so a failed save leaves an existing
+spec at that path untouched.
 
 ## Fingerprint
 

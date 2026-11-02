@@ -41,6 +41,10 @@ class NystroemFeaturesTransformer(BasePreTabTransformer):
         The fitted underlying scikit-learn estimator.
     n_features_in_ : int
         Number of input features seen during ``fit``.
+    feature_names_in_ : ndarray of str
+        Names of the input columns seen during ``fit``. Defined only when ``X``
+        was a DataFrame with string column names; ``transform`` then requires
+        the same columns in the same order.
     total_output_dim_ : int
         Total number of output columns (the effective number of landmarks).
 

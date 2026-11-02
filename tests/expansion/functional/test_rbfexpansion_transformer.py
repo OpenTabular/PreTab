@@ -55,7 +55,7 @@ def test_rbf_invalid_strategy():
 
 
 def test_rbf_invalid_task():
-    with pytest.raises(ValueError, match="Invalid task"):
+    with pytest.raises(ValueError, match=r"RBFExpansionTransformer\.task = 'invalid' is invalid"):
         RBFExpansionTransformer(task="invalid").fit(np.random.rand(5, 1))
 
 

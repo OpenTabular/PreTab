@@ -10,12 +10,13 @@ from typing import ClassVar, Literal
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array, check_is_fitted
+from sklearn.utils.validation import _check_feature_names, check_array, check_is_fitted
 
 from ...core.adaptive import AdaptiveResolutionMixin
-from ...core.parameters import UNSET, AliasResolverMixin
+from ...core.parameters import UNSET, AliasResolverMixin, validate_task
 from ...core.representation import RepresentationSpecMixin
 from ...core.supervised import warn_target_leakage
+from ...core.validation import resolve_input_features, single_target
 from ...exceptions import (
     IncompatibleParamsError,
     InvalidParamError,
@@ -76,6 +77,10 @@ class PLETransformer(
         to ``[0, 1]``.
     n_features_in_ : int
         Number of features seen during ``fit``.
+    feature_names_in_ : ndarray of str
+        Names of the input columns seen during ``fit``. Defined only when ``X``
+        was a DataFrame with string column names; ``transform`` then requires
+        the same columns in the same order.
     n_bins_per_feature_ : list of int
         Number of output bins produced for each feature (``len(thresholds) + 1``).
     total_output_dim_ : int
@@ -146,9 +151,11 @@ class PLETransformer(
         ----------
         X : array-like of shape (n_samples, n_features)
             Training data. Must be finite; NaN values raise an error.
-        y : array-like of shape (n_samples,)
+        y : array-like of shape (n_samples,) or (n_samples, 1)
             Target values used to grow the per-feature decision trees. PLE is
-            always target-aware, so ``y`` is required.
+            always target-aware, so ``y`` is required, and it places its bins
+            against a single target: a multi-output ``y`` raises
+            :class:`~pretab.exceptions.IncompatibleParamsError`.
 
         Returns
         -------
@@ -161,13 +168,19 @@ class PLETransformer(
                 "PLETransformer is always target-aware and requires y at fit time; got y=None."
             )
 
+        _check_feature_names(self, X, reset=True)
         X = check_array(
             X,
             dtype=np.float64,  # type: ignore
             ensure_2d=True,
             ensure_all_finite=True,  # type: ignore
         )
-        y = np.asarray(y).ravel()
+        y = single_target(
+            y,
+            type(self).__name__,
+            fix="fit on one target column. PLE always places its bins against y, so a multi-output "
+            "target needs a numerical method with unsupervised placement.",
+        )
 
         if len(X) != len(y):
             raise PretabDataError(f"X and y must have same length. Got {len(X)} and {len(y)}")
@@ -182,8 +195,7 @@ class PLETransformer(
         max_bins_req = self._resolve_param("max_output_dim", default=None)
         min_bins, max_bins = self._resolve_bin_bounds(n_bins, min_bins_req, max_bins_req)
 
-        if self.task not in ("regression", "classification"):
-            raise InvalidParamError(f"Unsupported task: {self.task}. Use 'regression' or 'classification'.")
+        task = validate_task(self.task, type(self).__name__)
 
         if self.placement_strategy not in ("cart", "lightgbm"):
             raise InvalidParamError(
@@ -198,7 +210,7 @@ class PLETransformer(
         # exactly ``output_dim`` bins, adaptive clamps it into ``[min, max]``.
         adapter = PLEPlacementAdapter(
             placement_strategy=self.placement_strategy,
-            task=self.task,
+            task=task,
             random_state=self.random_state,
         )
         min_thresholds = max(0, min_bins - 1)
@@ -230,6 +242,7 @@ class PLETransformer(
         """
         check_is_fitted(self, ["thresholds_", "n_features_in_"])
 
+        _check_feature_names(self, X, reset=False)
         X = check_array(
             X,
             dtype=np.float64,  # type: ignore
@@ -276,7 +289,7 @@ class PLETransformer(
         if len(thresholds) == 0:
             lower, upper = edges[0], edges[-1]
             width = upper - lower
-            if width > 1e-10:
+            if width > 0:
                 values = np.clip((feature - lower) / width, 0.0, 1.0)
             else:
                 values = np.full(n_samples, 0.5)
@@ -297,7 +310,7 @@ class PLETransformer(
             upper_edge = edges[bin_idx + 1]
             bin_width = upper_edge - lower_edge
 
-            if bin_width > 1e-10:
+            if bin_width > 0:
                 ple_encoded[mask, bin_idx] = np.clip((values - lower_edge) / bin_width, 0.0, 1.0)
             else:
                 ple_encoded[mask, bin_idx] = 0.5
@@ -318,17 +331,25 @@ class PLETransformer(
         Parameters
         ----------
         input_features : array-like of str or None, default=None
-            Input feature names. If None, generic names ``x0``, ``x1`` ... are used.
+            Input feature names. ``None`` uses ``feature_names_in_`` when the
+            transformer was fitted on a DataFrame, else ``x0, x1, ...``. Explicit
+            names need one entry per input feature and, after a DataFrame fit,
+            must equal ``feature_names_in_``.
 
         Returns
         -------
         feature_names_out : ndarray of str
             One name per output column, formatted ``{name}_ple{j}``.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``input_features`` does not have one entry per input feature.
+        ValueError
+            If ``input_features`` differs from ``feature_names_in_``.
         """
         check_is_fitted(self, ["thresholds_", "n_features_in_"])
-
-        if input_features is None:
-            input_features = [f"x{i}" for i in range(self.n_features_in_)]
+        input_features = resolve_input_features(self, input_features)
 
         feature_names_out = []
         for name, n_bins in zip(input_features, self.n_bins_per_feature_, strict=False):

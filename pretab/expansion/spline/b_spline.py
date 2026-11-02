@@ -81,6 +81,8 @@ class BSplineTransformer(BaseSplineTransformer):
         for i in range(n_basis):
             coef = np.zeros(n_basis)
             coef[i] = 1.0
-            spline = BSpline(knots, coef, self.degree, extrapolate=False)
+            # In-range values are the same either way; out-of-range values only reach
+            # this point under an "extrapolate" / "warn" policy (the default clips).
+            spline = BSpline(knots, coef, self.degree, extrapolate=True)
             design[:, i] = spline(x)
         return np.nan_to_num(design, nan=0.0)

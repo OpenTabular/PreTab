@@ -59,6 +59,63 @@ class _CatStringLength(BaseRepresentation):
         return [1] * self.n_features_in_
 
 
+class _SplitAtTarget(BaseRepresentation):
+    """Optionally supervised: split at the median, or (target-aware) where ``y`` peaks."""
+
+    representation_name = "split_reg"
+    feature_kind = "numerical"
+    supervision = "optional"
+
+    def __init__(self, target_aware=True):
+        self.target_aware = target_aware
+
+    def fit(self, X, y=None):
+        X = self._validate(X, reset=True)
+        self.used_y_ = bool(self.target_aware and y is not None)
+        self.threshold_ = X[np.argmax(np.asarray(y)), 0] if self.used_y_ else np.median(X[:, 0])
+        return self
+
+    def transform(self, X):
+        check_is_fitted(self, "threshold_")
+        return (self._validate(X, reset=False) > self.threshold_).astype(float)
+
+    def _output_sizes(self):
+        return [1] * self.n_features_in_
+
+
+class _SplitAtTargetOffByDefault(_SplitAtTarget):
+    def __init__(self, target_aware=False):
+        super().__init__(target_aware=target_aware)
+
+
+@pytest.mark.parametrize("cls", [_SplitAtTarget, _SplitAtTargetOffByDefault])
+def test_register_optional_representation_follows_preprocessor_target_aware(cls):
+    # Whatever the class default, the Preprocessor's target_aware decides whether
+    # the representation uses y (no placement strategies are declared).
+    register_representation("split_reg", cls)
+    X = pd.DataFrame({"x": np.linspace(0.0, 1.0, 50)})
+    y = np.sin(X["x"] * 6)
+    for target_aware, placement in [(False, "uniform"), (True, "cart")]:
+        pre = Preprocessor(numerical_method="split_reg", target_aware=target_aware, placement_strategy=placement)
+        pre.fit(X, y)
+
+        step = pre.column_transformer_.named_transformers_["num_x"].named_steps["split_reg"]
+        assert step.target_aware is target_aware
+        assert step.used_y_ is target_aware
+        assert [record.uses_target for record in pre.get_feature_lineage()] == [target_aware]
+
+
+def test_register_optional_representation_requires_target_aware_parameter():
+    class _NoTargetAware(_Square):
+        supervision = "optional"
+
+    with pytest.raises(TypeError, match="target_aware"):
+        register_representation("optional_reg", _NoTargetAware)
+    with pytest.raises(TypeError, match="target_aware"):
+        register_representation("optional_reg", _Square, supervision="optional")
+    assert "optional_reg" not in registry.TRANSFORMER_REGISTRY
+
+
 def test_register_makes_method_selectable_and_discoverable():
     register_representation("square_reg", _Square)
     assert "square_reg" in registry.NUMERICAL_METHODS

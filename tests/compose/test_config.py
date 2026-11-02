@@ -23,6 +23,12 @@ def test_invalid_placement_combo_raises(make_config):
         make_config(target_aware=False, placement_strategy="cart")
 
 
+@pytest.mark.parametrize("task", ["Regression", "classif", None])
+def test_invalid_task_raises(make_config, task):
+    with pytest.raises(InvalidParamError, match=r"Preprocessor\.task = .* is invalid"):
+        make_config(task=task)
+
+
 def test_feature_preprocessing_is_copied(make_config):
     fp = {"age": "standardization"}
     cfg = make_config(feature_preprocessing=fp)

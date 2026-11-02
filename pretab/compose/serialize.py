@@ -33,8 +33,9 @@ from .._version import __version__ as _PRETAB_VERSION
 from ..core.parameters import UNSET
 from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
-from ..exceptions import PretabError, PretabSerializationError
+from ..exceptions import PretabSerializationError
 from ..placement.base import PlacementResult
+from .inspection import representation_leaf
 from .registry import TransformerSpec
 
 SCHEMA_VERSION = 1
@@ -56,6 +57,10 @@ _ALLOWED_TOP_LEVEL = frozenset({"pretab", "sklearn", "numpy", "scipy"})
 _ALLOWED_DATACLASSES = frozenset(
     {RepresentationPolicy, RepresentationSpec, FeatureLineage, PlacementResult, TransformerSpec}
 )
+
+
+# Builtin types that are valid numpy dtype specifiers, encoded as that dtype.
+_BUILTIN_DTYPES = (bool, int, float, complex)
 
 
 # --- helpers -------------------------------------------------------------
@@ -97,11 +102,6 @@ def _encode_float(value):
     return {"__float__": repr(float(value))}
 
 
-def _encode_object_element(value):
-    """Tag a non-finite float element of an object array; keep any other element as it is."""
-    return _encode_float(value) if isinstance(value, float) else value
-
-
 def _encode(obj):
     if isinstance(obj, np.bool_):
         return bool(obj)
@@ -117,16 +117,25 @@ def _encode(obj):
         return {"__unset__": True}
     if isinstance(obj, np.ndarray):
         data = obj.tolist()
-        if obj.dtype.kind == "f" and not np.isfinite(obj).all():
+        if obj.dtype.kind == "O":
+            # tolist() keeps the elements of an object array as they are (e.g.
+            # numpy scalars such as np.bool_), so encode each one.
+            data = _map_elements(data, obj.ndim, _encode)
+        elif obj.dtype.kind == "f" and not np.isfinite(obj).all():
             data = _map_elements(data, obj.ndim, _encode_float)
-        elif obj.dtype.kind == "O":
-            # tolist() keeps the elements of an object array as they are, so tag
-            # the non-finite floats among them (e.g. a NaN category).
-            data = _map_elements(data, obj.ndim, _encode_object_element)
         return {"__ndarray__": {"dtype": obj.dtype.str, "shape": list(obj.shape), "data": data}}
     if isinstance(obj, np.dtype):
         return {"__npdtype__": obj.str}
     if isinstance(obj, type):
+        if obj in _BUILTIN_DTYPES:
+            # A dtype-like builtin (e.g. ``Preprocessor(dtype=float)``) is stored as
+            # the numpy dtype it denotes; ``builtins`` is never importable from a spec.
+            return {"__npdtype__": np.dtype(obj).str}
+        if not _module_allowed(obj.__module__):
+            raise PretabSerializationError(
+                f"Cannot serialize the type {obj.__module__}.{obj.__qualname__}: a spec can only reference "
+                f"types from {sorted(_ALLOWED_TOP_LEVEL)}."
+            )
         return {"__type__": f"{obj.__module__}:{obj.__qualname__}"}
     if isinstance(obj, slice):
         return {"__slice__": [obj.start, obj.stop, obj.step]}
@@ -172,18 +181,21 @@ def _json_safe(obj):
 
 
 # --- decoding ------------------------------------------------------------
-def _decode_float_element(item):
-    """Restore a non-finite float tagged by :func:`_encode_float`; keep any other element."""
-    if isinstance(item, dict) and "__float__" in item:
-        return float(item["__float__"])
-    return item
-
-
 def _decode_ndarray(payload: dict) -> np.ndarray:
     dtype = np.dtype(payload["dtype"])
+    if dtype.kind == "O":
+        # Fill element by element so a decoded element that is itself a sequence
+        # stays a single element instead of adding a dimension.
+        shape = payload["shape"]
+        elements: list = []
+        _map_elements(payload["data"], len(shape), lambda item: elements.append(_decode(item)))
+        arr = np.empty(len(elements), dtype=object)
+        for index, element in enumerate(elements):
+            arr[index] = element
+        return arr.reshape(shape)
     data = payload["data"]
-    if dtype.kind in "fO":
-        data = _map_elements(data, len(payload["shape"]), _decode_float_element)
+    if dtype.kind == "f":
+        data = _map_elements(data, len(payload["shape"]), _decode)
     arr = np.array(data, dtype=dtype)
     return arr.reshape(payload["shape"])
 
@@ -275,7 +287,18 @@ def _library_versions() -> dict:
 
 
 def _representation_summary(preprocessor) -> list:
-    """Best-effort declarative per-representation summary (family/columns/locations)."""
+    """Declarative per-representation summary (family/columns/locations).
+
+    One entry per block whose representation ends in a PreTab transformer, built from its
+    :class:`RepresentationSpec` with the block's column names as input features
+    (as the feature lineage does). For a missing-indicator / separate-state block,
+    this is the last step of its representation branch (see
+    :func:`~pretab.compose.inspection.representation_leaf`), not the union itself.
+    Blocks whose representation ends in a step without
+    ``get_representation_spec`` (scikit-learn scalers and encoders, embeddings)
+    have no entry. The steps are fitted, so a spec that fails to build is a bug:
+    its error propagates instead of silently dropping the entry.
+    """
     summary: list = []
     column_transformer = getattr(preprocessor, "column_transformer_", None)
     if column_transformer is None:
@@ -283,15 +306,17 @@ def _representation_summary(preprocessor) -> list:
     for name, transformer, columns in column_transformer.transformers_:
         if name == "remainder":
             continue
-        leaf = transformer.steps[-1][1] if hasattr(transformer, "steps") else transformer
+        leaf = representation_leaf(transformer)
         spec_fn = getattr(leaf, "get_representation_spec", None)
         if spec_fn is None:
             continue
-        try:
-            entry = spec_fn().to_dict()
-        except (PretabError, ValueError, AttributeError, TypeError, KeyError):
-            continue
-        entry["columns"] = [str(col) for col in columns]
+        block_columns = [str(col) for col in columns]
+        # A leaf with more inputs than its block has columns (one fitted behind
+        # the imputer's built-in missing indicator, add_missing_indicator=True)
+        # names its own inputs.
+        fits_block = getattr(leaf, "n_features_in_", len(block_columns)) == len(block_columns)
+        entry = spec_fn(input_features=block_columns if fits_block else None).to_dict()
+        entry["columns"] = block_columns
         summary.append(entry)
     return summary
 

@@ -48,3 +48,21 @@ def test_continuous_ordinal_unseen_category_maps_to_zero():
     transformer = ContinuousOrdinalTransformer().fit(np.array([["a"], ["b"]], dtype=object))
     Xt = transformer.transform(np.array([["c"]], dtype=object))
     assert Xt.ravel().tolist() == [0]
+
+
+def test_continuous_ordinal_handles_nullable_pandas_strings():
+    frame = pd.DataFrame({"c": ["red", None, "blue", "red"]}).convert_dtypes()
+
+    transformed = ContinuousOrdinalTransformer().fit_transform(frame)
+
+    assert transformed.ravel().tolist() == [2, 0, 1, 2]
+
+
+def test_continuous_ordinal_all_missing_and_transform_time_missing():
+    missing = pd.DataFrame({"c": [None, pd.NA, np.nan]}, dtype=object)
+    all_missing = ContinuousOrdinalTransformer().fit(missing)
+    np.testing.assert_array_equal(all_missing.transform(missing), np.zeros((3, 1), dtype=int))
+
+    clean = ContinuousOrdinalTransformer().fit(pd.DataFrame({"c": ["a", "b"]}))
+    transformed = clean.transform(pd.DataFrame({"c": [pd.NA, "unseen", "a"]}))
+    assert transformed.ravel().tolist() == [0, 0, 1]
