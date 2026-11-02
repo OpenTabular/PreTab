@@ -124,3 +124,33 @@ def test_get_params_and_clone_preserve_config():
     cloned = clone(search)
     assert isinstance(cloned, RepresentationSearchCV)
     assert cloned.get_params()["cv"] == 3
+
+
+@pytest.fixture
+def class_data():
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"x": rng.uniform(-3, 3, 300)})
+    return X, np.where(np.sin(X["x"]) > 0, "pos", "neg")
+
+
+def test_classifier_search_places_against_class_labels(class_data):
+    """A classifier made the search keep task="regression": string labels crashed the
+    target-aware placement and integer labels were treated as a regression target."""
+    X, y = class_data
+    search = RepresentationSearchCV(LogisticRegression(), methods=["minmax", "ple"], cv=3, random_state=0).fit(X, y)
+    assert search.best_preprocessor_.task == "classification"
+    assert set(search.predict(X)) <= {"pos", "neg"}
+
+
+def test_classifier_search_keeps_an_explicit_task(class_data):
+    X, y = class_data
+    search = RepresentationSearchCV(
+        LogisticRegression(), methods=["minmax"], cv=3, preprocessor_params={"task": "regression"}
+    ).fit(X, (y == "pos").astype(int))
+    assert search.best_preprocessor_.task == "regression"
+
+
+def test_regressor_search_keeps_the_regression_task(nonlinear_data):
+    X, y = nonlinear_data
+    search = RepresentationSearchCV(LinearRegression(), methods=["minmax"], cv=3).fit(X, y)
+    assert search.best_preprocessor_.task == "regression"
