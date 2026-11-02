@@ -10,6 +10,7 @@ from typing import cast
 
 import numpy as np
 import pytest
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import KFold
 
 from pretab import CrossFittedTransformer, LeakageWarning
@@ -106,6 +107,412 @@ def test_invalid_task_rejected(data):
     X, y = data
     with pytest.raises(InvalidParamError, match="task"):
         CrossFittedTransformer(PLETransformer(), task="classificaton").fit_transform(X, y)
+
+
+# --- fit_transform returns the kind of output transform returns (issue #90) ---------
+
+
+@pytest.fixture
+def integer_array():
+    """A numerical and a categorical integer column whose types and categories every fold sees."""
+    rng = np.random.default_rng(0)
+    X = np.column_stack([rng.integers(0, 100_000, 300), rng.choice([1, 2, 3], 300)])
+    y = (X[:, 0] / 50_000.0) ** 2 + (X[:, 1] == 2) + rng.normal(scale=0.1, size=300)
+    return X, y
+
+
+@pytest.fixture
+def object_array():
+    """A float and a string column in one object array."""
+    rng = np.random.default_rng(0)
+    X = np.empty((300, 2), dtype=object)
+    X[:, 0] = rng.normal(size=300)
+    X[:, 1] = rng.choice(["Berlin", "Paris", "Rome"], 300)
+    return X, X[:, 0].astype(float) ** 2 + rng.normal(scale=0.1, size=300)
+
+
+def _cross_fit(wrapped, X, y):
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=3, random_state=0)
+    return cross_fitted, cross_fitted.fit_transform(X, y)
+
+
+def test_fit_transform_keeps_strings_left_unchanged(object_array):
+    """The out-of-fold rows were written into a float buffer, so categorical_method=None
+    (strings passed through unchanged) raised in fit_transform but not in transform."""
+    from pretab import Preprocessor
+
+    X, y = object_array
+    cross_fitted, out = _cross_fit(Preprocessor(categorical_method=None, random_state=0), X, y)
+
+    assert out.dtype == cross_fitted.transform(X).dtype == object
+    np.testing.assert_array_equal(out, X)
+
+
+def test_fit_transform_stacks_out_of_fold_values_with_strings(object_array):
+    from sklearn.compose import ColumnTransformer
+
+    X, y = object_array
+    wrapped = ColumnTransformer([("ple", PLETransformer(output_dim=4), [0]), ("keep", "passthrough", [1])])
+    _, out = _cross_fit(wrapped, X, y)
+    _, numeric = _cross_fit(PLETransformer(output_dim=4), X[:, [0]].astype(float), y)
+
+    assert out.dtype == object
+    np.testing.assert_allclose(out[:, :4].astype(float), numeric)
+    np.testing.assert_array_equal(out[:, 4], X[:, 1])
+
+
+def test_fit_transform_keeps_sparse_output(integer_array):
+    """fit_transform could not stack sparse fold output, while transform returned CSR."""
+    from scipy import sparse as sp
+
+    from pretab import Preprocessor
+
+    X, y = integer_array
+    params = {"categorical_method": "one-hot", "output_dim": 4, "random_state": 0}
+    cross_fitted, out = _cross_fit(Preprocessor(output_format="sparse", **params), X, y)
+    _, dense = _cross_fit(Preprocessor(**params), X, y)
+
+    assert sp.issparse(out)
+    assert out.format == cross_fitted.transform(X).format == "csr"
+    np.testing.assert_allclose(out.toarray(), dense)
+
+
+def test_fit_transform_keeps_the_configured_dtype(integer_array):
+    from pretab import Preprocessor
+
+    X, y = integer_array
+    cross_fitted, out = _cross_fit(Preprocessor(dtype=np.float32, output_dim=4, random_state=0), X, y)
+    _, native = _cross_fit(Preprocessor(output_dim=4, random_state=0), X, y)
+
+    assert out.dtype == cross_fitted.transform(X).dtype == np.float32
+    np.testing.assert_allclose(out, native, rtol=1e-6)
+
+
+def test_fit_transform_returns_the_dataframe_transform_returns(integer_array):
+    import pandas as pd
+
+    from pretab import Preprocessor
+
+    X, y = integer_array
+    cross_fitted, out = _cross_fit(Preprocessor(output_dim=4, random_state=0).set_output(transform="pandas"), X, y)
+    full = cross_fitted.transform(X)
+    _, array = _cross_fit(Preprocessor(output_dim=4, random_state=0), X, y)
+
+    assert isinstance(out, pd.DataFrame)
+    pd.testing.assert_index_equal(out.columns, full.columns)
+    pd.testing.assert_index_equal(out.index, full.index)  # the Preprocessor numbers its rows
+    np.testing.assert_allclose(out.to_numpy(), array)
+
+
+def test_fit_transform_returns_polars_like_transform(integer_array):
+    pl = pytest.importorskip("polars")
+    from pretab import Preprocessor
+
+    X, y = integer_array
+    cross_fitted, out = _cross_fit(Preprocessor(output_dim=4, random_state=0).set_output(transform="polars"), X, y)
+    _, array = _cross_fit(Preprocessor(output_dim=4, random_state=0), X, y)
+
+    assert isinstance(out, pl.DataFrame)
+    assert out.columns == cross_fitted.transform(X).columns
+    np.testing.assert_allclose(out.to_numpy(), array)
+
+
+def test_stacked_dataframe_folds_keep_the_input_index_they_carry():
+    """scikit-learn's set_output copies the input index onto each fold's frame."""
+    import pandas as pd
+
+    from pretab.core.supervised import _stack_folds
+
+    X = pd.DataFrame({"a": [10.0, 11.0, 12.0, 13.0]}, index=pd.Index([7, 3, 9, 1]))
+    test_indices = [np.array([1, 3]), np.array([0, 2])]
+    blocks = [X.iloc[rows] * 2 for rows in test_indices]
+
+    pd.testing.assert_frame_equal(_stack_folds(blocks, test_indices, X), X * 2)
+    renumbered = _stack_folds([block.reset_index(drop=True) for block in blocks], test_indices, X)
+    pd.testing.assert_frame_equal(renumbered, (X * 2).reset_index(drop=True))
+
+
+def test_fit_transform_rejects_folds_with_other_dataframe_columns():
+    """Frames are stacked by column label: a fold that keeps other columns at the
+    same width (here another top category) must raise, not widen the result with
+    NaN-padded columns."""
+    from sklearn.compose import ColumnTransformer
+    from sklearn.preprocessing import OneHotEncoder
+
+    # Unshuffled folds: fold 0 holds out rows 0-29 (all "a"), so its training rows keep
+    # "b" as the frequent category while the all-data fit keeps "a" -- same width, other labels.
+    X = np.empty((90, 2), dtype=object)
+    X[:, 0] = np.linspace(-1.0, 1.0, 90)
+    X[:, 1] = ["a"] * 30 + ["b"] * 30 + ["c"] * 20 + ["a"] * 10
+    y = X[:, 0].astype(float) ** 2
+    encoder = OneHotEncoder(max_categories=2, handle_unknown="infrequent_if_exist", sparse_output=False)
+    transformer = ColumnTransformer([("ple", PLETransformer(output_dim=3), [0]), ("oh", encoder, [1])]).set_output(
+        transform="pandas"
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", LeakageWarning)
+        with pytest.raises(IncompatibleParamsError, match=r"same output columns across folds.*x1_a"):
+            CrossFittedTransformer(transformer, n_folds=3, shuffle=False).fit_transform(X, y)
+
+
+def test_cross_fitting_rejects_blocks(integer_array):
+    from pretab import Preprocessor
+
+    X, y = integer_array
+    blocks = Preprocessor(output_structure="blocks", random_state=0)
+    with pytest.raises(IncompatibleParamsError, match="dict of blocks"):
+        CrossFittedTransformer(blocks, n_folds=3, random_state=0).fit_transform(X, y)
+
+
+@pytest.mark.parametrize("output_format", ["sparse", "auto"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_sparse_mixed_frame_keeps_dtype_schema_and_missing_indicators(output_format, dtype):
+    import pandas as pd
+    from scipy import sparse as sp
+
+    from pretab import Preprocessor
+
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(
+        {
+            "value": rng.normal(size=200),
+            "city": np.repeat([f"city_{i}" for i in range(100)], 2),
+            "flag": rng.choice([True, False], size=200),
+        },
+        index=pd.Index(rng.permutation(200), name="row"),
+    )
+    X.iloc[7, 0] = np.nan
+    original = X.copy(deep=True)
+    y = rng.normal(size=len(X))
+    params = {
+        "categorical_method": "one-hot",
+        "output_dim": 6,
+        "add_missing_indicator": True,
+        "dtype": dtype,
+        "random_state": 0,
+    }
+    wrapped, out = _cross_fit(Preprocessor(output_format=output_format, **params), X, y)
+    _, expected = _cross_fit(Preprocessor(output_format="dense", **params), X, y)
+    full = wrapped.transform(X)
+    assert sp.issparse(out) and sp.issparse(full)
+    assert out.format == full.format == "csr"
+    assert out.dtype == full.dtype == dtype
+    assert out.shape == expected.shape == full.shape == (len(X), 109)
+    np.testing.assert_allclose(out.toarray(), expected)
+    np.testing.assert_array_equal(out[:, 6:].toarray(), full[:, 6:].toarray())
+    np.testing.assert_array_equal(out[:, 6].toarray().ravel(), X["value"].isna().astype(float))
+    assert not np.allclose(out[:, :6].toarray(), full[:, :6].toarray())
+    pd.testing.assert_frame_equal(X, original)
+
+
+@pytest.mark.parametrize("sparse_format", ["csr", "csc", "coo", "bsr", "dia", "dok", "lil"])
+@pytest.mark.parametrize("sparse_array", [False, True])
+def test_stacking_sparse_folds_preserves_format_dtype_and_values_without_densifying(
+    sparse_format, sparse_array, monkeypatch
+):
+    from scipy import sparse as sp
+
+    from pretab.core.supervised import _stack_folds
+
+    values = np.array([[1, 0], [0, 2], [3, 0], [0, 4]], dtype=np.float32)
+    rows = [np.array([3, 1]), np.array([2, 0])]
+    constructor = sp.csr_array if sparse_array else sp.csr_matrix
+    blocks = [constructor(values[index]).asformat(sparse_format) for index in rows]
+
+    def reject_densification(*args, **kwargs):
+        pytest.fail("Sparse fold output must not be densified")
+
+    with monkeypatch.context() as guard:
+        guard.setattr(type(blocks[0]), "toarray", reject_densification)
+        guard.setattr(sp.csr_matrix, "toarray", reject_densification)
+        guard.setattr(sp.csr_array, "toarray", reject_densification)
+        out = _stack_folds(blocks, rows, values)
+    assert sp.issparse(out)
+    assert out.format == sparse_format
+    assert type(out) is type(blocks[0])
+    assert out.dtype == np.float32
+    np.testing.assert_array_equal(out.toarray(), values)
+
+
+@pytest.mark.parametrize("index_kind", ["shuffled", "duplicate", "multi"])
+def test_pandas_output_preserves_the_input_index_through_the_public_wrapper(index_kind):
+    import pandas as pd
+    from sklearn.preprocessing import StandardScaler
+
+    from pretab import Preprocessor
+
+    rng = np.random.default_rng(0)
+    index = pd.Index(rng.permutation(120), name="row")
+    if index_kind == "duplicate":
+        index = pd.Index(np.arange(120) % 7, name="row")
+    elif index_kind == "multi":
+        index = pd.MultiIndex.from_arrays([np.arange(120) % 7, rng.permutation(120)], names=["group", "row"])
+    X = pd.DataFrame({"value": rng.normal(size=120), "other": rng.normal(size=120)}, index=index)
+    y = rng.normal(size=len(X))
+    for transformer in [StandardScaler(), Preprocessor(numerical_method="minmax")]:
+        wrapped, out = _cross_fit(transformer.set_output(transform="pandas"), X, y)
+        full = wrapped.transform(X)
+        assert isinstance(out, pd.DataFrame) and isinstance(full, pd.DataFrame)
+        pd.testing.assert_index_equal(out.index, X.index)
+        pd.testing.assert_index_equal(out.columns, full.columns)
+        assert out.dtypes.equals(full.dtypes)
+        if isinstance(transformer, Preprocessor):
+            pd.testing.assert_frame_equal(out, full)
+
+
+def test_pandas_fold_stacking_preserves_nullable_and_categorical_dtypes():
+    import pandas as pd
+
+    from pretab.core.supervised import _stack_folds
+
+    X = pd.DataFrame(
+        {
+            "count": pd.array([1, None, 3, 4], dtype="Int64"),
+            "flag": pd.array([True, False, None, True], dtype="boolean"),
+            "text": pd.array(["a", None, "c", "d"], dtype="string"),
+            "category": pd.Categorical(["a", "b", "a", "b"], ordered=True),
+        },
+        index=pd.Index([3, 3, 1, 7], name="row"),
+    )
+    rows = [np.array([3, 1]), np.array([0, 2])]
+    pd.testing.assert_frame_equal(_stack_folds([X.iloc[index] for index in rows], rows, X), X)
+
+
+@pytest.mark.parametrize("return_lists", [False, True])
+def test_dense_fold_stacking_preserves_values_and_common_dtype(return_lists):
+    from pretab.core.supervised import _stack_folds
+
+    rows = [np.array([3, 1]), np.array([2, 0])]
+    blocks = [np.array([[3], [1]], dtype=np.int16), np.array([[2.5], [0.5]], dtype=np.float32)]
+    if return_lists:
+        blocks = [block.tolist() for block in blocks]
+    out = _stack_folds(blocks, rows, np.zeros((4, 1)))
+    np.testing.assert_array_equal(out.ravel(), [0.5, 1, 2.5, 3])
+    if not return_lists:
+        assert out.dtype == np.float32
+
+
+class _InvalidFoldOutput(TransformerMixin, BaseEstimator):
+    def __init__(self, kind):
+        self.kind = kind
+
+    def fit(self, X, y=None):
+        self.n_rows_ = len(X)
+        return self
+
+    def transform(self, X):
+        import pandas as pd
+
+        n_rows = len(X)
+        if self.kind == "scalar":
+            return 1.0
+        if self.kind == "1d":
+            return np.zeros(n_rows)
+        if self.kind == "3d":
+            return np.zeros((n_rows, 1, 1))
+        if self.kind == "rows":
+            return np.zeros((n_rows - 1, 1))
+        if self.kind == "labels":
+            return pd.DataFrame({self.get_feature_names_out()[0] if self.n_rows_ == 30 else 1: np.zeros(n_rows)})
+        return pd.DataFrame(np.zeros((n_rows, 2)), columns=pd.Index(["b", "a"]))
+
+    def get_feature_names_out(self, input_features=None):
+        return np.array(["a", "b"] if self.kind == "order" else ["1"], dtype=object)
+
+
+@pytest.mark.parametrize("kind", ["scalar", "1d", "3d", "rows"])
+def test_cross_fitting_rejects_malformed_fold_output_with_a_clear_error(kind):
+    with pytest.raises(IncompatibleParamsError, match="output shape"):
+        CrossFittedTransformer(_InvalidFoldOutput(kind), n_folds=3).fit_transform(
+            np.zeros((30, 1)), np.arange(30, dtype=float)
+        )
+
+
+@pytest.mark.parametrize("kind", ["labels", "order"])
+def test_cross_fitting_rejects_changed_dataframe_labels_or_order(kind):
+    with pytest.raises(IncompatibleParamsError, match="same output columns across folds"):
+        CrossFittedTransformer(_InvalidFoldOutput(kind), n_folds=3).fit_transform(
+            np.zeros((30, 1)), np.arange(30, dtype=float)
+        )
+
+
+@pytest.mark.parametrize("container", ["default", "pandas", "polars"])
+def test_mixed_string_and_target_aware_output_keeps_row_order_and_missing_state(container):
+    import pandas as pd
+
+    from pretab import Preprocessor
+
+    if container == "polars":
+        pytest.importorskip("polars")
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(
+        {"value": rng.normal(size=120), "city": rng.choice(["Berlin", "Paris"], 120)},
+        index=pd.Index(np.arange(120) % 17, name="row"),
+    )
+    X.iloc[7, 0] = np.nan
+    y = rng.normal(size=len(X))
+    params = {
+        "numerical_method": "ple",
+        "categorical_method": None,
+        "output_dim": 4,
+        "add_missing_indicator": True,
+        "output_format": "dense",
+        "random_state": 0,
+    }
+    wrapped, out = _cross_fit(Preprocessor(**params).set_output(transform=container), X, y)
+    _, reference = _cross_fit(Preprocessor(**params), X, y)
+    full = wrapped.transform(X)
+    if container == "pandas":
+        assert isinstance(out, pd.DataFrame) and isinstance(full, pd.DataFrame)
+        pd.testing.assert_index_equal(out.index, X.index)
+        pd.testing.assert_index_equal(out.columns, full.columns)
+        assert out.dtypes.equals(full.dtypes)
+    elif container == "polars":
+        pl = pytest.importorskip("polars")
+        assert isinstance(out, pl.DataFrame) and isinstance(full, pl.DataFrame)
+        assert out.schema == full.schema
+    else:
+        assert out.dtype == full.dtype == object
+    values = out if isinstance(out, np.ndarray) else out.to_numpy()
+    assert values.shape == (len(X), 6)
+    np.testing.assert_allclose(values[:, :4].astype(float), reference[:, :4].astype(float))
+    np.testing.assert_array_equal(values[:, 4].astype(float), X["value"].isna().astype(float))
+    np.testing.assert_array_equal(values[:, 5], X["city"].to_numpy())
+
+
+def test_polars_input_and_output_keep_nullable_columns_and_target_isolation():
+    pl = pytest.importorskip("polars")
+    from pretab import Preprocessor
+
+    rng = np.random.default_rng(0)
+    values = rng.normal(size=120)
+    X = pl.DataFrame(
+        {"value": [None if i == 7 else float(value) for i, value in enumerate(values)], "flag": [True, False] * 60}
+    )
+    y = rng.normal(size=len(X))
+    params = {
+        "output_dim": 4,
+        "add_missing_indicator": True,
+        "dtype": np.float32,
+        "output_format": "dense",
+        "random_state": 0,
+    }
+    wrapped, out = _cross_fit(Preprocessor(**params).set_output(transform="polars"), X, y)
+    _, expected = _cross_fit(Preprocessor(**params), X, y)
+    full = wrapped.transform(X)
+    assert isinstance(out, pl.DataFrame) and isinstance(full, pl.DataFrame)
+    assert out.schema == full.schema
+    assert all(value == pl.Float32 for value in out.schema.values())
+    assert out.shape == full.shape == (len(X), 6)
+    np.testing.assert_allclose(out.to_numpy(), expected)
+    np.testing.assert_array_equal(out.to_numpy()[:, 4], [int(i == 7) for i in range(len(X))])
+    assert not np.allclose(out.to_numpy()[:, :4], full.to_numpy()[:, :4])
+    assert X.null_count()["value"][0] == 1
+    spec = wrapped.get_representation_spec()
+    assert spec.input_features == ("value", "flag")
+    assert spec.output_features == tuple(out.columns)
+    assert spec.cross_fitted and spec.n_folds == 3
 
 
 # --- a wrapped Preprocessor keeps one encoding across folds (issue #79) -------------
