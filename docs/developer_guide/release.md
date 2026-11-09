@@ -42,7 +42,7 @@ commit before anything is uploaded, rather than trusting whatever last passed on
 | Lint (`ruff check`, `ruff format --check`)           | `lint`                         |
 | Type checking (`pyright`)                            | `typecheck`                    |
 | Package build + `twine check`                        | `build`                        |
-| Full test matrix (3.10-3.13, 3 OSes)                 | `tests`                        |
+| Full test matrix (3.11-3.13, 3 OSes)                 | `tests`                        |
 | Minimum supported dependency versions                | `minimum-deps`                 |
 | Smoke test + quickstart script                       | `smoke`                        |
 | Coverage (fails under 90%)                           | `coverage`                     |

@@ -203,7 +203,7 @@ your test suite keeps a future refactor from silently breaking compatibility wit
 ### Before you push
 
 Run `just check` and `just test` locally; together they cover most of what CI checks, though
-CI additionally runs across the full Python 3.10-3.13 matrix, builds the package, and
+CI additionally runs across the full Python 3.11-3.13 matrix, builds the package, and
 enforces a branch-coverage threshold.
 
 ```bash

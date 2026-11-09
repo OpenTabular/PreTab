@@ -251,10 +251,7 @@ def load_entry_point_representations(group=ENTRY_POINT_GROUP, *, override=False)
     """
     from importlib.metadata import entry_points
 
-    try:
-        eps = entry_points(group=group)
-    except TypeError:  # pragma: no cover - Python < 3.10 selection fallback
-        eps = entry_points().get(group, [])
+    eps = entry_points(group=group)
 
     loaded = []
     for ep in eps:

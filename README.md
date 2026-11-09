@@ -179,7 +179,9 @@ pip install "pretab[all]"          # both of the above
 ```
 
 > **Note:** The core install has no heavy dependencies. Each extra is opt-in and only
-> needed if you use the corresponding strategy. PreTab requires Python 3.10 to 3.13.
+> needed if you use the corresponding strategy. PreTab 1.1 requires Python 3.11 to 3.13.
+> Python 3.10 users must stay on `pretab<1.1`; see the
+> [migration guidance](docs/getting_started/installation.md#python-310-migration).
 
 **From source:**
 

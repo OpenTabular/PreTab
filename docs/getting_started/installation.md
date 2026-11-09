@@ -1,6 +1,6 @@
 # Installation
 
-pretab supports Python 3.10 to 3.13, with the following minimum core dependency versions:
+PreTab 1.1 supports Python 3.11 to 3.13, with the following minimum core dependency versions:
 
 | Dependency     | Minimum |
 | -------------- | ------- |
@@ -23,6 +23,24 @@ estimator-tag APIs used by PreTab.
 
 ```bash
 pip install pretab
+```
+
+### Python 3.10 migration
+
+Starting with PreTab 1.1, the supported Python range is `>=3.11,<3.14`.
+Upgrade to Python 3.11, 3.12, or 3.13 before installing PreTab 1.1. The minimum
+NumPy, pandas, SciPy, and scikit-learn versions have not changed.
+
+If you must keep Python 3.10, install the last compatible release:
+
+```bash
+pip install "pretab<1.1"
+```
+
+```{warning}
+PreTab 1.0.0 is the final release supporting Python 3.10. It does not include
+the fixes or features in 1.1. Python 3.10 reached end of life in October 2026;
+staying on an older PreTab release does not provide Python security updates.
 ```
 
 ### Optional extras
