@@ -1,5 +1,8 @@
 """Representation parameters flow through the public Preprocessor API."""
 
+import sys
+from types import ModuleType
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -57,6 +60,29 @@ def test_one_hot_options_keep_block_width_and_metadata_in_sync():
         np.testing.assert_array_equal(blocks[f"cat_{feature}"], expected)
         assert metadata[feature]["dimension"] == expected.shape[1]
         assert metadata[feature]["categories"] == 3
+
+
+def test_pretrained_model_names_follow_method_and_feature_overrides(monkeypatch):
+    class StubSentenceTransformer:
+        def __init__(self, model_name):
+            self.dim = {"shared-model": 2, "feature-model": 3}[model_name]
+
+        def encode(self, values, *, convert_to_numpy):
+            return np.zeros((len(values), self.dim))
+
+    dependency = ModuleType("sentence_transformers")
+    monkeypatch.setattr(dependency, "SentenceTransformer", StubSentenceTransformer, raising=False)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", dependency)
+    X = pd.DataFrame({"city": ["b", "a", "c"], "region": ["y", "z", "x"]})
+    pre = Preprocessor(
+        categorical_method="pretrained",
+        representation_params={"pretrained": {"model_name": "shared-model"}},
+        feature_preprocessing={"region": {"method": "pretrained", "model_name": "feature-model"}},
+    ).fit(X)
+
+    blocks = pre.transform(X, return_array=False)
+    assert blocks["cat_city"].shape == (len(X), 2)
+    assert blocks["cat_region"].shape == (len(X), 3)
 
 
 @pytest.mark.parametrize(
