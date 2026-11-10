@@ -324,6 +324,48 @@ def test_search_records_the_input_features(nonlinear_data):
     assert not hasattr(search, "feature_names_in_")
 
 
+@pytest.mark.parametrize("frame_type", ["pandas", "polars"])
+@pytest.mark.parametrize("estimator_kind", ["regressor", "classifier"])
+@pytest.mark.parametrize("new_width", [1, 2])
+def test_refit_replaces_named_input_metadata(nonlinear_data, class_data, frame_type, estimator_kind, new_width):
+    frame, target = class_data if estimator_kind == "classifier" else nonlinear_data
+    estimator = LogisticRegression() if estimator_kind == "classifier" else LinearRegression()
+    renamed = frame.rename(columns={"x": "renamed"})
+    if new_width == 2:
+        renamed = renamed.assign(squared=frame["x"].to_numpy() ** 2)
+    expected_columns = list(renamed.columns)
+    if frame_type == "polars":
+        polars = pytest.importorskip("polars")
+        frame = polars.DataFrame({column: frame[column].to_numpy() for column in frame.columns})
+        renamed = polars.DataFrame({column: renamed[column].to_numpy() for column in renamed.columns})
+
+    methods = ["minmax", "standardization"]
+    search = _search(estimator, methods, cv=3).fit(frame, target)
+    previous_preprocessor = search.best_preprocessor_
+    previous_estimator = search.best_estimator_
+    np.testing.assert_array_equal(search.feature_names_in_, ["x"])
+
+    search.fit(renamed, target)
+    fresh = _search(estimator, methods, cv=3).fit(renamed, target)
+
+    assert search.n_features_in_ == new_width
+    np.testing.assert_array_equal(search.feature_names_in_, expected_columns)
+    np.testing.assert_array_equal(search.best_preprocessor_.feature_names_in_, expected_columns)
+    assert search.best_preprocessor_ is not previous_preprocessor
+    assert search.best_estimator_ is not previous_estimator
+    assert search.best_method_ == fresh.best_method_
+    assert search.cv_results_ == fresh.cv_results_
+    np.testing.assert_array_equal(
+        search.best_preprocessor_.get_feature_names_out(), fresh.best_preprocessor_.get_feature_names_out()
+    )
+    if estimator_kind == "classifier":
+        np.testing.assert_array_equal(search.classes_, fresh.classes_)
+        np.testing.assert_array_equal(search.predict(renamed), fresh.predict(renamed))
+        np.testing.assert_allclose(search.predict_proba(renamed), fresh.predict_proba(renamed))
+    else:
+        np.testing.assert_allclose(search.predict(renamed), fresh.predict(renamed))
+
+
 def test_classifier_search_places_against_class_labels(class_data):
     """A classifier made the search keep task="regression": string labels crashed the
     target-aware placement and integer labels were treated as a regression target."""
