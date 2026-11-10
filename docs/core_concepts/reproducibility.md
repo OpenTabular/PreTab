@@ -63,8 +63,9 @@ spec at that path untouched.
 Restoring a PreTab 1.0.0 `Preprocessor` from a spec or trusted pickle repairs
 the stale feature count in pass-through and float-cast helpers directly after
 sparse one-hot encoders. With unchanged dependencies, these objects retain their
-transformed values, names, and feature information without refitting, and can
-again export specs and fingerprints. Standalone helper validation is unchanged.
+transformed values and names without refitting, and can again export specs and
+fingerprints. Feature information reports the fitted layout; previously incorrect
+dimension metadata can change. Standalone helper validation is unchanged.
 Fingerprints can differ from 1.0.0 because the fitted metadata and JSON encoding
 have been corrected. This targeted repair is not a general guarantee of
 cross-version compatibility. Only unpickle artifacts from trusted sources.

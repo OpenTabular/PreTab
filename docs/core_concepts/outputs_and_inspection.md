@@ -364,6 +364,15 @@ For other fitted details (total output width, per-feature output counts, the las
 [API reference](../api/preprocessor.rst).
 ```
 
+```{note}
+`dimension` is the actual width of the fitted feature block, including any
+missing-indicator columns. Inspection reads the fitted output spans without
+evaluating dummy inputs, so it also works for representations restricted to a
+particular input domain. `categories` records vocabulary size separately: dropped
+or grouped one-hot categories can produce fewer columns than the vocabulary
+contains, while additional representation or indicator columns can increase width.
+```
+
 ## Fit-time logging
 
 `verbose` controls how much `fit` reports through the shared `"pretab"` logger, useful when

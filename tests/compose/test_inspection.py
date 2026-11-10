@@ -1,12 +1,14 @@
 """Unit tests for :mod:`pretab.compose.inspection`."""
 
 import warnings
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import FunctionTransformer, MaxAbsScaler, PolynomialFeatures
 
 from pretab.compose.factory import build_column_transformer, get_categorical_transformer_steps
 from pretab.compose.inspection import (
@@ -60,13 +62,28 @@ def test_build_feature_info_does_not_infer_kind_from_cat_in_feature_name(make_co
     assert feature not in categorical
 
 
+def test_build_feature_info_uses_fitted_width_without_transform(monkeypatch):
+    frame = pd.DataFrame({"age": [1.0, 2.0, 4.0]})
+    pipeline = Pipeline([("positive_only", FunctionTransformer(np.log, feature_names_out="one-to-one"))])
+    ct = ColumnTransformer([("num_age", pipeline, ["age"])]).fit(frame)
+    expected = ct.transform(frame)
+    expected_names = ct.get_feature_names_out()
+
+    def reject_transform(*_args, **_kwargs):
+        raise AssertionError("Feature inspection must not invoke transform")
+
+    fitted_transformer = ct.named_transformers_["num_age"].named_steps["positive_only"]
+    monkeypatch.setattr(fitted_transformer, "transform", reject_transform)
+
+    numerical, _, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert numerical["age"]["dimension"] == np.shape(expected)[1] == len(expected_names) == 1
+    assert numerical["age"]["dimension"] == get_output_slices(ct)[0][2]
+
+
 @pytest.mark.parametrize(("method", "dimension"), [("rbf", 3), ("standardization", 1)])
-def test_build_feature_info_probes_a_step_fitted_on_the_frame_without_warning(
-    make_config, sample_frame, method, dimension
-):
-    """Without an imputer the representation is fitted on the DataFrame column and
-    records ``feature_names_in_``; probing it with a bare array warned that X does
-    not have valid feature names."""
+def test_build_feature_info_reads_width_after_frame_fit_without_warning(make_config, sample_frame, method, dimension):
+    """Fitting on named columns must not trigger feature-name warnings during inspection."""
     config = make_config(numerical_method=method, numerical_imputation=None, output_dim=3)
     ct = build_column_transformer(config, ["age"], ["city"]).fit(sample_frame)
 
@@ -89,6 +106,82 @@ def test_build_feature_info_reports_a_zero_width_block():
     _, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
 
     assert categorical["city"]["dimension"] == 0
+
+
+@pytest.mark.parametrize("sparse_output", [False, True])
+def test_build_feature_info_reports_zero_width_after_dropping_only_category(sparse_output):
+    frame = pd.DataFrame({"city": ["Rome", "Rome", "Rome"], "age": [1.0, 2.0, 3.0]})
+    steps = get_categorical_transformer_steps("one-hot", sparse_output=sparse_output, drop="first")
+    ct = ColumnTransformer([("cat_city", Pipeline(steps), ["city"]), ("num_age", "passthrough", ["age"])]).fit(frame)
+
+    _, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    span = ct.output_indices_["cat_city"]
+    assert categorical["city"]["dimension"] == np.shape(ct.transform(frame)[:, span])[1] == 0
+    assert categorical["city"]["categories"] == 1
+    assert np.shape(ct.transform(frame))[1] == len(ct.get_feature_names_out()) == 1
+    assert get_output_slices(ct) == [("num_age", 0, 1)]
+
+
+@pytest.mark.parametrize("sparse_output", [False, True])
+@pytest.mark.parametrize("suffix", ["to_float", "scaler", "polynomial"])
+@pytest.mark.parametrize(
+    "encoder_options",
+    [{}, {"drop": "first"}, {"min_frequency": 2}, {"max_categories": 2}, {"drop": "first", "min_frequency": 2}],
+)
+def test_build_feature_info_separates_vocabulary_from_emitted_width(
+    monkeypatch, sparse_output, suffix, encoder_options
+):
+    frame = pd.DataFrame({"city": ["Rome", "Rome", "Berlin", "Oslo", "Paris"]})
+    steps = get_categorical_transformer_steps(
+        "one-hot", add_imputer=False, sparse_output=sparse_output, **encoder_options
+    )
+    if suffix == "scaler":
+        steps.append(("scaler", MaxAbsScaler()))
+    elif suffix == "polynomial":
+        steps.append(("polynomial", PolynomialFeatures(degree=2, include_bias=False)))
+    ct = ColumnTransformer([("cat_city", Pipeline(steps), ["city"])]).fit(frame)
+    expected = ct.transform(frame)
+    expected_names = ct.get_feature_names_out()
+    reject_transform = Mock(side_effect=AssertionError("Feature inspection must not invoke transform"))
+    for _, step in ct.named_transformers_["cat_city"].steps:
+        monkeypatch.setattr(step, "transform", reject_transform)
+
+    numerical, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert numerical == {}
+    assert categorical["city"]["categories"] == 4
+    assert categorical["city"]["dimension"] == np.shape(expected)[1] == len(expected_names)
+    assert categorical["city"]["dimension"] == get_output_slices(ct)[0][2]
+    reject_transform.assert_not_called()
+
+
+@pytest.mark.parametrize("missing_options", [{"add_missing_indicator": True}, {"missing_policy": "separate_state"}])
+def test_build_feature_info_uses_combined_indicator_span(make_config, missing_options):
+    frame = pd.DataFrame({"age": [1.0, np.nan, 3.0, 4.0], "city": ["Rome", np.nan, "Oslo", "Rome"]})
+    config = make_config(numerical_method="rbf", output_dim=3, categorical_method="one-hot", **missing_options)
+    ct = build_column_transformer(config, ["age"], ["city"]).fit(frame)
+
+    numerical, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+    spans = {name: width for name, _, width in get_output_slices(ct)}
+
+    assert numerical["age"]["dimension"] == spans["num_age"] == 4
+    assert categorical["city"]["dimension"] == spans["cat_city"] == 3
+    assert categorical["city"]["categories"] == 2
+    assert sum(spans.values()) == np.shape(ct.transform(frame))[1] == len(ct.get_feature_names_out())
+
+
+@pytest.mark.parametrize("passthrough", ["direct", "pipeline"])
+def test_build_feature_info_handles_passthrough_and_dropped_blocks(passthrough):
+    frame = pd.DataFrame({"age": [1.0, 2.0, 3.0], "ignored": [4.0, 5.0, 6.0]})
+    transformer = "passthrough" if passthrough == "direct" else Pipeline([("passthrough", "passthrough")])
+    ct = ColumnTransformer([("num_age", transformer, ["age"]), ("num_ignored", "drop", ["ignored"])]).fit(frame)
+
+    numerical, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert list(numerical) == ["age"]
+    assert categorical == {}
+    assert numerical["age"]["dimension"] == np.shape(ct.transform(frame))[1] == len(ct.get_feature_names_out()) == 1
 
 
 def test_build_transformer_summary_has_header_and_rows():

@@ -11,16 +11,12 @@ import copy
 from typing import Any, cast
 
 import numpy as np
-import pandas as pd
 from sklearn.base import clone
 from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..core._typing import TransformerLike
-from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
 from .registry import TRANSFORMER_REGISTRY
-
-logger = get_logger(__name__)
 
 __all__ = [
     "block_name",
@@ -185,19 +181,6 @@ def _separate_state_branches(transformer):
     return branches["representation"], branches["missing"]
 
 
-def _probe_input(step, value):
-    """Return a one-row probe input for measuring a fitted step's output width.
-
-    A step fitted directly on the ColumnTransformer's DataFrame column records
-    ``feature_names_in_`` and, like scikit-learn, warns on input without feature
-    names, so its probe is a DataFrame carrying the fitted names.
-    """
-    names = getattr(step, "feature_names_in_", None)
-    if names is None:
-        return np.full((1, 1), value)
-    return pd.DataFrame(np.full((1, len(names)), value), columns=names)
-
-
 def representation_leaf(transformer):
     """Return the last step of a fitted per-column block's representation.
 
@@ -214,6 +197,8 @@ def representation_leaf(transformer):
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
     """Collect per-feature metadata (preprocessing, dimension, categories).
 
+    Dimensions come from the fitted output spans without evaluating transformers.
+    Category counts describe fitted vocabularies, not emitted widths.
     Returns a ``(numerical_info, categorical_info, embedding_info)`` tuple of
     dicts keyed by feature name.
     """
@@ -234,109 +219,46 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
         transformer_pipeline,
         columns,
     ) in column_transformer.transformers_:
+        if transformer_pipeline == "drop" or len(columns) == 0:
+            continue
+        span = column_transformer.output_indices_[name]
+        dimension = span.stop - span.start
         separate_state = _separate_state_branches(transformer_pipeline)
         if separate_state is not None:
             representation_pipeline, _missing_indicator = separate_state
             steps = [step[0] for step in representation_pipeline.steps]
             preprocessing_type = f"representation({' -> '.join(steps)}) + missing"
-            span = column_transformer.output_indices_.get(name)
-            separate_state_dimension = None if span is None else span.stop - span.start
         else:
             representation_pipeline = transformer_pipeline
-            steps = [step[0] for step in representation_pipeline.steps]
+            steps = (
+                [step[0] for step in representation_pipeline.steps]
+                if isinstance(representation_pipeline, Pipeline)
+                else [type(representation_pipeline).__name__]
+            )
             preprocessing_type = " -> ".join(steps)
-            separate_state_dimension = None
 
         for feature_name in columns:
-            dimension = None
             categories = None
-
-            if "discretizer" in steps or any(
-                step in steps
-                for step in [
-                    "standardization",
-                    "minmax",
-                    "quantile",
-                    "polynomial",
-                    "splines",
-                    "box-cox",
-                ]
-            ):
-                last_step = representation_pipeline.steps[-1][1]
-                if hasattr(last_step, "transform"):
-                    dummy_input = _probe_input(last_step, 1e-05)
-                    try:
-                        transformed_feature = last_step.transform(dummy_input)
-                        dimension = transformed_feature.shape[1]
-                    except (ValueError, TypeError, AttributeError, IndexError) as exc:
-                        logger.debug(
-                            "Could not introspect output width of %r: %s",
-                            feature_name,
-                            exc,
-                        )
-                        dimension = None
-                if separate_state_dimension is not None:
-                    dimension = separate_state_dimension
-                numerical_feature_info[feature_name] = {
-                    "preprocessing": preprocessing_type,
-                    "dimension": dimension,
-                    "categories": None,
-                }
-
-            elif "continuous_ordinal" in steps:
+            if "continuous_ordinal" in steps:
                 step = representation_pipeline.named_steps["continuous_ordinal"]
                 position = columns.index(feature_name)
                 # An encoder that received no column (a 0-width block) has no mapping.
                 has_mapping = position < len(step.mapping_)
                 categories = len(step.mapping_[position]) if has_mapping else None
-                dimension = separate_state_dimension if separate_state_dimension is not None else int(has_mapping)
-                categorical_feature_info[feature_name] = {
-                    "preprocessing": preprocessing_type,
-                    "dimension": dimension,
-                    "categories": categories,
-                }
-
             elif "onehot" in steps:
                 step = representation_pipeline.named_steps["onehot"]
                 if hasattr(step, "categories_"):
                     categories = sum(len(cat) for cat in step.categories_)
-                    dimension = categories
-                if separate_state_dimension is not None:
-                    dimension = separate_state_dimension
-                categorical_feature_info[feature_name] = {
-                    "preprocessing": preprocessing_type,
-                    "dimension": dimension,
-                    "categories": categories,
-                }
-
-            else:
-                last_step = representation_pipeline.steps[-1][1]
-                if hasattr(last_step, "transform"):
-                    dummy_input = _probe_input(last_step, 0.0)
-                    try:
-                        transformed_feature = last_step.transform(dummy_input)
-                        dimension = transformed_feature.shape[1]
-                    except (ValueError, TypeError, AttributeError, IndexError) as exc:
-                        logger.debug(
-                            "Could not introspect output width of %r: %s",
-                            feature_name,
-                            exc,
-                        )
-                        dimension = None
-                if separate_state_dimension is not None:
-                    dimension = separate_state_dimension
-                if name.startswith("cat_"):
-                    categorical_feature_info[feature_name] = {
-                        "preprocessing": preprocessing_type,
-                        "dimension": dimension,
-                        "categories": None,
-                    }
-                else:
-                    numerical_feature_info[feature_name] = {
-                        "preprocessing": preprocessing_type,
-                        "dimension": dimension,
-                        "categories": None,
-                    }
+            feature_info = (
+                categorical_feature_info
+                if name.startswith("cat_") or "continuous_ordinal" in steps or "onehot" in steps
+                else numerical_feature_info
+            )
+            feature_info[feature_name] = {
+                "preprocessing": preprocessing_type,
+                "dimension": dimension,
+                "categories": categories,
+            }
 
     return numerical_feature_info, categorical_feature_info, embedding_feature_info
 

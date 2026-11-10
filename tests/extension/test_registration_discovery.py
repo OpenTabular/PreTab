@@ -38,6 +38,16 @@ class _Square(BaseRepresentation):
         return [1] * self.n_features_in_
 
 
+class _PositiveOnly(_Square):
+    representation_name = "positive_only_reg"
+
+    def transform(self, X):
+        values = self._validate(X, reset=False)
+        if np.any(values <= 0):
+            raise ValueError("Positive input required")
+        return np.log(values)
+
+
 class _CatStringLength(BaseRepresentation):
     representation_name = "cat_reg"
     feature_kind = "categorical"
@@ -137,6 +147,33 @@ def test_register_end_to_end_through_preprocessor():
     # the registered "square" method yields non-negative values bounded by 1.
     assert (out >= -1e-9).all()
     assert out.max() <= 1 + 1e-9
+
+
+def test_registered_positive_only_feature_info_matches_fitted_layout(monkeypatch):
+    register_representation("positive_only_reg", _PositiveOnly)
+    frame = pd.DataFrame({"value": [1.0, 2.0, 4.0, 8.0]})
+    pre = Preprocessor(
+        numerical_method="positive_only_reg",
+        numerical_imputation=None,
+        target_aware=False,
+        placement_strategy="uniform",
+    )
+    pre.set_params(scaling=None)
+    pre.fit(frame)
+    expected = np.asarray(pre.transform(frame, return_array=True))
+    expected_names = pre.get_feature_names_out()
+
+    def reject_transform(*_args, **_kwargs):
+        raise AssertionError("Feature inspection must not invoke transform")
+
+    step = pre.column_transformer_.named_transformers_["num_value"].named_steps["positive_only_reg"]
+    monkeypatch.setattr(step, "transform", reject_transform)
+
+    numerical, categorical, embeddings = pre.get_feature_info(verbose=False)
+
+    assert categorical == embeddings == {}
+    assert numerical["value"]["dimension"] == pre.output_dims_["value"] == 1
+    assert pre.total_output_dim_ == expected.shape[1] == len(expected_names) == 1
 
 
 def test_register_categorical_updates_categorical_view():
