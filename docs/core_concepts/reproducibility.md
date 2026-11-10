@@ -34,6 +34,7 @@ reads it. Non-finite floats, such as the imputers' `missing_values=np.nan`, are 
 tagged value, `{"__float__": "nan"}` (or `"inf"`, `"-inf"`), instead of a bare `NaN` token.
 Specs written by PreTab 1.0.0, which contain bare `NaN` tokens, still load.
 The reverse is not supported: older readers cannot decode the new float tags.
+Keep the original spec if you may need to roll back to PreTab 1.0.0.
 The tagged encoding also changes fingerprints for fitted state containing non-finite
 values, including the default imputers; this change does not alter transformed values.
 
@@ -70,6 +71,10 @@ Fingerprints can differ from 1.0.0 because the fitted metadata and JSON encoding
 have been corrected. This targeted repair is not a general guarantee of
 cross-version compatibility. Only unpickle artifacts from trusted sources.
 ```
+
+When refitting after an upgrade, check output names and widths before reusing a
+trained model. If the feature layout changes, refit the preprocessing and retrain
+the model together.
 
 ## Fingerprint
 
