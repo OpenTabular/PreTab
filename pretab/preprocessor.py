@@ -172,8 +172,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     feature_preprocessing : dict, optional
         Mapping of individual column names to a method, overriding the global ``numerical_method`` /
         ``categorical_method`` for those columns only, e.g.
-        ``{"age": "cubicspline", "city": "pretrained"}``. Columns absent from the dict fall back to
-        the global defaults.
+        ``{"age": "cubicspline", "city": "pretrained"}``. Use a mapping with a ``"method"`` key
+        and constructor options to configure a single feature, e.g.
+        ``{"age": {"method": "quantile", "n_quantiles": 32}}``. Columns absent from the dict use
+        the global method and its options.
+    representation_params : dict, optional
+        Mapping of method names to constructor options used by every feature that selects that
+        method, e.g. ``{"quantile": {"n_quantiles": 128, "output_distribution": "normal"}}``.
+        These options override shared constructor defaults such as ``output_dim``. Options in
+        ``feature_preprocessing`` take precedence. ``task``, ``target_aware`` and
+        ``placement_strategy`` are configured on the preprocessor itself.
     output_dim : int, default=7
         The single width knob shared by every numerical method: the number of non-bias output
         columns produced per input feature (bins for PLE/binning, centers for the feature maps,
@@ -459,6 +467,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     ['cat_gender', 'num_age']
     """
 
+    # Specs and pickles from before this option was added have no instance attribute.
+    representation_params = None
+
     def __init__(
         self,
         numerical_method=UNSET,
@@ -490,6 +501,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         dtype=None,
         verbose=0,
         preset=None,
+        representation_params=None,
     ):
         """
         Initialize the Preprocessor with various transformation options for tabular data.
@@ -501,6 +513,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.numerical_method = numerical_method
         self.categorical_method = categorical_method
         self.feature_preprocessing = feature_preprocessing
+        self.representation_params = representation_params
         self.output_dim = output_dim
         self.degree = degree
         self.target_aware = target_aware
@@ -581,6 +594,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             numerical_method=resolved["numerical_method"],
             categorical_method=resolved["categorical_method"],
             feature_preprocessing=resolved["feature_preprocessing"],
+            representation_params=resolved["representation_params"],
             output_dim=resolved["output_dim"],
             degree=resolved["degree"],
             target_aware=resolved["target_aware"],

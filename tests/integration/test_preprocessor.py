@@ -172,6 +172,7 @@ EXPECTED_PARAMS = {
     "numerical_method",
     "categorical_method",
     "feature_preprocessing",
+    "representation_params",
     "output_dim",
     "adaptive",
     "min_output_dim",

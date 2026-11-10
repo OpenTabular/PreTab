@@ -95,8 +95,8 @@ class TransformerSpec:
         transforms prepend a positive-range scaler) record their primary class
         here; the extra wiring lives in :mod:`pretab.compose.factory`.
     allowed_args : tuple of str
-        Constructor argument names the method accepts. Used to filter the shared
-        Preprocessor keyword arguments down to what the class understands.
+        Constructor argument names exposed through the Preprocessor. Used to
+        filter shared arguments and validate representation-specific overrides.
     feature_kind : frozenset of str
         The feature kinds the method applies to (``"numerical"`` and/or
         ``"categorical"``). Only ``none`` (passthrough) applies to both.
@@ -195,13 +195,17 @@ _BOTH_MODE = {
 # ordering), then the categorical-only methods.
 _SPECS: tuple[TransformerSpec, ...] = (
     # --- numerical: scalers / distribution transforms (no placement) ---
-    _spec("standardization", StandardScaler),
-    _spec("minmax", MinMaxScaler),
-    _spec("quantile", QuantileTransformer, ("n_quantiles", "output_distribution", "random_state")),
+    _spec("standardization", StandardScaler, ("with_mean", "with_std")),
+    _spec("minmax", MinMaxScaler, ("feature_range", "clip")),
+    _spec(
+        "quantile",
+        QuantileTransformer,
+        ("n_quantiles", "output_distribution", "random_state", "subsample", "ignore_implicit_zeros"),
+    ),
     _spec("polynomial", PolynomialFeatures, ("degree", "interaction_only", "include_bias")),
-    _spec("robust", RobustScaler),
-    _spec("box-cox", PowerTransformer),
-    _spec("yeo-johnson", PowerTransformer),
+    _spec("robust", RobustScaler, ("with_centering", "with_scaling", "quantile_range", "unit_variance")),
+    _spec("box-cox", PowerTransformer, ("standardize",)),
+    _spec("yeo-johnson", PowerTransformer, ("standardize",)),
     # --- numerical: piecewise-linear encoding (always target-aware) ---
     _spec(
         "ple",
@@ -314,30 +318,37 @@ _SPECS: tuple[TransformerSpec, ...] = (
     _spec(
         "bspline",
         BSplineTransformer,
-        ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        ("output_dim", "degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
         **_BOTH_MODE,
     ),
     _spec(
         "mspline",
         MSplineTransformer,
-        ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        ("output_dim", "degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
         **_BOTH_MODE,
     ),
     _spec(
         "ispline",
         ISplineTransformer,
-        ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        ("output_dim", "degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
         **_BOTH_MODE,
     ),
     # --- numerical / categorical: passthrough ---
     _spec("none", NoTransformer, feature_kind=frozenset({NUMERICAL, CATEGORICAL})),
     # --- categorical-only methods ---
     _spec("int", ContinuousOrdinalTransformer, feature_kind=frozenset({CATEGORICAL})),
-    _spec("one-hot", OneHotEncoder, feature_kind=frozenset({CATEGORICAL}), sparse_output=True),
+    _spec(
+        "one-hot",
+        OneHotEncoder,
+        ("categories", "drop", "sparse_output", "dtype", "handle_unknown", "min_frequency", "max_categories"),
+        feature_kind=frozenset({CATEGORICAL}),
+        sparse_output=True,
+    ),
     _spec("onehot_from_ordinal", OneHotFromOrdinalTransformer, feature_kind=frozenset({CATEGORICAL})),
     _spec(
         "pretrained",
         LanguageEmbeddingTransformer,
+        ("model_name",),
         feature_kind=frozenset({CATEGORICAL}),
         optional_dependency="embeddings",
     ),

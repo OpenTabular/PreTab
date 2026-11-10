@@ -137,6 +137,8 @@ def get_numerical_transformer_steps(
     imputer_kwargs: dict | None = None,
     add_missing_indicator: bool = False,
     scaling: str | None = None,
+    *,
+    representation_params: dict | None = None,
     **kwargs,
 ):
     """Return the ordered ``(name, transformer)`` steps for a numerical ``method``."""
@@ -176,6 +178,7 @@ def get_numerical_transformer_steps(
     spec = get_spec(method)
     cls = spec.transformer_cls
     filtered = _filter_kwargs(spec.allowed_args, kwargs)
+    filtered.update(representation_params or {})
     placement = _placement_kwargs(spec, kwargs)
 
     if method == "box-cox":
@@ -191,7 +194,7 @@ def get_numerical_transformer_steps(
         # can sit outside their [5, 50] basis range); the legacy families keep
         # their own wider bounds, so only clamp for B/M/I.
         if method in _BMI_SPLINE_METHODS:
-            output_dim = kwargs.get("output_dim")
+            output_dim = spline_kwargs.get("output_dim")
             if output_dim is not None:
                 spline_kwargs["output_dim"] = _clamp_spline_basis(output_dim)
 
@@ -211,6 +214,8 @@ def get_categorical_transformer_steps(
     imputer_strategy: str = "most_frequent",
     imputer_kwargs: dict | None = None,
     add_missing_indicator: bool = False,
+    *,
+    representation_params: dict | None = None,
     **kwargs,
 ):
     """Return the ordered ``(name, transformer)`` steps for a categorical ``method``."""
@@ -234,13 +239,14 @@ def get_categorical_transformer_steps(
 
     spec = get_spec(method)
     cls = spec.transformer_cls
+    overrides = representation_params or {}
 
     if method == "int":
-        steps.append(("continuous_ordinal", cls()))
+        steps.append(("continuous_ordinal", cls(**overrides)))
     elif method == "one-hot":
         # Default to ignoring unseen categories so transform never crashes on
         # categories absent at fit time; callers can override via kwargs.
-        onehot_kwargs = {"handle_unknown": "ignore", **kwargs}
+        onehot_kwargs = {"handle_unknown": "ignore", **kwargs, **overrides}
         categories = onehot_kwargs.get("categories", "auto")
         drop = onehot_kwargs.get("drop")
         if (
@@ -255,25 +261,28 @@ def get_categorical_transformer_steps(
         steps.append(("onehot", cls(**onehot_kwargs)))
         steps.append(("to_float", ToFloatTransformer()))
     elif method == "pretrained":
-        steps.append(("pretrained", cls()))
+        steps.append(("pretrained", cls(**overrides)))
     elif method == "none":
-        steps.append(("none", cls()))
+        steps.append(("none", cls(**overrides)))
     elif method == "onehot_from_ordinal":
-        steps.append(("onehot_from_ordinal", cls()))
+        steps.append(("onehot_from_ordinal", cls(**overrides)))
     else:
         call_kwargs = _filter_kwargs(spec.allowed_args, kwargs)
         call_kwargs.update(_placement_kwargs(spec, kwargs))
+        call_kwargs.update(overrides)
         steps.append((method, cls(**call_kwargs)))
 
     return steps
 
 
-def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorConfig) -> Pipeline | FeatureUnion:
+def create_transformer(
+    method: str, *, is_numerical: bool, config: PreprocessorConfig, representation_params: dict | None = None
+) -> Pipeline | FeatureUnion:
     """Build the per-column :class:`~sklearn.pipeline.Pipeline` for one feature.
 
     ``method`` is the resolved method name; ``is_numerical`` selects the numerical
     or categorical construction path. All width / placement / seeding knobs are
-    taken from ``config``.
+    taken from ``config`` and then updated by validated representation parameters.
 
     Raises
     ------
@@ -306,6 +315,7 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             degree=config.degree,
             scaling=config.scaling,
             placement_strategy=config.placement_strategy,
+            representation_params=representation_params,
             **config.seed_kwargs,
         )
     else:
@@ -328,6 +338,7 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
             method,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
+            representation_params=representation_params,
             **constructor_kwargs,
         )
 
@@ -403,8 +414,8 @@ def build_column_transformer(
     transformers = []
     for (kind, feature), name in zip(blocks, _step_names(blocks), strict=True):
         is_numerical = kind == "num"
-        method = config.method_for(feature, is_numerical=is_numerical)
-        pipeline = create_transformer(method, is_numerical=is_numerical, config=config)
+        method, params = config.representation_for(feature, is_numerical=is_numerical)
+        pipeline = create_transformer(method, is_numerical=is_numerical, config=config, representation_params=params)
         transformers.append((name, pipeline, [str(feature)]))
     return ColumnTransformer(
         transformers=transformers,

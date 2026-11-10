@@ -164,6 +164,17 @@ def test_register_categorical_end_to_end_through_preprocessor():
     assert pipeline.named_steps["cat_reg"].degree == 2
 
 
+def test_registered_representation_accepts_explicit_options():
+    register_representation("cat_reg", _CatStringLength, allowed_args=("degree",))
+    X = pd.DataFrame({"city": ["Rome", "Berlin"], "country": ["Italy", "Germany"]})
+    pre = Preprocessor(
+        categorical_method="cat_reg",
+        representation_params={"cat_reg": {"degree": 3}},
+        feature_preprocessing={"country": {"method": "cat_reg", "degree": 4}},
+    )
+    np.testing.assert_array_equal(pre.fit_transform(X), [[12.0, 20.0], [18.0, 28.0]])
+
+
 def test_duplicate_registration_requires_override():
     register_representation("square_reg", _Square)
     with pytest.raises(ValueError, match="already registered"):
