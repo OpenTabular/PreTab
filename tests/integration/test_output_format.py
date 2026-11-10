@@ -219,11 +219,24 @@ def test_set_output_pandas_fit_transform(frame, y):
     assert out.shape[1] == p.total_output_dim_
 
 
-def test_set_output_pandas_preserves_input_index(indexed_frame, y):
+@pytest.mark.parametrize("index_name", [None, "row_id"])
+@pytest.mark.parametrize("duplicate_index", [False, True])
+def test_set_output_pandas_preserves_input_index(indexed_frame, y, index_name, duplicate_index):
     """Regression guard for issue #60: the DataFrame keeps X's index, as sklearn's transformers do."""
-    p = _bspline().set_output(transform="pandas")
-    pd.testing.assert_index_equal(p.fit_transform(indexed_frame, y).index, indexed_frame.index)
-    pd.testing.assert_index_equal(p.transform(indexed_frame).index, indexed_frame.index)
+    labels = indexed_frame.index.to_numpy()
+    if duplicate_index:
+        labels = labels // 2
+    indexed_frame = indexed_frame.set_axis(pd.Index(labels, name=index_name))
+    expected_index = indexed_frame.index.copy(deep=True)
+    expected = np.asarray(_bspline().fit_transform(indexed_frame, y))
+    fitted = _bspline()
+    fitted.set_output(transform="pandas")
+    for output in (fitted.fit_transform(indexed_frame, y), fitted.transform(indexed_frame)):
+        assert isinstance(output, pd.DataFrame)
+        pd.testing.assert_index_equal(output.index, expected_index)
+        assert output.shape == expected.shape
+        assert list(output.columns) == list(fitted.get_feature_names_out())
+        np.testing.assert_array_equal(output.to_numpy(), expected)
 
 
 def test_set_output_pandas_inside_column_transformer(indexed_frame):
