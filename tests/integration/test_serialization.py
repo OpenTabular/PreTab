@@ -8,6 +8,7 @@ policy preservation, and the security allow-list that keeps loading a spec safe
 
 import json
 import math
+import pickle
 from typing import cast
 
 import numpy as np
@@ -15,7 +16,8 @@ import pandas as pd
 import pytest
 
 from pretab import Preprocessor, PretabSerializationError, RepresentationPolicy
-from pretab.compose.serialize import SCHEMA_VERSION
+from pretab.compose.serialize import SCHEMA_VERSION, _encode_mapping
+from pretab.preprocessing.floats import NoTransformer, ToFloatTransformer
 
 
 @pytest.fixture
@@ -68,6 +70,92 @@ def test_round_trip_reproduces_transform_bit_for_bit(frame, target, params, cate
 
     assert np.array_equal(reference, reproduced, equal_nan=True)
     assert list(p.get_feature_names_out()) == list(restored.get_feature_names_out())
+
+
+@pytest.mark.parametrize("restore_format", ["pickle", "spec"])
+@pytest.mark.parametrize("helper_type", [NoTransformer, ToFloatTransformer])
+@pytest.mark.parametrize("add_missing_indicator", [False, True])
+@pytest.mark.parametrize("frozen", [False, True])
+def test_restore_legacy_sparse_one_hot_feature_count(restore_format, helper_type, add_missing_indicator, frozen):
+    frame = pd.DataFrame({"city": ["Rome", None, "Berlin", "Rome"]})
+    fitted = Preprocessor(
+        numerical_method="none", categorical_method="one-hot", add_missing_indicator=add_missing_indicator
+    ).fit(frame)
+    fitted.set_output(transform="default")
+    if frozen:
+        fitted.freeze()
+    expected = fitted.transform(frame)
+    expected_names = fitted.get_feature_names_out()
+    expected_info = fitted.get_feature_info(verbose=False)
+    spec = fitted.to_spec()
+    pipeline = fitted.column_transformer_.named_transformers_["cat_city"]
+    if add_missing_indicator:
+        pipeline = dict(pipeline.transformer_list)["representation"]
+    helper = helper_type()
+    helper.__dict__.update(vars(pipeline.named_steps["to_float"]))
+    helper.n_features_in_ = 1
+    pipeline.steps[-1] = ("to_float", helper)
+
+    if restore_format == "pickle":
+        restored = pickle.loads(pickle.dumps(fitted))  # noqa: S301 - only locally generated test data
+    else:
+        spec["state"] = _encode_mapping(vars(fitted))
+        restored = Preprocessor.from_spec(spec)
+
+    np.testing.assert_array_equal(restored.transform(frame), expected)
+    np.testing.assert_array_equal(restored.get_feature_names_out(), expected_names)
+    assert restored.get_feature_info(verbose=False) == expected_info
+    assert restored.is_frozen() == frozen
+    assert vars(restored)["_sklearn_output_config"] == vars(fitted)["_sklearn_output_config"]
+    restored_pipeline = restored.column_transformer_.named_transformers_["cat_city"]
+    if add_missing_indicator:
+        restored_pipeline = dict(restored_pipeline.transformer_list)["representation"]
+    restored_helper = restored_pipeline.named_steps["to_float"]
+    assert type(restored_helper) is helper_type
+    assert restored_helper.n_features_in_ == 2
+    rewritten = Preprocessor.from_spec(restored.to_spec())
+    assert rewritten.fingerprint_ == restored.fingerprint_
+    np.testing.assert_array_equal(rewritten.transform(frame), expected)
+
+
+@pytest.mark.parametrize("restore_format", ["pickle", "spec"])
+@pytest.mark.parametrize("helper_type", [NoTransformer, ToFloatTransformer])
+@pytest.mark.parametrize("state_case", ["healthy", "unexpected_width", "dense_input", "named_input"])
+def test_restore_preserves_nonlegacy_helper_metadata(restore_format, helper_type, state_case):
+    frame = pd.DataFrame({"city": ["Rome", "Berlin", "Rome"]})
+    fitted = Preprocessor(numerical_method="none", categorical_method="one-hot").fit(frame)
+    spec = fitted.to_spec()
+    pipeline = fitted.column_transformer_.named_transformers_["cat_city"]
+    helper = helper_type()
+    helper.__dict__.update(vars(pipeline.named_steps["to_float"]))
+    expected_count = {"healthy": 2, "unexpected_width": 3, "dense_input": 1, "named_input": 1}[state_case]
+    helper.n_features_in_ = expected_count
+    if state_case == "dense_input":
+        pipeline.named_steps["onehot"].sparse_output = False
+    if state_case == "named_input":
+        helper.feature_names_in_ = np.array(["fitted_name"], dtype=object)
+    pipeline.steps[-1] = ("to_float", helper)
+
+    if restore_format == "pickle":
+        restored = pickle.loads(pickle.dumps(fitted))  # noqa: S301 - only locally generated test data
+    else:
+        spec["state"] = _encode_mapping(vars(fitted))
+        restored = Preprocessor.from_spec(spec)
+
+    restored_helper = restored.column_transformer_.named_transformers_["cat_city"].named_steps["to_float"]
+    assert restored_helper.n_features_in_ == expected_count
+    if state_case == "named_input":
+        np.testing.assert_array_equal(restored_helper.feature_names_in_, ["fitted_name"])
+    if state_case != "healthy":
+        with pytest.raises(ValueError):
+            restored.get_feature_names_out()
+
+
+def test_pickle_unfitted_preprocessor_preserves_params():
+    original = Preprocessor(numerical_method="none", categorical_method="one-hot")
+    restored = pickle.loads(pickle.dumps(original))  # noqa: S301 - only locally generated test data
+    assert restored.get_params() == original.get_params()
+    assert not hasattr(restored, "column_transformer_")
 
 
 def test_spec_is_json_serializable_and_versioned(frame, target):

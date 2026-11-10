@@ -23,10 +23,13 @@ import dataclasses
 import importlib
 import math
 from collections import UserList
+from itertools import pairwise
 from typing import Any, cast
 
 import numpy as np
 from sklearn.base import BaseEstimator
+from sklearn.pipeline import FeatureUnion, Pipeline
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.utils.validation import check_is_fitted
 
 from .._version import __version__ as _PRETAB_VERSION
@@ -35,6 +38,7 @@ from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
 from ..exceptions import PretabSerializationError
 from ..placement.base import PlacementResult
+from ..preprocessing.floats import NoTransformer, ToFloatTransformer
 from .inspection import representation_leaf
 from .registry import TransformerSpec
 
@@ -346,6 +350,28 @@ def check_spec_schema(data: dict) -> None:
         )
 
 
+def _repair_legacy_sparse_feature_counts(preprocessor) -> None:
+    """Repair the sparse-input helper width stored by PreTab 1.0.0."""
+    column_transformer = getattr(preprocessor, "column_transformer_", None)
+    if column_transformer is None:
+        return
+    for _, transformer, _ in column_transformer.transformers_:
+        if isinstance(transformer, FeatureUnion):
+            transformer = dict(vars(transformer)["transformer_list"]).get("representation")
+        if not isinstance(transformer, Pipeline):
+            continue
+        for (_, encoder), (_, helper) in pairwise(transformer.steps):
+            if (
+                type(encoder) is OneHotEncoder
+                and vars(encoder)["sparse_output"]
+                and hasattr(encoder, "categories_")
+                and type(helper) in (NoTransformer, ToFloatTransformer)
+                and getattr(helper, "n_features_in_", None) == 1
+                and not hasattr(helper, "feature_names_in_")
+            ):
+                helper.n_features_in_ = len(encoder.get_feature_names_out())
+
+
 def preprocessor_from_spec(data: dict):
     """Reconstruct a fitted preprocessor from a spec produced by :func:`preprocessor_to_spec`."""
     check_spec_schema(data)
@@ -353,4 +379,5 @@ def preprocessor_from_spec(data: dict):
 
     obj = Preprocessor.__new__(Preprocessor)
     obj.__dict__.update(_decode_mapping(data["state"]))
+    _repair_legacy_sparse_feature_counts(obj)
     return obj

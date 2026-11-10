@@ -41,7 +41,12 @@ from .compose.output import (
     to_dataframe_output,
     validate_embedding_request,
 )
-from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
+from .compose.serialize import (
+    SCHEMA_VERSION,
+    _repair_legacy_sparse_feature_counts,
+    preprocessor_from_spec,
+    preprocessor_to_spec,
+)
 from .core._typing import TransformerLike
 from .core.logging import configure_logging, get_logger
 from .core.parameters import UNSET, validate_task
@@ -527,6 +532,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.dtype = dtype
         self.verbose = verbose
         self.preset = preset
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        _repair_legacy_sparse_feature_counts(self)
 
     def fit(self, X, y=None, embeddings=None):
         """

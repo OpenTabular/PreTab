@@ -59,6 +59,17 @@ serializer; unsupported state raises `PretabSerializationError` when the spec is
 spec is serialized before `to_spec(path)` opens the file, so a failed save leaves an existing
 spec at that path untouched.
 
+```{note}
+Restoring a PreTab 1.0.0 `Preprocessor` from a spec or trusted pickle repairs
+the stale feature count in pass-through and float-cast helpers directly after
+sparse one-hot encoders. With unchanged dependencies, these objects retain their
+transformed values, names, and feature information without refitting, and can
+again export specs and fingerprints. Standalone helper validation is unchanged.
+Fingerprints can differ from 1.0.0 because the fitted metadata and JSON encoding
+have been corrected. This targeted repair is not a general guarantee of
+cross-version compatibility. Only unpickle artifacts from trusted sources.
+```
+
 ## Fingerprint
 
 `fingerprint_` is a SHA-256 hash over a canonical view of the fitted representation: the
