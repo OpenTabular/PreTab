@@ -112,9 +112,22 @@ object and leaves the original untouched, and `mark_stale(reason)` records why a
 should no longer be used.
 
 ```{warning}
-`fit`, `fit_transform`, and `set_params` on a frozen preprocessor raise `FrozenRepresentationError`. This is deliberate:
-a deployed representation should not silently change shape. Use `refit` to produce a new
-object instead of mutating the old one.
+Attempts to refit a frozen preprocessor, change its parameters, or change its
+`set_output` format raise `FrozenRepresentationError`. Use `clone_unfitted()`
+for a mutable copy or `refit()` to produce a new fitted object.
+```
+
+`set_output(transform=None)` leaves the configuration unchanged. Repeating an
+explicitly selected format, such as `"pandas"`, is also allowed after freezing.
+Selecting a format for the first time is a change, even if it matches the
+current global default.
+
+```{note}
+Freezing protects instance settings, not sklearn's global configuration. If no
+instance format is set, `sklearn.set_config(transform_output="pandas")` can
+still change the returned container without changing the fingerprint. Call
+`set_output(transform="default")`, or select another supported format, before
+`freeze()` to make the output container independent of global settings.
 ```
 
 ## Where to go next

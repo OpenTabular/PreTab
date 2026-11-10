@@ -1497,11 +1497,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return bool(getattr(self, "_frozen", False))
 
     def freeze(self) -> "Preprocessor":
-        """Freeze the fitted preprocessor, blocking ``fit`` and ``set_params`` mutation.
+        """Freeze the fitted preprocessor against mutation.
+
+        Blocks ``fit``, ``set_params``, and changes through ``set_output``.
+        ``set_output(transform=None)`` and repeating an explicitly configured
+        output format remain no-ops.
 
         Returns ``self`` for chaining. A frozen preprocessor is intended as an
         immutable deployment artifact; use :meth:`clone_unfitted` or :meth:`refit`
         to obtain a fresh, mutable estimator.
+
+        Global sklearn output configuration remains external to the frozen state:
+        it can change the returned container without changing the fingerprint.
+        Call ``set_output(transform="default")`` (or another supported format)
+        before freezing to pin the container independently of global settings.
         """
         check_is_fitted(self)
         self._frozen = True
@@ -1543,3 +1552,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 "Use clone_unfitted() for a mutable copy, or refit() to fit fresh data."
             )
         return super().set_params(**params)
+
+    def set_output(self, *, transform=None):
+        """Set sklearn output wrapping, refusing changes on a frozen preprocessor.
+
+        ``transform`` accepts ``"default"``, ``"pandas"``, ``"polars"``, or
+        ``None`` with sklearn's usual semantics. ``None`` leaves the setting
+        unchanged; repeating an explicit instance setting is also a no-op.
+        """
+        if transform is not None and self.is_frozen():
+            configured = getattr(self, "_sklearn_output_config", {}).get("transform")
+            if transform != configured:
+                raise FrozenRepresentationError(
+                    f"Cannot set_output(transform={transform!r}) on a frozen {type(self).__name__}. "
+                    "Use clone_unfitted() for a mutable copy, or refit() to fit fresh data."
+                )
+            transform = None
+        return super().set_output(transform=transform)
