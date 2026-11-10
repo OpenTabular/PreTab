@@ -167,8 +167,9 @@ def register_representation(
         ``uses_target``, and :class:`~pretab.CrossFittedTransformer` refits the
         block on every fold of a wrapped :class:`~pretab.Preprocessor`.
     allowed_args : iterable of str, default=()
-        Constructor argument names the shared Preprocessor keyword arguments are
-        filtered down to for this method.
+        Constructor argument names exposed through the Preprocessor. They filter
+        shared arguments and allow overrides in ``representation_params`` and
+        ``feature_preprocessing``.
     placement_strategies : iterable of str, default=()
         Placement strategies the method honours (empty for methods without
         data-driven placement). ``Preprocessor`` passes its ``placement_strategy``

@@ -300,9 +300,8 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                 step = representation_pipeline.named_steps["onehot"]
                 if hasattr(step, "categories_"):
                     categories = sum(len(cat) for cat in step.categories_)
-                    dimension = categories
-                if separate_state_dimension is not None:
-                    dimension = separate_state_dimension
+                span = column_transformer.output_indices_[name]
+                dimension = span.stop - span.start
                 categorical_feature_info[feature_name] = {
                     "preprocessing": preprocessing_type,
                     "dimension": dimension,

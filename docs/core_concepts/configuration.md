@@ -142,6 +142,35 @@ Don't infer the resolved method per column from the constructor arguments alone.
 [Fit-time logging](outputs_and_inspection.md#fit-time-logging).
 ```
 
+## Representation parameters
+
+Use `representation_params` to set options for every feature that selects a given
+representation. To override those options for one feature, give its
+`feature_preprocessing` entry a `method` and the options to change.
+
+```python
+pre = Preprocessor(
+    numerical_method="quantile",
+    representation_params={
+        "quantile": {"n_quantiles": 128, "output_distribution": "normal"},
+    },
+    feature_preprocessing={
+        "income": {"method": "quantile", "n_quantiles": 32},
+        "city": {"method": "one-hot", "drop": "first"},
+    },
+)
+```
+
+`income` uses 32 quantiles and inherits the normal output distribution. Other
+quantile features use 128 quantiles. `city` drops the first category from its
+one-hot output. Method names and aliases follow the same rules as the global
+method selectors.
+
+PreTab applies shared constructor defaults first, then `representation_params`,
+then options for the individual feature. It validates explicit options against
+the representation's registered `allowed_args`. `task`, `target_aware`, and
+`placement_strategy` are set on the `Preprocessor` and apply across features.
+
 ## Presets
 
 Presets are transparent, named bundles of parameters for common intents. They set the same
@@ -218,7 +247,8 @@ The resolution order is deterministic. Later layers win.
 1. Library defaults.
 2. A `preset`, if given.
 3. Explicit constructor arguments (`numerical_method`, `output_dim`, and so on).
-4. Per-column `feature_preprocessing` entries, for the columns they name.
+4. `representation_params`, for the methods they name.
+5. Per-column `feature_preprocessing` entries, for the columns they name.
 
 ```{warning}
 Configuration is validated at `fit` time, not silently coerced. An invalid combination, such
@@ -237,6 +267,7 @@ in depth.
 | ------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
 | `numerical_method`, `categorical_method`                                  | `"ple"`, `"int"`                       | this page                                                            |
 | `feature_preprocessing`                                                   | `None`                                 | this page                                                            |
+| `representation_params`                                                   | `None`                                 | this page                                                            |
 | `output_dim`                                                              | `7`                                    | [Resolution and placement](resolution_and_placement.md)              |
 | `adaptive`, `min_output_dim`, `max_output_dim`                            | `False`, `5`, `10`                     | [Resolution and placement](resolution_and_placement.md)              |
 | `target_aware`, `placement_strategy`                                      | `True`, `"cart"`                       | [Target awareness](target_awareness.md)                              |

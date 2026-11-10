@@ -16,6 +16,7 @@ resolves them in the correct namespace at build time.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..core.parameters import validate_placement, validate_task
@@ -25,6 +26,7 @@ from .registry import (
     CATEGORICAL_METHODS,
     NUMERICAL_ALIASES,
     NUMERICAL_METHODS,
+    get_spec,
     resolve_method,
 )
 
@@ -33,6 +35,7 @@ __all__ = ["PreprocessorConfig"]
 # Valid values for the high-level ``missing_policy`` orchestration knob. ``None``
 # keeps the explicit imputation parameters authoritative (historical behaviour).
 MISSING_POLICIES = frozenset({"error", "propagate", "impute", "impute_with_indicator", "separate_state"})
+_SHARED_PLACEMENT_PARAMS = frozenset({"task", "target_aware", "placement_strategy"})
 
 
 def _normalize_method(method, canonical, aliases) -> str:
@@ -40,6 +43,49 @@ def _normalize_method(method, canonical, aliases) -> str:
     if method is None:
         return "none"
     return resolve_method(method, canonical, aliases)
+
+
+def _validate_representation_params(method, params, source):
+    """Check explicit overrides against the same registry used by the factory."""
+    allowed = set(get_spec(method).allowed_args) - _SHARED_PLACEMENT_PARAMS
+    unknown = params.keys() - allowed
+    if unknown:
+        raise invalid_param_error(
+            "Preprocessor",
+            source,
+            params,
+            f"unsupported parameters for {method!r}: {sorted(unknown, key=str)}",
+            valid=allowed,
+        )
+
+
+def _normalize_representation_params(overrides):
+    if overrides is None:
+        return {}
+    if not isinstance(overrides, Mapping):
+        raise invalid_param_error("Preprocessor", "representation_params", overrides, "must be a mapping")
+
+    normalized = {}
+    methods = NUMERICAL_METHODS.keys() | CATEGORICAL_METHODS
+    for name, params in overrides.items():
+        if not isinstance(name, str) or not isinstance(params, Mapping):
+            raise invalid_param_error(
+                "Preprocessor", "representation_params", overrides, "must map method names to parameter mappings"
+            )
+        method = resolve_method(name, NUMERICAL_METHODS, NUMERICAL_ALIASES)
+        if method not in NUMERICAL_METHODS:
+            method = resolve_method(name, CATEGORICAL_METHODS, CATEGORICAL_ALIASES)
+        if method not in methods or not get_spec(method).preprocessor_compatible:
+            raise invalid_param_error(
+                "Preprocessor", "representation_params", name, "must name a per-column method", valid=methods
+            )
+        if method in normalized:
+            raise invalid_param_error(
+                "Preprocessor", "representation_params", name, f"duplicates the settings for {method!r}"
+            )
+        _validate_representation_params(method, params, "representation_params")
+        normalized[method] = dict(params)
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -54,6 +100,7 @@ class PreprocessorConfig:
     numerical_method: str
     categorical_method: str
     feature_preprocessing: dict
+    representation_params: dict
     output_dim: int
     degree: int
     target_aware: bool
@@ -96,6 +143,7 @@ class PreprocessorConfig:
         add_missing_indicator,
         missing_policy,
         verbose,
+        representation_params=None,
     ) -> PreprocessorConfig:
         """Normalize and validate raw Preprocessor parameters into a config.
 
@@ -121,6 +169,7 @@ class PreprocessorConfig:
             numerical_method=_normalize_method(numerical_method, NUMERICAL_METHODS, NUMERICAL_ALIASES),
             categorical_method=_normalize_method(categorical_method, CATEGORICAL_METHODS, CATEGORICAL_ALIASES),
             feature_preprocessing=dict(feature_preprocessing or {}),
+            representation_params=_normalize_representation_params(representation_params),
             output_dim=output_dim,
             degree=degree,
             target_aware=target_aware,
@@ -159,7 +208,25 @@ class PreprocessorConfig:
         """
         default = self.numerical_method if is_numerical else self.categorical_method
         raw = self.feature_preprocessing.get(feature, default)
+        if isinstance(raw, Mapping):
+            raw = raw.get("method")
+        if not isinstance(raw, str):
+            raise invalid_param_error(
+                "Preprocessor", "feature_preprocessing", raw, f"column {feature!r} requires a string method name"
+            )
         return self.resolve_numerical(raw) if is_numerical else self.resolve_categorical(raw)
+
+    def representation_for(self, feature, *, is_numerical: bool) -> tuple[str, dict]:
+        """Resolve a column's method and merge shared and feature-specific options."""
+        method = self.method_for(feature, is_numerical=is_numerical)
+        params = self.representation_params.get(method, {})
+        override = self.feature_preprocessing.get(feature)
+        methods = NUMERICAL_METHODS if is_numerical else CATEGORICAL_METHODS
+        if isinstance(override, Mapping) and method in methods:
+            feature_params = {name: value for name, value in override.items() if name != "method"}
+            _validate_representation_params(method, feature_params, f"feature_preprocessing[{feature!r}]")
+            params = params | feature_params
+        return method, params
 
     @property
     def seed_kwargs(self) -> dict:
