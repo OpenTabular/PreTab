@@ -12,11 +12,14 @@ from sklearn.preprocessing import FunctionTransformer, MaxAbsScaler, PolynomialF
 
 from pretab.compose.factory import build_column_transformer, get_categorical_transformer_steps
 from pretab.compose.inspection import (
+    _locate_block_representation,
+    block_uses_target,
     build_feature_info,
     build_transformer_summary,
     clean_feature_names,
     get_output_slices,
 )
+from pretab.core.representation import RepresentationSpec
 
 
 @pytest.fixture
@@ -24,6 +27,96 @@ def fitted_ct(make_config, sample_frame):
     ct = build_column_transformer(make_config(numerical_method="standardization"), ["age"], ["city"])
     ct.fit(sample_frame, np.array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0]))
     return ct, sample_frame
+
+
+@pytest.fixture
+def declared_representation():
+    spec = RepresentationSpec(
+        family="declared_joint_basis",
+        component_kind="basis",
+        scope="multivariate",
+        supervision="optional",
+        uses_target=True,
+        is_interaction=True,
+        input_features=("age", "income"),
+        output_features=("age_income",),
+        output_dim=1,
+        degree=None,
+        include_bias=False,
+        periodic=False,
+        period=None,
+        local_support=False,
+        location_kind=None,
+        locations=None,
+    )
+    representation = Mock(spec=["get_representation_spec", "n_features_in_"])
+    representation.n_features_in_ = 2
+    representation.get_representation_spec.return_value = spec
+    return representation
+
+
+@pytest.mark.parametrize("step_name", ["representation", "scaler", "onehot"])
+@pytest.mark.parametrize("trailing_helper", [False, True])
+def test_locate_representation_spec_precedes_legacy_steps(declared_representation, step_name, trailing_helper):
+    steps = [("imputer", FunctionTransformer()), (step_name, declared_representation)]
+    if trailing_helper:
+        steps.append(("minmax", MaxAbsScaler()))
+    pipeline = Pipeline(steps)
+
+    assert _locate_block_representation(pipeline, ["age", "income"]) == (
+        1,
+        ("declared_joint_basis", "basis", True, True),
+    )
+    assert block_uses_target(pipeline) is True
+
+
+@pytest.mark.parametrize(
+    ("columns", "fitted_width", "expected_names"),
+    [
+        (["age", "income"], 2, ["age", "income"]),
+        (("age", "income"), 2, ["age", "income"]),
+        (["age"], 2, None),
+        (None, 2, None),
+    ],
+)
+def test_locate_representation_only_forwards_matching_input_names(
+    declared_representation, columns, fitted_width, expected_names
+):
+    declared_representation.n_features_in_ = fitted_width
+
+    assert _locate_block_representation(declared_representation, columns) == (
+        0,
+        ("declared_joint_basis", "basis", True, True),
+    )
+    declared_representation.get_representation_spec.assert_called_once_with(input_features=expected_names)
+
+
+def test_locate_representation_uses_the_rightmost_declared_spec(declared_representation):
+    earlier = Mock(spec=["get_representation_spec"])
+    earlier.get_representation_spec.side_effect = AssertionError("An earlier declaration must not be inspected")
+    pipeline = Pipeline([("earlier", earlier), ("representation", declared_representation), ("scaler", MaxAbsScaler())])
+
+    assert _locate_block_representation(pipeline, ["age", "income"]) == (
+        1,
+        ("declared_joint_basis", "basis", True, True),
+    )
+    earlier.get_representation_spec.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("step_names", "expected"),
+    [
+        (["scaler"], (0, ("standardization", "raw", False, False))),
+        (["onehot", "scaler"], (1, ("standardization", "raw", False, False))),
+        (["scaler", "onehot"], (1, ("onehot", "category", False, False))),
+        (["imputer", "to_float"], (None, ("passthrough", "raw", False, False))),
+    ],
+)
+def test_locate_representation_legacy_fallback_is_the_rightmost_known_step(step_names, expected):
+    pipeline = Pipeline([(name, FunctionTransformer()) for name in step_names])
+
+    assert _locate_block_representation(pipeline, ["age"]) == expected
+    assert block_uses_target(pipeline) is False
 
 
 def test_get_output_slices_are_ordered_and_named(fitted_ct):
