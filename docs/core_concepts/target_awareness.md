@@ -162,7 +162,9 @@ to fit it) leaks information the same way an unguarded supervised transformer do
 `numerical_method` values, refits the best one on all the data, and keeps every candidate's
 scoring honest by fitting a fresh `Preprocessor` per fold. With a classifier as the estimator,
 every `Preprocessor` uses `task="classification"`, so target-aware methods place against the
-class labels; a `task` set in `preprocessor_params` takes precedence.
+class labels; a `task` set in `preprocessor_params` takes precedence. The candidate names are
+checked when `fit` starts, so a misspelled method raises before any candidate is
+cross-validated.
 
 ```python
 import numpy as np
