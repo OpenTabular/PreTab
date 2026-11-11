@@ -5,7 +5,10 @@ Two tiers:
 * **Near-conformant** transformers run the *full* ``check_estimator`` suite. Only
   a small, documented set of checks is allowed to fail (``expected_failed_checks``);
   any *other* failing check is a real regression and fails the test. This is the
-  enforced contract for the migrated spline / PLE / feature-map families.
+  enforced contract for the migrated spline / PLE / feature-map families. The
+  Fourier feature map and the kernel approximations (random Fourier features,
+  Nystroem) have no sentinel defaults and pass every check, so they are listed
+  without tolerated failures.
 
 * **Deferred** transformers have deep structural gaps (univariate-only,
   sample-count-changing, or categorical-only) and are tracked as strict
@@ -24,15 +27,18 @@ from pretab.transformers import (
     BSplineTransformer,
     ContinuousOrdinalTransformer,
     CubicRegressionSplineTransformer,
+    FourierFeatureTransformer,
     ISplineTransformer,
     MSplineTransformer,
     NaturalCubicSplineTransformer,
     NoTransformer,
     NumericBinningTransformer,
+    NystroemFeaturesTransformer,
     OneHotFromOrdinalTransformer,
     PeriodicEncodingTransformer,
     PLETransformer,
     PSplineTransformer,
+    RandomFourierFeaturesTransformer,
     RBFExpansionTransformer,
     ReLUExpansionTransformer,
     SigmoidExpansionTransformer,
@@ -98,6 +104,10 @@ NEAR_CONFORMANT = [
             "check_parameters_default_constructible": SENTINEL,
         },
     ),
+    # Fully conformant: no tolerated failures.
+    (FourierFeatureTransformer(), {}),
+    (RandomFourierFeaturesTransformer(), {}),
+    (NystroemFeaturesTransformer(), {}),
 ]
 
 
