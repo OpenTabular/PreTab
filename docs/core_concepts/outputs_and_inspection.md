@@ -84,8 +84,9 @@ pre_blocks.transform(df)["num_age"].shape
 ```{tip}
 This is why a wide expansion (a spline or feature map with a large `output_dim`, or several
 expanded columns) can produce a much wider matrix than the input `DataFrame` had columns.
-Use `get_feature_info(verbose=True)` (below) or `estimate_output_shape(df)` to see the total
-width before committing, especially with several expanded columns at once.
+Use `get_feature_info(verbose=True)` (below) or `estimate_output_shape(df)` on the fitted
+preprocessor to see the total width before committing, especially with several expanded columns
+at once.
 ```
 
 ## Output format and dtype
@@ -442,16 +443,34 @@ The output budget lets you cap the blast radius and estimate cost before committ
 | `overflow_policy`        | What to do on overflow, default `"error"`.     |
 
 ```python
-pre = Preprocessor(max_output_features=500, overflow_policy="error")
+pre = Preprocessor(max_output_features=500, overflow_policy="error").fit(df, y)
 
-pre.estimate_output_shape(df)   # predicted (n_rows, n_cols) without transforming
-pre.estimate_memory(df)         # predicted dense memory in bytes
+pre.estimate_output_shape(df)   # (n_rows, n_cols) for df, without transforming it
+pre.estimate_memory(df)         # dense memory in bytes for df
+```
+
+Both estimates need a fitted preprocessor and raise `NotFittedError` before `fit`: the output
+width is only known once the representations are fitted. The row count comes from the data you
+pass, which is not transformed, so a preprocessor fitted on a sample can size the full dataset
+before you transform it.
+
+```python
+pre_sample = Preprocessor(numerical_method="bspline", output_dim=20).fit(df.head(1_000), y[:1_000])
+
+pre_sample.estimate_output_shape(df)   # width fitted on the sample, rows of the full df
+pre_sample.estimate_memory(df)
+```
+
+```{note}
+A width learned from the data, such as the categories of a one-hot block or an adaptive
+`output_dim`, can differ between a sample and the full data, so treat a sample-based estimate
+as approximate for those columns.
 ```
 
 ```{warning}
-With `overflow_policy="error"`, exceeding a budget raises `OutputBudgetError` at `fit`. Use
-`estimate_output_shape` and `estimate_memory` first when you work with wide expansions or
-large data.
+With `overflow_policy="error"`, exceeding a budget raises `OutputBudgetError` at `fit`, before
+the estimates are available. To explore the width of a wide expansion or a large dataset
+first, fit on a sample as above, or fit with `overflow_policy="warn"` and read the estimates.
 ```
 
 ## Where to go next
