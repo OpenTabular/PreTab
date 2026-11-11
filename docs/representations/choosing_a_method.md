@@ -116,6 +116,9 @@ PreTab is explicit about degenerate inputs rather than failing silently.
   `"none"` keep its block as missing values, and every other method raises the same typed
   error. `policy={"constant": "error"}` rejects an empty numerical column like any other
   constant one.
+- **Input without rows at fit**: `Preprocessor.fit` raises `EmptyDataError` (a
+  `PretabDataError`, and so a `ValueError`): a column's kind is detected from its values, so
+  nothing can be fitted without a sample.
 
 ## Non-goals
 

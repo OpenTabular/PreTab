@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from ..core.validation import is_polars_frame, polars_to_pandas
-from ..exceptions import PretabDataError, invalid_param_error
+from ..exceptions import EmptyDataError, PretabDataError, invalid_param_error
 
 __all__ = ["bool_columns_as_object", "detect_column_types", "has_column_labels", "to_dataframe", "with_string_labels"]
 
@@ -137,8 +137,19 @@ def detect_column_types(X, *, cat_cutoff, treat_all_integers_as_numerical, estim
         Column labels detected as numerical.
     categorical_features : list
         Column labels detected as categorical.
+
+    Raises
+    ------
+    EmptyDataError
+        If ``X`` has columns but no rows: a column's kind is decided from its
+        values, so there is nothing to detect (or to fit) without a sample.
     """
     X = to_dataframe(X)
+    if X.shape[0] == 0 and X.shape[1] > 0:
+        raise EmptyDataError(
+            f"{estimator_name} needs at least one sample, but X has 0 rows (shape {X.shape}).\n"
+            "Fix: pass data with at least one row."
+        )
 
     categorical_features = []
     numerical_features = []
