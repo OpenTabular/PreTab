@@ -7,7 +7,9 @@ scikit-learn's ColumnTransformer, silently swapping columns.
 """
 
 import warnings
+from copy import deepcopy
 from typing import cast
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
@@ -17,6 +19,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import make_pipeline
 
 from pretab import Preprocessor
+from pretab.compose.inspection import refit_block_representation
 from pretab.core.supervised import CrossFittedTransformer
 from pretab.exceptions import PretabDataError
 
@@ -33,6 +36,174 @@ def _passthrough(**kwargs):
 
 def _blocks(out):
     return cast("dict[str, np.ndarray]", out)
+
+
+@pytest.fixture(params=["string", "integer"])
+def input_route_frame(request):
+    frame = pd.DataFrame(
+        {1: [True, False, True, False, True, True], 0: [10.0, 20, 30, 40, 50, 60]},
+        index=pd.Index([8, 3, 8, 2, 7, 5]),
+    )
+    if request.param == "string":
+        frame.columns = ["flag", "value"]
+    return frame
+
+
+@pytest.fixture
+def input_route_spies(monkeypatch):
+    def install(preprocessor):
+        align = Mock(wraps=preprocessor._align_input)
+        adapt = Mock(wraps=preprocessor._column_transformer_input)
+        route = Mock()
+        route.attach_mock(align, "align")
+        route.attach_mock(adapt, "adapt")
+        monkeypatch.setattr(preprocessor, "_align_input", align)
+        monkeypatch.setattr(preprocessor, "_column_transformer_input", adapt)
+        return route, align, adapt
+
+    return install
+
+
+@pytest.mark.parametrize("operation", ["fit", "fit_transform"])
+def test_fitting_uses_shared_input_adaptation(input_route_spies, input_route_frame, operation):
+    frame = input_route_frame
+    original = frame.copy(deep=True)
+    preprocessor = _passthrough(categorical_method="int", target_aware=False, placement_strategy="uniform")
+    route, align, adapt = input_route_spies(preprocessor)
+
+    result = getattr(preprocessor, operation)(frame)
+
+    expected_route = ["adapt"] if operation == "fit" else ["adapt", "align", "adapt"]
+    assert [call[0] for call in route.mock_calls] == expected_route
+    assert align.call_count == int(operation == "fit_transform")
+    assert adapt.call_count == (1 if operation == "fit" else 2)
+    for call in adapt.call_args_list:
+        pd.testing.assert_frame_equal(call.args[0], original)
+    assert vars(preprocessor.column_transformer_)["feature_names_in_"].tolist() == [
+        str(label) for label in frame.columns
+    ]
+    if operation == "fit":
+        assert result is preprocessor
+    else:
+        blocks = _blocks(result)
+        np.testing.assert_array_equal(blocks[f"num_{frame.columns[1]}"].ravel(), frame.iloc[:, 1])
+        np.testing.assert_array_equal(blocks[f"cat_{frame.columns[0]}"].ravel(), [2.0, 1.0, 2.0, 1.0, 2.0, 2.0])
+    pd.testing.assert_frame_equal(frame, original)
+
+
+@pytest.mark.parametrize("input_kind", ["frame", "reordered", "array", "list"])
+def test_transform_aligns_before_shared_input_adaptation(input_route_spies, input_route_frame, input_kind):
+    frame = input_route_frame.astype(float) if input_kind == "list" else input_route_frame
+    original = frame.copy(deep=True)
+    preprocessor = _passthrough(categorical_method="int", target_aware=False, placement_strategy="uniform").fit(frame)
+    expected = _blocks(preprocessor.transform(frame))
+    incoming = {
+        "frame": frame,
+        "reordered": frame.iloc[:, ::-1],
+        "array": frame.to_numpy(),
+        "list": frame.to_numpy().tolist(),
+    }[input_kind]
+    original_incoming = deepcopy(incoming)
+    route, align, adapt = input_route_spies(preprocessor)
+
+    if input_kind in ("array", "list") and hasattr(preprocessor, "feature_names_in_"):
+        with pytest.warns(UserWarning, match="does not have valid feature names"):
+            actual = _blocks(preprocessor.transform(incoming))
+    else:
+        actual = _blocks(preprocessor.transform(incoming))
+
+    assert [call[0] for call in route.mock_calls] == ["align", "adapt"]
+    align.assert_called_once()
+    adapt.assert_called_once()
+    assert align.call_args.args[0] is incoming
+    expected_frame = frame.iloc[:, ::-1] if input_kind == "reordered" else frame
+    if input_kind in ("array", "list"):
+        expected_frame = frame.set_axis([str(label) for label in frame.columns], axis=1).reset_index(drop=True)
+    pd.testing.assert_frame_equal(adapt.call_args.args[0], expected_frame)
+    assert list(actual) == list(expected)
+    for name in expected:
+        np.testing.assert_array_equal(actual[name], expected[name])
+    if isinstance(incoming, pd.DataFrame):
+        pd.testing.assert_frame_equal(incoming, original_incoming)
+    else:
+        np.testing.assert_array_equal(incoming, original_incoming)
+    pd.testing.assert_frame_equal(frame, original)
+
+
+@pytest.mark.parametrize("input_kind", ["reordered", "array"])
+def test_fold_refit_aligns_and_adapts_before_routing_to_representations(
+    input_route_spies, input_route_frame, monkeypatch, input_kind
+):
+    frame = pd.concat([input_route_frame] * 10, ignore_index=True)
+    original = frame.copy(deep=True)
+    target = frame.iloc[:, 1].to_numpy() + np.random.default_rng(0).normal(size=len(frame))
+    preprocessor = Preprocessor(
+        numerical_method="ple",
+        categorical_method="int",
+        output_dim=4,
+        adaptive=False,
+        target_aware=True,
+        placement_strategy="cart",
+        scaling="none",
+        random_state=0,
+    ).fit(frame, target)
+    original_output = preprocessor.transform(frame)
+    train = frame.iloc[12:]
+    train_target = target[12:]
+    incoming = train.iloc[:, ::-1] if input_kind == "reordered" else train.to_numpy()
+    route, align, adapt = input_route_spies(preprocessor)
+    refit = Mock(wraps=refit_block_representation)
+    monkeypatch.setattr("pretab.preprocessor.refit_block_representation", refit)
+
+    if input_kind == "array" and hasattr(preprocessor, "feature_names_in_"):
+        with pytest.warns(UserWarning, match="does not have valid feature names"):
+            fold = preprocessor._cross_fit_fold(incoming, train_target)
+    else:
+        fold = preprocessor._cross_fit_fold(incoming, train_target)
+
+    assert [call[0] for call in route.mock_calls] == ["align", "adapt"]
+    align.assert_called_once()
+    adapt.assert_called_once()
+    assert align.call_args.args[0] is incoming
+    refit.assert_called_once()
+    numerical_name = f"num_{frame.columns[1]}"
+    categorical_name = f"cat_{frame.columns[0]}"
+    expected_frame = train.iloc[:, [1]].set_axis([str(frame.columns[1])], axis=1)
+    if input_kind == "array":
+        expected_frame = expected_frame.reset_index(drop=True)
+    assert refit.call_args.args[0] is preprocessor.column_transformer_.named_transformers_[numerical_name]
+    pd.testing.assert_frame_equal(refit.call_args.args[1], expected_frame)
+    assert refit.call_args.args[2] is train_target
+    assert fold.column_transformer_ is not preprocessor.column_transformer_
+    assert fold.column_transformer_.named_transformers_[numerical_name] is not refit.call_args.args[0]
+    assert (
+        fold.column_transformer_.named_transformers_[categorical_name]
+        is preprocessor.column_transformer_.named_transformers_[categorical_name]
+    )
+    np.testing.assert_array_equal(preprocessor.transform(frame), original_output)
+    pd.testing.assert_frame_equal(frame, original)
+
+
+def test_feature_info_uses_fitted_metadata_without_input_routing_or_transform(
+    input_route_spies, input_route_frame, monkeypatch
+):
+    frame = input_route_frame
+    preprocessor = _passthrough(categorical_method="int", target_aware=False, placement_strategy="uniform").fit(frame)
+    expected = preprocessor.get_feature_info(verbose=False)
+    route, align, adapt = input_route_spies(preprocessor)
+    reject_transform = Mock(side_effect=AssertionError("Feature metadata must not transform synthetic input"))
+    monkeypatch.setattr(preprocessor.column_transformer_, "transform", reject_transform)
+
+    actual = preprocessor.get_feature_info(verbose=False)
+
+    assert actual == expected
+    assert list(actual[0]) == [frame.columns[1]]
+    assert list(actual[1]) == [frame.columns[0]]
+    assert actual[2] == {}
+    assert route.mock_calls == []
+    align.assert_not_called()
+    adapt.assert_not_called()
+    reject_transform.assert_not_called()
 
 
 @pytest.mark.parametrize("label", ["_score", "income__log", "__index_level_0__", "trailing__"])
