@@ -1,7 +1,7 @@
-"""Tests for portable serialization: ``to_spec`` / ``from_spec`` (P9.1).
+"""Tests for fitted-state serialization through specs and pickle.
 
 Covers the versioned JSON envelope, bit-for-bit transform reproduction across
-representation families, file round-trips, categorical / missing-value handling,
+representation families, fitted metadata, file round-trips, categorical / missing-value handling,
 policy preservation, and the security allow-list that keeps loading a spec safe
 (unlike ``pickle``).
 """
@@ -45,6 +45,8 @@ _CONFIGS = [
     {"numerical_method": "tanh", "target_aware": False, "placement_strategy": "quantile"},
     {"numerical_method": "relu", "target_aware": False, "placement_strategy": "quantile"},
     {"numerical_method": "bspline", "target_aware": False, "placement_strategy": "quantile"},
+    {"numerical_method": "mspline", "target_aware": False, "placement_strategy": "quantile"},
+    {"numerical_method": "ispline", "target_aware": False, "placement_strategy": "quantile"},
     {"numerical_method": "cubicspline", "target_aware": False, "placement_strategy": "quantile"},
     {"numerical_method": "naturalspline", "target_aware": False, "placement_strategy": "quantile"},
     {"numerical_method": "pspline", "target_aware": False, "placement_strategy": "uniform"},
@@ -61,15 +63,28 @@ def _ids(configs):
 
 @pytest.mark.parametrize("params", _CONFIGS, ids=_ids(_CONFIGS))
 @pytest.mark.parametrize("categorical_method", ["int", "one-hot"])
-def test_round_trip_reproduces_transform_bit_for_bit(frame, target, params, categorical_method):
+@pytest.mark.parametrize("restore_format", ["pickle", "spec"])
+def test_round_trip_reproduces_transform_bit_for_bit(frame, target, params, categorical_method, restore_format):
     p = Preprocessor(output_dim=6, categorical_method=categorical_method, **params).fit(frame, target)
+    fingerprint = p.fingerprint_
+    names = p.get_feature_names_out()
+    dimensions = p.output_dims_
+    feature_info = p.get_feature_info(verbose=False)
     reference = np.asarray(p.transform(frame, return_array=True), dtype=float)
 
-    restored = Preprocessor.from_spec(p.to_spec())
+    if restore_format == "pickle":
+        restored = pickle.loads(pickle.dumps(p))  # noqa: S301 - only locally generated test data
+    else:
+        restored = Preprocessor.from_spec(json.loads(json.dumps(p.to_spec(), allow_nan=False)))
     reproduced = np.asarray(restored.transform(frame, return_array=True), dtype=float)
 
     assert np.array_equal(reference, reproduced, equal_nan=True)
-    assert list(p.get_feature_names_out()) == list(restored.get_feature_names_out())
+    np.testing.assert_array_equal(restored.get_feature_names_out(), names)
+    assert reference.shape == reproduced.shape == (len(frame), len(names))
+    assert sum(dimensions.values()) == reference.shape[1]
+    assert restored.output_dims_ == dimensions
+    assert restored.get_feature_info(verbose=False) == feature_info
+    assert p.fingerprint_ == restored.fingerprint_ == fingerprint
 
 
 @pytest.mark.parametrize("restore_format", ["pickle", "spec"])
@@ -258,22 +273,64 @@ def test_round_trip_preserves_policy(frame, target):
     assert restored.policy_.constant == "error"
 
 
-def test_round_trip_with_missing_values(target):
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param(config, id=config["numerical_method"])
+        for config in _CONFIGS
+        if config["numerical_method"] in {"bspline", "ple", "rbf"}
+    ],
+)
+@pytest.mark.parametrize("categorical_method", ["int", "one-hot"])
+@pytest.mark.parametrize("missing_policy", ["impute", "impute_with_indicator", "separate_state"])
+@pytest.mark.parametrize("restore_format", ["pickle", "spec"])
+def test_round_trip_with_missing_values(params, categorical_method, missing_policy, restore_format):
     frame = pd.DataFrame({"a": [1.0, np.nan, 3.0, 4.0, np.nan, 6.0] * 5, "c": ["x", "y", None, "x", "y", "z"] * 5})
     y = np.arange(len(frame), dtype=float)
     p = Preprocessor(
-        numerical_method="rbf",
-        categorical_method="one-hot",
-        target_aware=False,
-        placement_strategy="quantile",
-        numerical_imputation="median",
+        output_dim=6,
+        categorical_method=categorical_method,
+        missing_policy=missing_policy,
+        random_state=0,
+        **params,
     ).fit(frame, y)
-    restored = Preprocessor.from_spec(p.to_spec())
-    assert np.array_equal(
-        np.asarray(p.transform(frame, return_array=True), dtype=float),
-        np.asarray(restored.transform(frame, return_array=True), dtype=float),
-        equal_nan=True,
-    )
+    fingerprint = p.fingerprint_
+    names = list(p.get_feature_names_out())
+    dimensions = p.output_dims_
+    feature_info = p.get_feature_info(verbose=False)
+    reference = np.asarray(p.transform(frame, return_array=True), dtype=float)
+    if restore_format == "pickle":
+        restored = pickle.loads(pickle.dumps(p))  # noqa: S301 - only locally generated test data
+    else:
+        restored = Preprocessor.from_spec(json.loads(json.dumps(p.to_spec(), allow_nan=False)))
+
+    np.testing.assert_array_equal(restored.transform(frame, return_array=True), reference)
+    assert reference.shape == (len(frame), len(names))
+    assert np.isfinite(reference).all()
+    assert sum(dimensions.values()) == reference.shape[1]
+    assert list(restored.get_feature_names_out()) == names
+    assert restored.output_dims_ == dimensions
+    assert restored.get_feature_info(verbose=False) == feature_info
+    assert feature_info[0]["a"]["dimension"] == dimensions["a"]
+    assert feature_info[1]["c"]["dimension"] == dimensions["c"]
+    assert feature_info[2] == {}
+
+    for candidate in (p, restored):
+        for column, prefix in (("a", "num"), ("c", "cat")):
+            if missing_policy != "impute":
+                suffix = (
+                    f"missingindicator_{column}"
+                    if missing_policy == "impute_with_indicator"
+                    else f"missing__{column}__missing"
+                )
+                indicator_name = f"{prefix}_{column}__{suffix}"
+                output = np.asarray(candidate.transform(frame, return_array=True), dtype=float)
+                np.testing.assert_array_equal(
+                    output[:, names.index(indicator_name)], frame[column].isna().astype(float)
+                )
+            with pytest.raises(ValueError, match="columns are missing"):
+                candidate.transform(frame.drop(columns=[column]))
+        assert candidate.fingerprint_ == fingerprint
 
 
 def test_round_trip_reproduces_unseen_category_encoding(frame, target):
