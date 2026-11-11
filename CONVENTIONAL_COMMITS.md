@@ -14,8 +14,8 @@ version bumps and `CHANGELOG.md` generation.
 
 | Type       | Description             | Version Bump  |
 | ---------- | ----------------------- | ------------- |
-| `feat`     | New feature             | Minor (0.x.0) |
-| `fix`      | Bug fix                 | Patch (0.0.x) |
+| `feat`     | New feature             | Minor (1.x.0) |
+| `fix`      | Bug fix                 | Patch (1.0.x) |
 | `docs`     | Documentation only      | None          |
 | `style`    | Code style/formatting   | None          |
 | `refactor` | Code refactoring        | None          |
@@ -25,8 +25,9 @@ version bumps and `CHANGELOG.md` generation.
 | `ci`       | CI/CD changes           | None          |
 | `chore`    | Other changes           | None          |
 
-> While the project is in the `0.x` series (`major_version_zero = true`), a
-> breaking change bumps the **minor** version rather than the major version.
+> From `1.0.0` onward (`major_version_zero = false` in `pyproject.toml`), a
+> breaking change (`feat!:` or a `BREAKING CHANGE:` footer) bumps the **major**
+> version, following standard SemVer.
 
 ## Scopes (Optional)
 
@@ -34,24 +35,27 @@ Common scopes in this project:
 
 - `preprocessor`: The top-level `Preprocessor`
 - `transformers`: Transformer implementations
-- `binning`: Custom / tree-based binning
-- `splines`: Spline expansions (cubic, natural cubic, P-spline, tensor product, thin plate)
-- `feature-maps`: Neural basis expansions (RBF, ReLU, sigmoid, tanh)
+- `binning`: Numeric binning
+- `splines`: Spline expansions (B/M/I, cubic, natural cubic, P-spline, tensor product, thin plate)
+- `feature-maps`: Neural basis expansions (RBF, ReLU, sigmoid, tanh) and Fourier features
 - `embeddings`: Language / pretrained embeddings
 - `ple`: Piecewise linear encoding
 - `onehot`: One-hot encoders
-- `temporal`: Cyclic, lag, and rolling-stats transformers
-- `utils`: General utilities
+- `placement`: Knot / center / bin-edge placement (uniform, quantile, CART, LightGBM)
+- `cross-fitting`: `CrossFittedTransformer` and leakage-safe fitting
+- `search`: `RepresentationSearchCV`
+- `serialization`: `to_spec` / `from_spec` and fingerprints
+- `logging`: Verbosity and the `"pretab"` logger
 - `ci`: CI/CD related
 - `deps`: Dependencies
 
 ## Examples
 
 ```bash
-# Feature (minor bump: 0.1.0 → 0.2.0)
+# Feature (minor bump: 1.0.0 → 1.1.0)
 git commit -m "feat(splines): add B-spline basis transformer"
 
-# Bug fix (patch bump: 0.1.0 → 0.1.1)
+# Bug fix (patch bump: 1.0.0 → 1.0.1)
 git commit -m "fix(preprocessor): handle all-NaN numerical columns"
 
 # Performance (patch bump)
@@ -60,7 +64,7 @@ git commit -m "perf(feature-maps): vectorize RBF distance computation"
 # Documentation (no bump)
 git commit -m "docs: document custom binning strategies"
 
-# Breaking change (minor bump while in 0.x)
+# Breaking change (major bump: 1.0.0 → 2.0.0)
 git commit -m "feat!: rename fit_transform embeddings argument
 
 BREAKING CHANGE: embeddings must now be passed as a keyword argument."
@@ -105,10 +109,10 @@ cat CHANGELOG.md
 git commit
 
 # In the editor:
-feat(temporal): add rolling-window statistics transformer
+feat(feature-maps): add a log-spaced frequency strategy
 
-Adds a transformer that computes rolling mean/std/min/max over a configurable
-window for time-ordered features.
+Adds frequency_strategy="log_spaced" to FourierFeatureTransformer, spreading
+the frequencies in octaves above the fundamental.
 
 Closes #123
 ```
