@@ -109,7 +109,9 @@ pre.set_params(...)   # raises FrozenRepresentationError while frozen
 Freezing is useful when a representation is validated and about to ship. To make a fresh,
 unfrozen copy, use `clone_unfitted()`. To retrain, `refit(X, y)` returns a **new** fitted
 object and leaves the original untouched, and `mark_stale(reason)` records why an existing one
-should no longer be used.
+should no longer be used. The mark is advisory and describes the current fitted state: fitting
+the same (unfrozen) object again with `fit` replaces that state, so a successful `fit` clears
+the mark and the state returns to `FITTED`.
 
 ```{warning}
 `fit`, `fit_transform`, and `set_params` on a frozen preprocessor raise `FrozenRepresentationError`. This is deliberate:

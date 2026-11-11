@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab import FrozenRepresentationError, Preprocessor
+from pretab import FrozenRepresentationError, OutputBudgetError, Preprocessor
 
 
 @pytest.fixture
@@ -99,6 +99,53 @@ def test_mark_stale(frame, target):
     assert returned is p
     assert p.lifecycle_state_ == "STALE"
     assert p.stale_reason_ == "input schema drifted"
+
+
+def test_fit_clears_the_stale_mark(frame, target):
+    """A successful fit replaces the state the mark described; it used to stay STALE."""
+    p = _make().fit(frame, target)
+    p.mark_stale("drift")
+    p.fit(frame.assign(a=frame["a"] * 2), target)
+    assert p.lifecycle_state_ == "FITTED"
+    assert p.stale_reason_ is None
+
+
+def test_fit_transform_clears_the_stale_mark(frame, target):
+    p = _make().fit(frame, target)
+    p.mark_stale("drift")
+    p.fit_transform(frame, target)
+    assert p.lifecycle_state_ == "FITTED"
+    assert p.stale_reason_ is None
+
+
+def test_failed_fit_keeps_the_stale_mark(frame, target):
+    p = _make().fit(frame, target)
+    p.mark_stale("drift")
+    p.set_params(max_output_features=1)
+    with pytest.raises(OutputBudgetError):
+        p.fit(frame, target)
+    assert p.stale_reason_ == "drift"
+
+
+def test_fit_does_not_add_stale_state_to_the_spec(frame, target):
+    """Clearing the mark removes the attribute, so specs of never-stale fits are unchanged."""
+    never_stale = _make().fit(frame, target)
+    assert "_stale_reason" not in never_stale.to_spec()["state"]
+
+    refitted = _make().fit(frame, target)
+    refitted.mark_stale("drift")
+    refitted.fit(frame, target)
+    assert refitted.to_spec()["state"] == never_stale.to_spec()["state"]
+    assert refitted.fingerprint_ == never_stale.fingerprint_
+
+
+def test_stale_mark_survives_a_spec_round_trip_until_refit(frame, target):
+    p = _make().fit(frame, target)
+    p.mark_stale("drift")
+    restored = Preprocessor.from_spec(p.to_spec())
+    assert restored.lifecycle_state_ == "STALE"
+    restored.fit(frame, target)
+    assert restored.lifecycle_state_ == "FITTED"
 
 
 def test_frozen_takes_precedence_over_stale(frame, target):
