@@ -558,6 +558,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             Also if ``X`` has a duplicate column label, or two column labels share a string
             form (e.g. ``1`` and ``"1"``): every column is routed by the string form of
             its label, so such columns could not be told apart.
+        EmptyDataError
+            If ``X`` has columns but no rows (a subclass of ``PretabDataError`` and
+            ``ValueError``).
 
         Warns
         -----

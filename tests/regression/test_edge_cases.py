@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from pretab import Preprocessor
-from pretab.exceptions import PretabDataError
+from pretab.exceptions import EmptyDataError, PretabDataError
 
 
 def _finite(array) -> bool:
@@ -110,3 +110,29 @@ def test_unseen_categories_do_not_crash():
     # handle_unknown="ignore" encodes unseen categories as an all-zero row.
     assert out[2].sum() == 0.0
     assert out[4].sum() == 0.0
+
+
+# --- input without rows --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "X",
+    [
+        pd.DataFrame({"x": pd.Series([], dtype=float), "c": pd.Series([], dtype=object)}),
+        np.empty((0, 2)),
+        {"x": [], "c": []},
+    ],
+    ids=["dataframe", "ndarray", "dict"],
+)
+@pytest.mark.parametrize("numerical_method", ["ple", "minmax"])
+def test_fit_on_input_without_rows_raises_typed_error(X, numerical_method):
+    """A 0-row fit used to fail with ZeroDivisionError during column-type detection."""
+    pre = Preprocessor(numerical_method=numerical_method)
+    with pytest.raises(EmptyDataError, match=r"Preprocessor needs at least one sample, but X has 0 rows"):
+        pre.fit(X, [])
+
+
+def test_fit_on_input_without_rows_is_a_value_error():
+    """scikit-learn's convention for empty training data."""
+    with pytest.raises(ValueError, match="0 rows"):
+        Preprocessor().fit_transform(pd.DataFrame({"x": pd.Series([], dtype=float)}), [])
