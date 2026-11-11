@@ -1,14 +1,20 @@
 """Unit tests for :mod:`pretab.compose.factory`."""
 
+from dataclasses import fields
+from unittest.mock import Mock, call, patch
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import FeatureUnion, Pipeline
 
+from pretab import Preprocessor
+from pretab.compose.config import PreprocessorConfig
 from pretab.compose.factory import (
     _placement_kwargs,
     build_column_transformer,
+    create_transformer,
     get_categorical_transformer_steps,
     get_numerical_transformer_steps,
 )
@@ -188,3 +194,174 @@ def test_build_column_transformer_fits_and_transforms(make_config, sample_frame)
     out = ct.fit_transform(sample_frame, np.array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0]))
     assert isinstance(out, np.ndarray)
     assert out.shape[0] == len(sample_frame)
+
+
+@pytest.mark.parametrize("adaptive", [False, True])
+@pytest.mark.parametrize("random_state", [None, 17])
+@pytest.mark.parametrize(
+    "missing_policy", [None, "error", "propagate", "impute", "impute_with_indicator", "separate_state"]
+)
+def test_create_transformer_forwards_normalized_numerical_options(make_config, adaptive, random_state, missing_policy):
+    config = make_config(
+        numerical_method="rbf",
+        output_dim=11,
+        degree=2,
+        target_aware=True,
+        placement_strategy="cart",
+        task="classification",
+        adaptive=adaptive,
+        min_output_dim=3,
+        max_output_dim=8,
+        random_state=random_state,
+        scaling="standardization",
+        numerical_imputation=None,
+        add_missing_indicator=True,
+        missing_policy=missing_policy,
+    )
+    plan = config.imputation_plan(is_numerical=True)
+
+    with patch(
+        "pretab.compose.factory.get_numerical_transformer_steps", wraps=get_numerical_transformer_steps
+    ) as numerical_steps:
+        block = create_transformer(config.numerical_method, is_numerical=True, config=config)
+
+    numerical_steps.assert_called_once_with(
+        method="rbf",
+        task="classification",
+        target_aware=True,
+        add_imputer=plan["add_imputer"],
+        imputer_strategy="median",
+        output_dim=11,
+        adaptive=adaptive,
+        min_output_dim=3 if adaptive else None,
+        max_output_dim=8 if adaptive else None,
+        degree=2,
+        scaling="standardization",
+        placement_strategy="cart",
+        **({} if random_state is None else {"random_state": random_state}),
+    )
+    if plan["separate_state"] or plan["add_indicator"]:
+        assert isinstance(block, FeatureUnion)
+        representation = dict(block.transformer_list)["representation"]
+    else:
+        representation = block
+    assert isinstance(representation, Pipeline)
+    assert ("imputer" in representation.named_steps) is plan["add_imputer"]
+    if plan["add_imputer"]:
+        assert representation.named_steps["imputer"].strategy == "median"
+
+
+@pytest.mark.parametrize("preset", [None, "standard", "expanded", "adaptive"])
+@pytest.mark.parametrize("missing_policy", [None, "impute_with_indicator", "separate_state"])
+def test_preprocessor_routes_one_normalized_config_through_the_factory(sample_frame, preset, missing_policy):
+    feature_overrides = {"age": "rbf", "city": "int"}
+    preprocessor = Preprocessor(
+        preset=preset,
+        numerical_method="cubic",
+        categorical_method="ohe",
+        feature_preprocessing=feature_overrides,
+        degree=2,
+        target_aware=False,
+        placement_strategy="uniform",
+        task="classification",
+        adaptive=False,
+        min_output_dim=3,
+        max_output_dim=8,
+        random_state=17,
+        scaling="standardization",
+        cat_cutoff=0.1,
+        treat_all_integers_as_numerical=True,
+        numerical_imputation="mean",
+        categorical_imputation="constant",
+        add_missing_indicator=True,
+        missing_policy=missing_policy,
+        max_output_features=64,
+        max_features_per_input=16,
+        max_dense_memory=1_000_000,
+        output_structure="blocks",
+        output_format="sparse",
+        dtype="float32",
+    )
+    requested = preprocessor.get_params(deep=False)
+    resolved = preprocessor.get_resolved_config()
+    config_fields = {field.name for field in fields(PreprocessorConfig)}
+    facade_fields = {
+        "policy",
+        "max_output_features",
+        "max_features_per_input",
+        "max_dense_memory",
+        "overflow_policy",
+        "output_structure",
+        "output_format",
+        "dtype",
+    }
+    assert set(resolved) == config_fields | facade_fields
+    assert config_fields.isdisjoint(facade_fields)
+
+    normalized_configs: list[PreprocessorConfig] = []
+    from_params = PreprocessorConfig.from_params
+
+    def normalize_config(**parameters):
+        config = from_params(**parameters)
+        normalized_configs.append(config)
+        return config
+
+    with (
+        patch.object(PreprocessorConfig, "from_params", side_effect=normalize_config) as normalize,
+        patch.object(
+            PreprocessorConfig, "method_for", autospec=True, side_effect=PreprocessorConfig.method_for
+        ) as method_for,
+        patch.object(
+            PreprocessorConfig, "imputation_plan", autospec=True, side_effect=PreprocessorConfig.imputation_plan
+        ) as imputation_plan,
+        patch("pretab.compose.factory.create_transformer", wraps=create_transformer) as create,
+    ):
+        route = Mock()
+        for name, spy in (
+            ("normalize", normalize),
+            ("method", method_for),
+            ("imputation", imputation_plan),
+            ("create", create),
+        ):
+            route.attach_mock(spy, name)
+
+        preprocessor.fit(sample_frame, np.array([0, 1, 0, 1, 0, 1]))
+
+        normalize.assert_called_once_with(**{name: resolved[name] for name in config_fields})
+        (config,) = normalized_configs
+        assert all(item.kwargs["config"] is config for item in create.call_args_list)
+        assert all(item.args[0] is config for item in method_for.call_args_list + imputation_plan.call_args_list)
+        assert config.numerical_method == "cubicspline"
+        assert config.categorical_method == "one-hot"
+        assert config.feature_preprocessing == feature_overrides
+        assert config.feature_preprocessing is not feature_overrides
+        assert method_for.call_args_list == [
+            call(config, "age", is_numerical=True),
+            call(config, "city", is_numerical=False),
+        ]
+        assert create.call_args_list == [
+            call("rbf", is_numerical=True, config=config),
+            call("int", is_numerical=False, config=config),
+        ]
+        assert imputation_plan.call_args_list == [call(config, is_numerical=True), call(config, is_numerical=False)]
+        assert [item[0] for item in route.mock_calls] == [
+            "normalize",
+            "method",
+            "create",
+            "imputation",
+            "method",
+            "create",
+            "imputation",
+        ]
+
+    for name, strategy in (("num_age", "mean"), ("cat_city", "constant")):
+        block = preprocessor.column_transformer_.named_transformers_[name]
+        assert isinstance(block, FeatureUnion)
+        representation = dict(block.transformer_list)["representation"]
+        assert representation.named_steps["imputer"].strategy == strategy
+    numerical = dict(preprocessor.column_transformer_.named_transformers_["num_age"].transformer_list)["representation"]
+    assert numerical.named_steps["rbf"].output_dim == resolved["output_dim"]
+    assert numerical.named_steps["rbf"].random_state == 17
+    assert preprocessor.get_params(deep=False) == requested
+    assert preprocessor.get_resolved_config() == resolved
+    assert feature_overrides == {"age": "rbf", "city": "int"}
