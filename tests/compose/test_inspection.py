@@ -77,6 +77,18 @@ def test_build_feature_info_probes_a_step_fitted_on_the_frame_without_warning(
     assert numerical["age"]["dimension"] == dimension
 
 
+@pytest.mark.parametrize("scaling", [None, "standardization", "minmax"])
+def test_build_feature_info_reports_the_width_of_a_step_the_probe_cannot_transform(make_config, sample_frame, scaling):
+    """Box-Cox rejects the non-positive probe value used without min-max scaling, so
+    its dimension was reported as None; the fitted block width is used instead."""
+    config = make_config(numerical_method="box-cox", scaling=scaling)
+    ct = build_column_transformer(config, ["age"], ["city"]).fit(sample_frame)
+
+    numerical, _, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
+
+    assert numerical["age"]["dimension"] == 1
+
+
 def test_build_feature_info_reports_a_zero_width_block():
     # scikit-learn's imputer default drops a column without observed values, so
     # the encoder after it receives no column at all.

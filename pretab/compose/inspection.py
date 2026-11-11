@@ -198,6 +198,16 @@ def _probe_input(step, value):
     return pd.DataFrame(np.full((1, len(names)), value), columns=names)
 
 
+def _block_width(column_transformer, step_name):
+    """Return the fitted output width of a ColumnTransformer step, or None when unknown.
+
+    Every per-column block holds one feature, so its width in ``output_indices_``
+    is that feature's output dimension.
+    """
+    span = column_transformer.output_indices_.get(step_name)
+    return None if span is None else span.stop - span.start
+
+
 def representation_leaf(transformer):
     """Return the last step of a fitted per-column block's representation.
 
@@ -274,7 +284,9 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                             feature_name,
                             exc,
                         )
-                        dimension = None
+                        # The probe value is outside the step's domain (e.g. Box-Cox
+                        # needs strictly positive input): use the fitted block width.
+                        dimension = _block_width(column_transformer, name)
                 if separate_state_dimension is not None:
                     dimension = separate_state_dimension
                 numerical_feature_info[feature_name] = {
@@ -322,7 +334,9 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
                             feature_name,
                             exc,
                         )
-                        dimension = None
+                        # The probe value is outside the step's domain (e.g. Box-Cox
+                        # needs strictly positive input): use the fitted block width.
+                        dimension = _block_width(column_transformer, name)
                 if separate_state_dimension is not None:
                     dimension = separate_state_dimension
                 if name.startswith("cat_"):
