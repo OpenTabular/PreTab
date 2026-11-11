@@ -56,7 +56,8 @@ class SplineBasisMixin(BasePreTabTransformer):
         feature no longer poisons ``min`` / ``max`` / quantile knots with ``NaN``;
         the missing rows are still expanded to ``NaN`` basis rows at transform time
         (the "propagate" contract). A fully missing feature cannot yield knots and
-        raises a :class:`~pretab.exceptions.PretabDataError`.
+        raises a :class:`~pretab.exceptions.PretabDataError`, as does a zero-range
+        feature: a constant one, or one with a single observed value.
         """
         x = np.asarray(x, dtype=float)
         finite = ~np.isnan(x)
@@ -65,7 +66,14 @@ class SplineBasisMixin(BasePreTabTransformer):
         if not finite.all():
             x = x[finite]
             y = np.asarray(y)[finite] if y is not None else y
-        if x.size > 1 and np.ptp(x) == 0:
+        if x.size == 1:
+            # One observed value has no range either: the basis would silently
+            # degenerate (all-zero rows, or fewer columns than requested).
+            raise PretabDataError(
+                f"Feature has only 1 sample with an observed (non-missing) value ({float(x[0])!r}); "
+                "a spline basis cannot be constructed on a zero-range feature."
+            )
+        if np.ptp(x) == 0:
             raise PretabDataError(
                 f"Feature is constant (all values equal {float(x[0])!r}); "
                 "a spline basis cannot be constructed on a zero-range feature."
