@@ -768,3 +768,22 @@ def test_boxcox_survives_cross_validation():
     X, y = data[0], data[1]
     scores = cross_val_score(make_pipeline(Preprocessor(numerical_method="box-cox"), Ridge()), X, y, cv=5)
     assert np.isfinite(scores).all()
+
+
+@pytest.mark.parametrize("scaling", [None, "standardization", "minmax"])
+@pytest.mark.parametrize(
+    "numerical_method",
+    ["box-cox", "yeo-johnson", "polynomial", "robust", "custombin", "fourier", "bspline", "rbf", "none"],
+)
+def test_feature_info_dimension_matches_output_dims(numerical_method, scaling):
+    """get_feature_info reported dimension=None for Box-Cox unless scaling was "minmax"."""
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"a": rng.normal(size=60), "b": rng.exponential(size=60), "c": rng.choice(["x", "y"], size=60)})
+    pre = Preprocessor(
+        numerical_method=numerical_method, scaling=scaling, target_aware=False, placement_strategy="uniform"
+    ).fit(df)
+
+    numerical_info, categorical_info, _ = pre.get_feature_info(verbose=False)
+
+    reported = {feature: info["dimension"] for feature, info in {**numerical_info, **categorical_info}.items()}
+    assert reported == pre.output_dims_
