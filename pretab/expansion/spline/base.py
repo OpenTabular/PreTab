@@ -158,6 +158,11 @@ class BaseSplineTransformer(BasePreTabTransformer):
     expands to a row of NaN in its feature's basis block (an optional bias column
     stays 1), as in the other spline families.
 
+    A feature needs at least two distinct observed values: ``fit`` raises a
+    :class:`~pretab.exceptions.PretabDataError` for a constant feature and for a
+    feature with a single observed value (a one-row ``X``, or one non-missing
+    value), since no knot can be placed on a zero-range feature.
+
     Examples
     --------
     >>> import numpy as np
@@ -361,7 +366,15 @@ class BaseSplineTransformer(BasePreTabTransformer):
             xi_valid = xi[valid_mask]
             if xi_valid.size == 0:
                 raise PretabDataError(f"Feature at index {i} has only NaN values")
-            if xi_valid.size > 1 and np.ptp(xi_valid) == 0:
+            if xi_valid.size == 1:
+                # One observed value has no range either: no interior knot fits
+                # between the coinciding boundary knots, and evaluating the basis
+                # at transform would fail inside SciPy.
+                raise PretabDataError(
+                    f"Feature at index {i} has only 1 sample with an observed (non-missing) value "
+                    f"({float(xi_valid[0])!r}); a spline basis cannot be constructed on a zero-range feature."
+                )
+            if np.ptp(xi_valid) == 0:
                 raise PretabDataError(
                     f"Feature at index {i} is constant (all values equal {float(xi_valid[0])!r}); "
                     "a spline basis cannot be constructed on a zero-range feature."

@@ -84,9 +84,11 @@ feature does not carry the signal, no representation will create it. Measure, do
 PreTab is explicit about degenerate inputs rather than failing silently.
 
 - **Constant column**: the splines that need spread (B/M/I, cubic, natural cubic, P-spline,
-  tensor-product) raise a typed error rather than fitting a meaningless basis. Numeric
-  binning falls back to a single bin instead of raising, and PLE and the feature maps place
-  all their bins or centers at the same value, a degenerate but still valid basis.
+  tensor-product) raise a typed error rather than fitting a meaningless basis. A column
+  with a single observed value (a one-row input, or one non-missing value) has no spread
+  either and raises the same error. Numeric binning falls back to a single bin instead of
+  raising, and PLE and the feature maps place all their bins or centers at the same value,
+  a degenerate but still valid basis.
 - **Discrete or heavily tied column**: target-aware PLE and feature maps still get the
   requested number of distinct bin edges or centers strictly inside the observed range. When
   the tree finds fewer splits than requested, the shortfall is filled with spaced quantile
