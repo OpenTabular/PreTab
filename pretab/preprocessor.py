@@ -709,6 +709,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         self._enforce_output_budget(X.shape[0])
 
+        # This fit replaces the fitted state that mark_stale() flagged as outdated.
+        # The attribute is removed instead of reset, so a spec of a never-stale
+        # preprocessor is unchanged.
+        self.__dict__.pop("_stale_reason", None)
+
         if verbose >= 1:
             numerical_summary = _method_summary(numerical_features, is_numerical=True, config=config)
             categorical_summary = _method_summary(categorical_features, is_numerical=False, config=config)
@@ -1512,7 +1517,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Records ``reason`` and flips :attr:`lifecycle_state_` to ``STALE`` (unless
         already ``FROZEN``). Purely advisory: it does not alter the fitted state.
-        Returns ``self`` for chaining.
+        A later successful :meth:`fit` of this object replaces that state, so it
+        clears the mark and the state returns to ``FITTED``; a ``fit`` that raises
+        leaves the mark in place. Returns ``self`` for chaining.
         """
         check_is_fitted(self)
         self._stale_reason = reason
