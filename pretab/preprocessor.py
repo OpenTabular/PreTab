@@ -324,6 +324,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         - ``2`` -- the per-feature table that :meth:`get_feature_info` builds.
         - ``3`` -- internal decisions (fitted bins / knots / centers).
 
+        A value above ``3`` logs like ``3``.
+
         Stored verbatim and forwarded by ``get_params`` / ``clone``, so an embedding host
         (e.g. DeepTab) can pass it straight through ``Preprocessor(**kwargs)``. PreTab never
         configures the root logger or attaches a handler when the host already owns one (on
