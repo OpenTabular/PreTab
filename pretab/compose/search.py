@@ -22,8 +22,9 @@ from sklearn.utils.validation import _check_method_params, check_is_fitted
 
 from ..core._typing import PredictorLike
 from ..core.validation import is_polars_frame, polars_to_pandas
-from ..exceptions import InvalidParamError
+from ..exceptions import InvalidParamError, invalid_param_error
 from ..preprocessor import Preprocessor
+from .registry import NUMERICAL_ALIASES, NUMERICAL_METHODS, resolve_method
 
 __all__ = ["RepresentationSearchCV"]
 
@@ -64,7 +65,12 @@ class RepresentationSearchCV(BaseEstimator):
     estimator : estimator
         Downstream supervised estimator fit on the transformed features.
     methods : sequence of str
-        Candidate ``numerical_method`` values to search over.
+        Candidate ``numerical_method`` values to search over, e.g.
+        ``["minmax", "bspline"]``. Names are resolved like
+        ``Preprocessor(numerical_method=...)`` (aliases and ``None`` included) and
+        checked when :meth:`fit` starts, before any candidate is cross-validated.
+        A single string is rejected instead of being read as a sequence of
+        one-letter names.
     cv : int or cross-validation generator, default=5
         Cross-validation splitting strategy passed to
         :func:`sklearn.model_selection.check_cv`. A group splitter such as
@@ -76,7 +82,8 @@ class RepresentationSearchCV(BaseEstimator):
     preprocessor_params : dict or None, default=None
         Extra keyword arguments forwarded to every :class:`Preprocessor`. When
         ``estimator`` is a classifier, ``task`` defaults to ``"classification"`` so
-        target-aware placement treats ``y`` as class labels.
+        target-aware placement treats ``y`` as class labels. ``numerical_method``
+        cannot be set here: the search sets it to each entry of ``methods``.
     random_state : int or None, default=None
         Seed forwarded to each :class:`Preprocessor`.
 
@@ -121,6 +128,48 @@ class RepresentationSearchCV(BaseEstimator):
             params.setdefault("task", "classification")
         return Preprocessor(numerical_method=method, **params)
 
+    def _validated_methods(self) -> list:
+        """Return ``methods`` as a list, checked before any candidate is fitted.
+
+        A typo would otherwise only surface inside the first fold of that
+        candidate, after every candidate listed before it has been
+        cross-validated, and a single string would be searched letter by letter.
+        """
+        name = type(self).__name__
+        if isinstance(self.methods, str):
+            raise invalid_param_error(
+                name,
+                "methods",
+                self.methods,
+                f"must be a sequence of numerical method names, not a single string; pass [{self.methods!r}] "
+                "to search one method",
+            )
+        methods = list(self.methods)
+        if not methods:
+            raise InvalidParamError("methods must be a non-empty sequence of numerical methods.")
+        for method in methods:
+            # None is Preprocessor's spelling of "none" (leave numerical columns unchanged).
+            known = method is None or (
+                isinstance(method, str)
+                and resolve_method(method, NUMERICAL_METHODS, NUMERICAL_ALIASES) in NUMERICAL_METHODS
+            )
+            if not known:
+                raise invalid_param_error(
+                    name,
+                    "methods",
+                    method,
+                    "every entry must name a numerical preprocessing method",
+                    valid=set(NUMERICAL_METHODS),
+                )
+        if "numerical_method" in (self.preprocessor_params or {}):
+            raise invalid_param_error(
+                name,
+                "preprocessor_params",
+                self.preprocessor_params,
+                "must not set 'numerical_method': the search sets it to each entry of methods",
+            )
+        return methods
+
     def fit(self, X, y=None, *, groups=None, **fit_params):
         """Search over ``methods`` and refit the best representation on all data.
 
@@ -151,10 +200,16 @@ class RepresentationSearchCV(BaseEstimator):
         -------
         self : RepresentationSearchCV
             Fitted search.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``methods`` is empty, a single string, or has an entry that does not
+            name a numerical method; if ``preprocessor_params`` sets
+            ``numerical_method``; or if ``y`` is None. Raised before any candidate
+            is fitted.
         """
-        methods = list(self.methods)
-        if not methods:
-            raise InvalidParamError("methods must be a non-empty sequence of numerical methods.")
+        methods = self._validated_methods()
         if y is None:
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
         y_arr = np.asarray(y).ravel()

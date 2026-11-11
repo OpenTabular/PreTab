@@ -113,6 +113,54 @@ def test_empty_methods_raises(nonlinear_data):
         RepresentationSearchCV(LinearRegression(), methods=[]).fit(X, y)
 
 
+def test_methods_as_a_single_string_is_rejected(nonlinear_data):
+    """A string was iterated letter by letter: "bspline" failed as the unknown method 'b'."""
+    X, y = nonlinear_data
+    with pytest.raises(InvalidParamError, match=r"not a single string; pass \['bspline'\]"):
+        RepresentationSearchCV(LinearRegression(), methods="bspline").fit(X, y)
+
+
+class _CountingRegressor(RegressorMixin, BaseEstimator):
+    """Counts fits on the class, so clones made by the search are counted too."""
+
+    n_fits = 0
+
+    def fit(self, X, y):
+        type(self).n_fits += 1
+        return self
+
+    def predict(self, X):
+        return np.zeros(len(X))
+
+
+@pytest.mark.parametrize("unknown", ["no-such-method", "one-hot", "tensorspline", 3])
+def test_unknown_method_is_rejected_before_any_candidate_is_fitted(nonlinear_data, unknown):
+    """An unknown name used to fail only after the candidates before it were cross-validated."""
+    X, y = nonlinear_data
+    _CountingRegressor.n_fits = 0
+    search = _search(_CountingRegressor(), ["minmax", unknown])
+    with pytest.raises(InvalidParamError, match=r"RepresentationSearchCV\.methods = .* is invalid"):
+        search.fit(X, y)
+    assert _CountingRegressor.n_fits == 0
+    assert not hasattr(search, "cv_results_")
+
+
+def test_method_aliases_and_none_stay_valid(nonlinear_data):
+    X, y = nonlinear_data
+    search = _search(LinearRegression(), ["std", "B-Spline", None]).fit(X, y)
+    assert list(search.cv_results_) == ["std", "B-Spline", None]
+
+
+def test_numerical_method_in_preprocessor_params_is_rejected(nonlinear_data):
+    """It collided with the searched method in a bare TypeError from Preprocessor()."""
+    X, y = nonlinear_data
+    search = RepresentationSearchCV(
+        LinearRegression(), methods=["minmax"], preprocessor_params={"numerical_method": "ple"}
+    )
+    with pytest.raises(InvalidParamError, match="must not set 'numerical_method'"):
+        search.fit(X, y)
+
+
 def test_requires_y_at_fit(nonlinear_data):
     X, _ = nonlinear_data
     with pytest.raises(InvalidParamError):
