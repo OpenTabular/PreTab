@@ -3,14 +3,16 @@
 import copy
 import json
 import pickle
+from collections import UserDict
 from dataclasses import FrozenInstanceError, is_dataclass
+from types import MappingProxyType
 from typing import Any, cast
 
 import pytest
 from sklearn.base import clone
 
 from pretab import Preprocessor
-from pretab.compose.config import RepresentationConfig
+from pretab.compose.config import RepresentationConfig, _normalize_representation_config
 from pretab.core.parameters import UNSET
 from pretab.exceptions import InvalidParamError
 
@@ -185,3 +187,96 @@ def test_mapping_keys_and_required_values_are_validated():
         cast(Any, RepresentationConfig)(method="rbf", name=UNSET)
     with pytest.raises(InvalidParamError, match="params"):
         cast(Any, RepresentationConfig)(method="rbf", params=None)
+
+
+@pytest.mark.parametrize("form", ["string", "mapping", "value"])
+@pytest.mark.parametrize(
+    ("method", "is_numerical", "canonical"),
+    [
+        ("rbf", True, "rbf"),
+        (" R_B F ", True, "rbf"),
+        ("cubic", True, "cubicspline"),
+        ("std", True, "standardization"),
+        ("binning", True, "custombin"),
+        (" O_H E ", False, "one-hot"),
+        ("ordinal", False, "int"),
+        ("one_hot", False, "one-hot"),
+        ("ordinal", True, "ordinal"),
+        ("binning", False, "binning"),
+        ("identity", True, "none"),
+        ("identity", False, "none"),
+    ],
+)
+def test_normalization_forms_are_equivalent_in_their_namespace(form, method, is_numerical, canonical):
+    requested = {"string": method, "mapping": {"method": method}, "value": RepresentationConfig(method=method)}[form]
+    normalized = _normalize_representation_config(requested, is_numerical=is_numerical)
+
+    assert normalized == RepresentationConfig(method=canonical)
+    assert normalized.output_dim is UNSET
+    assert normalized.to_dict() == {"method": canonical, "params": {}, "name": None}
+
+
+@pytest.mark.parametrize("form", ["mapping", "value"])
+@pytest.mark.parametrize(("method", "is_numerical", "canonical"), [("RBF", True, "rbf"), ("OHE", False, "one-hot")])
+def test_normalization_preserves_explicit_and_omitted_settings(form, method, is_numerical, canonical):
+    data = {
+        "method": method,
+        "output_dim": 3,
+        "target_aware": False,
+        "placement_strategy": "uniform",
+        "min_output_dim": None,
+        "name": "feature",
+        "params": {"options": {"values": [None, False, 2, 0.5, "x"]}},
+    }
+    requested = data if form == "mapping" else RepresentationConfig.from_dict(data)
+    normalized = _normalize_representation_config(requested, is_numerical=is_numerical)
+
+    assert normalized.to_dict() == {**data, "method": canonical}
+    assert normalized.adaptive is UNSET
+    assert normalized.max_output_dim is UNSET
+    assert normalized.min_output_dim is None
+    assert data["method"] == method
+    if isinstance(requested, RepresentationConfig):
+        assert requested.method == method
+    assert _normalize_representation_config(normalized, is_numerical=is_numerical) == normalized
+
+
+@pytest.mark.parametrize("mapping_type", [dict, UserDict, MappingProxyType])
+def test_normalization_detaches_mapping_at_the_boundary(mapping_type):
+    data = {"method": "RBF", "gamma": 0.5, "params": {"options": {"values": [1, 2]}}}
+    requested = mapping_type(data)
+    preprocessor = Preprocessor(feature_preprocessing={"age": requested})
+    data["params"]["options"]["values"][0] = 3
+    normalized = _normalize_representation_config(requested, is_numerical=True)
+    data["params"]["options"]["values"].append(4)
+
+    assert normalized == RepresentationConfig(method="rbf", params={"gamma": 0.5, "options": {"values": [3, 2]}})
+    assert preprocessor.get_params(deep=False)["feature_preprocessing"]["age"] is requested
+    assert requested["method"] == "RBF"
+    assert "gamma" in requested and "gamma" not in requested["params"]
+    assert _normalize_representation_config(requested, is_numerical=True).params["options"]["values"] == (3, 2, 4)
+    with pytest.raises(TypeError):
+        cast(Any, normalized.params)["changed"] = True
+
+
+@pytest.mark.parametrize("is_numerical", [False, True])
+@pytest.mark.parametrize("value", [None, UNSET, [], 1, True, object(), lambda: "rbf"])
+def test_normalization_rejects_unsupported_input_types(value, is_numerical):
+    with pytest.raises(InvalidParamError, match="must be a string, mapping, or RepresentationConfig"):
+        _normalize_representation_config(value, is_numerical=is_numerical)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {},
+        {"method": None},
+        {"method": "rbf", "output_dim": True},
+        {"method": "rbf", "params": {"method": "ple"}},
+        {"method": "rbf", "gamma": 0.5, "params": {"gamma": 0.5}},
+        {"method": "rbf", "params": {"gamma": float("nan")}},
+    ],
+)
+def test_normalization_reuses_value_shape_validation(data):
+    with pytest.raises(InvalidParamError):
+        _normalize_representation_config(data, is_numerical=True)

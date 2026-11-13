@@ -17,7 +17,7 @@ resolves them in the correct namespace at build time.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from math import isfinite
 from typing import Any
 
@@ -201,6 +201,32 @@ class RepresentationConfig:
                     )
                 params[key] = requested.pop(key)
         return cls(**requested, params=params)
+
+
+def _normalize_representation_config(
+    value: str | Mapping[str, Any] | RepresentationConfig, *, is_numerical: bool
+) -> RepresentationConfig:
+    """Normalize one request in its known feature-kind namespace.
+
+    Raw mappings detach through ``from_dict``. Typed values retain their
+    requested spelling; normalization replaces rather than mutates an alias.
+    Omitted fields remain ``UNSET``. Method applicability, capability checks,
+    and effective defaults are not resolved here.
+    """
+    if isinstance(value, RepresentationConfig):
+        config = value
+    elif isinstance(value, str):
+        config = RepresentationConfig(method=value)
+    elif isinstance(value, Mapping):
+        config = RepresentationConfig.from_dict(value)
+    else:
+        raise invalid_param_error(
+            "RepresentationConfig", "value", value, "must be a string, mapping, or RepresentationConfig"
+        )
+    canonical = NUMERICAL_METHODS if is_numerical else CATEGORICAL_METHODS
+    aliases = NUMERICAL_ALIASES if is_numerical else CATEGORICAL_ALIASES
+    method = resolve_method(config.method, canonical, aliases)
+    return config if method == config.method else replace(config, method=method)
 
 
 def _normalize_method(method, canonical, aliases) -> str:
