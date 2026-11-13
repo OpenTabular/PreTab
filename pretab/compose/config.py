@@ -16,9 +16,12 @@ resolves them in the correct namespace at build time.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, fields
+from math import isfinite
+from typing import Any
 
-from ..core.parameters import validate_placement, validate_task
+from ..core.parameters import UNSET, _Unset, validate_placement, validate_task
 from ..exceptions import invalid_param_error
 from .registry import (
     CATEGORICAL_ALIASES,
@@ -28,11 +31,176 @@ from .registry import (
     resolve_method,
 )
 
-__all__ = ["PreprocessorConfig"]
+__all__ = ["PreprocessorConfig", "RepresentationConfig"]
 
 # Valid values for the high-level ``missing_policy`` orchestration knob. ``None``
 # keeps the explicit imputation parameters authoritative (historical behaviour).
 MISSING_POLICIES = frozenset({"error", "propagate", "impute", "impute_with_indicator", "separate_state"})
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _FrozenParams(Mapping[str, Any]):
+    _entries: tuple[tuple[str, Any], ...]
+
+    def __getitem__(self, key: str) -> Any:
+        for stored_key, value in self._entries:
+            if stored_key == key:
+                return value
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return (key for key, _ in self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __repr__(self) -> str:
+        return repr(dict(self))
+
+
+def _freeze_config_value(value: Any, path: str, active: set[int]) -> Any:
+    if value is None or type(value) in (str, bool, int):
+        return value
+    if type(value) is float and isfinite(value):
+        return value
+    if not isinstance(value, (Mapping, Sequence)) or isinstance(value, (str, bytes, bytearray, memoryview)):
+        raise invalid_param_error(
+            "RepresentationConfig", path, value, "must contain only finite JSON-compatible values"
+        )
+    identity = id(value)
+    if identity in active:
+        raise invalid_param_error("RepresentationConfig", path, value, "must not contain circular references")
+    active.add(identity)
+    try:
+        if isinstance(value, Mapping):
+            entries = []
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise invalid_param_error("RepresentationConfig", path, key, "mapping keys must be strings")
+                entries.append((key, _freeze_config_value(item, f"{path}[{key!r}]", active)))
+            return _FrozenParams(tuple(entries))
+        return tuple(_freeze_config_value(item, f"{path}[{index}]", active) for index, item in enumerate(value))
+    finally:
+        active.remove(identity)
+
+
+def _config_value_to_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _config_value_to_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_config_value_to_json(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True)
+class RepresentationConfig:
+    """Immutable, JSON-compatible settings for one representation.
+
+    Parameters
+    ----------
+    method : str
+        Requested method name. Alias resolution and parameter applicability
+        require a numerical or categorical context and are checked separately.
+    output_dim : int, optional
+        Positive requested width, subject to the selected family's constraints.
+    target_aware : bool, optional
+        Whether to use the target for placement.
+    placement_strategy : str, optional
+        Requested nonempty placement-strategy name.
+    adaptive : bool, optional
+        Whether to use adaptive resolution.
+    min_output_dim, max_output_dim : int or None, optional
+        Positive adaptive bounds, or ``None`` where the method permits it.
+    params : mapping, optional
+        Family-specific options. Nested mappings and sequences are copied into
+        read-only storage. Only finite JSON-compatible values are accepted.
+    name : str or None, default=None
+        Optional metadata label; it does not rename input or output columns.
+
+    Notes
+    -----
+    Omitted common settings retain ``UNSET`` rather than adopting method defaults.
+    This value is not an estimator; it has no fitted state or ``set_params``.
+    """
+
+    method: str
+    output_dim: int | _Unset = UNSET
+    target_aware: bool | _Unset = UNSET
+    placement_strategy: str | _Unset = UNSET
+    adaptive: bool | _Unset = UNSET
+    min_output_dim: int | _Unset | None = UNSET
+    max_output_dim: int | _Unset | None = UNSET
+    params: Mapping[str, Any] = field(default_factory=dict)
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.method is UNSET:
+            raise invalid_param_error("RepresentationConfig", "method", self.method, "is required")
+        for key in ("method", "placement_strategy", "name"):
+            value = getattr(self, key)
+            if (key == "placement_strategy" and value is UNSET) or (key == "name" and value is None):
+                continue
+            if type(value) is not str or not value.strip():
+                raise invalid_param_error("RepresentationConfig", key, value, "must be a nonempty string")
+        for key in ("output_dim", "min_output_dim", "max_output_dim"):
+            value = getattr(self, key)
+            if value is UNSET or (key != "output_dim" and value is None):
+                continue
+            if type(value) is not int or value < 1:
+                raise invalid_param_error("RepresentationConfig", key, value, "must be a positive integer")
+        for key in ("target_aware", "adaptive"):
+            value = getattr(self, key)
+            if value is not UNSET and type(value) is not bool:
+                raise invalid_param_error("RepresentationConfig", key, value, "must be a boolean")
+        if not isinstance(self.params, Mapping):
+            raise invalid_param_error("RepresentationConfig", "params", self.params, "must be a mapping")
+        reserved = {item.name for item in fields(self)}
+        for key in self.params:
+            if key in reserved:
+                raise invalid_param_error(
+                    "RepresentationConfig",
+                    f"params[{key!r}]",
+                    self.params[key],
+                    "must be supplied as a top-level field",
+                )
+        object.__setattr__(self, "params", _freeze_config_value(self.params, "params", set()))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return detached JSON-compatible settings, omitting ``UNSET`` fields."""
+        return {
+            item.name: _config_value_to_json(value)
+            for item in fields(self)
+            if (value := getattr(self, item.name)) is not UNSET
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> RepresentationConfig:
+        """Build a value from a mapping, collecting family options into ``params``.
+
+        An option supplied both at the top level and in ``params`` is an error,
+        even if the two values agree. Method-specific validation requires the
+        feature-kind context and is not performed by this constructor.
+        """
+        if not isinstance(data, Mapping):
+            raise invalid_param_error("RepresentationConfig", "data", data, "must be a mapping")
+        requested = dict(data)
+        if any(type(key) is not str for key in requested):
+            raise invalid_param_error("RepresentationConfig", "data", data, "mapping keys must be strings")
+        if "method" not in requested:
+            raise invalid_param_error("RepresentationConfig", "method", UNSET, "is required")
+        params = requested.pop("params", {})
+        if not isinstance(params, Mapping):
+            raise invalid_param_error("RepresentationConfig", "params", params, "must be a mapping")
+        params = dict(params)
+        common = {item.name for item in fields(cls)}
+        for key in list(requested):
+            if key not in common:
+                if key in params:
+                    raise invalid_param_error(
+                        "RepresentationConfig", key, requested[key], "must not also be supplied inside params"
+                    )
+                params[key] = requested.pop(key)
+        return cls(**requested, params=params)
 
 
 def _normalize_method(method, canonical, aliases) -> str:

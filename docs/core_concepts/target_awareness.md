@@ -83,10 +83,19 @@ the same format, or a pandas/Polars DataFrame. Fold outputs are restored to the 
 order. A pandas output keeps the input index when the wrapped transformer preserves it;
 otherwise it uses a fresh row index.
 
-Cross-fitting currently requires matrix output. A wrapped `Preprocessor` configured with
-`output_structure="blocks"` raises an explicit error; use `output_structure="matrix"` instead.
+`CrossFittedTransformer.fit_transform` requires matrix output. A wrapped `Preprocessor`
+configured with `output_structure="blocks"` raises `IncompatibleParamsError`; use
+`output_structure="matrix"` instead.
 Each fold must return a 2D output with one row per held-out sample, a fixed width, and, for
 DataFrames, the same column labels in the same order as the all-data fit.
+
+`output_format="dense"` makes block values dense; it does not turn a block dictionary into
+a matrix. DeepTab's preprocessing factory requests dense blocks, so a preprocessor built by
+that factory cannot be wrapped unchanged to produce cross-fitted training features.
+
+Calling `fit(X, y).transform(X)` is not an out-of-fold workaround: it uses the estimator fit
+on all training rows, even when ordinary block transformation succeeds. Use `fit_transform`
+for out-of-fold training features and `transform` for genuinely new rows.
 
 A wrapped `Preprocessor` is not refit from scratch on each fold: every fold reuses its all-data
 fit and refits only the target-aware representations and subsequent pipeline steps. Column

@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import pretab
+from pretab import compose as pretab_compose
 from pretab import exceptions as pretab_exceptions
 from pretab.compose import registry
 
@@ -51,6 +52,7 @@ def _public_api_contract():
     contract = {
         "exports": {
             "pretab": sorted(pretab.__all__),
+            "pretab.compose": sorted(pretab_compose.__all__),
             "pretab.transformers": sorted(transformers.__all__),
             "pretab.exceptions": sorted(pretab_exceptions.__all__),
             "pretab.compose.registry": sorted(registry.__all__),
@@ -215,6 +217,15 @@ def test_dunder_all_is_resolvable():
 
 def test_preprocessor_is_constructible():
     assert pretab.Preprocessor() is not None
+
+
+def test_representation_config_public_exports_are_identical():
+    from pretab.compose.config import RepresentationConfig
+
+    assert pretab.RepresentationConfig is RepresentationConfig
+    assert pretab_compose.RepresentationConfig is RepresentationConfig
+    assert "RepresentationConfig" in pretab.__all__
+    assert pretab_compose.__all__ == ["RepresentationConfig"]
 
 
 def test_transformers_public_surface_is_resolvable():

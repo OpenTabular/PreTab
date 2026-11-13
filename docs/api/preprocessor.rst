@@ -13,6 +13,19 @@ configuration, and produces model-ready output with full lineage.
 
    Preprocessor
 
+Representation values
+---------------------
+
+:class:`~pretab.RepresentationConfig` stores a representation request with
+read-only, detached parameters and JSON-compatible dictionary conversion.
+Constructing the value does not fit an estimator or resolve method aliases.
+
+.. autosummary::
+   :toctree: _autosummary
+   :nosignatures:
+
+   RepresentationConfig
+
 Configuration, output, and reproducibility
 ------------------------------------------
 

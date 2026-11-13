@@ -1,4 +1,5 @@
 from ._version import __version__
+from .compose import RepresentationConfig
 from .compose.search import RepresentationSearchCV
 from .core.logging import configure_logging, set_verbosity
 from .core.policy import RepresentationPolicy
@@ -31,6 +32,7 @@ __all__ = [
     "Preprocessor",
     "PretabSerializationError",
     "PretabWarning",
+    "RepresentationConfig",
     "RepresentationConformanceError",
     "RepresentationPolicy",
     "RepresentationSearchCV",

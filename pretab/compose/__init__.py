@@ -4,3 +4,7 @@ per-column pipelines are combined into a single :class:`~sklearn.compose.ColumnT
 Includes the ``config``, ``registry``, ``factory``, ``feature_detection``,
 ``output`` and ``inspection`` modules.
 """
+
+from .config import RepresentationConfig
+
+__all__ = ["RepresentationConfig"]
