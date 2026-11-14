@@ -20,15 +20,20 @@ TUTORIALS_DIR = ROOT / "docs" / "tutorials"
 _FENCE = re.compile(r"^```python\n(.*?)^```\s*$", re.DOTALL | re.MULTILINE)
 
 
-def _code_blocks(path: Path) -> list[tuple[int, str]]:
+def _code_blocks(path: Path, section: str | None = None) -> list[tuple[int, str]]:
     """Return (1-based start line, source) for every python fence in ``path``.
 
-    The source is padded with leading blank lines so a traceback raised while
-    executing it reports the real line number in the markdown file.
+    Optionally select one second-level section. The source is padded with leading
+    blank lines so a traceback reports the real line number in the markdown file.
     """
     text = path.read_text(encoding="utf-8")
+    start = text.index(f"## {section}\n") if section is not None else 0
+    stop = text.find("\n## ", start + 1) if section is not None else -1
+    stop = len(text) if stop == -1 else stop
     blocks = []
     for match in _FENCE.finditer(text):
+        if not start <= match.start() < stop:
+            continue
         start_line = text.count("\n", 0, match.start()) + 2
         padded = "\n" * (start_line - 1) + match.group(1)
         blocks.append((start_line, padded))
@@ -59,11 +64,23 @@ def isolate_document_state(tmp_path, monkeypatch):
     registry.CATEGORICAL_METHODS.update(categorical)
 
 
-@pytest.mark.parametrize("tutorial", _TUTORIALS, ids=[p.stem for p in _TUTORIALS])
+@pytest.mark.parametrize(
+    ("tutorial", "section"),
+    [pytest.param(page, None, id=page.stem) for page in _TUTORIALS]
+    + [
+        pytest.param(
+            ROOT / "docs" / "core_concepts" / "configuration.md",
+            "Structured per-feature configuration",
+            id="configuration",
+        )
+    ],
+)
 @pytest.mark.filterwarnings("ignore::pretab.exceptions.LeakageWarning")
-def test_tutorial_code_runs(tutorial):
+def test_tutorial_code_runs(tutorial, section):
     namespace: dict = {"__name__": "__main__"}
-    for start_line, source in _code_blocks(tutorial):
+    blocks = _code_blocks(tutorial, section)
+    assert blocks, f"No Python examples found in {tutorial.name}: {section}"
+    for start_line, source in blocks:
         try:
             exec(compile(source, str(tutorial), "exec"), namespace)  # noqa: S102
         except Exception as exc:

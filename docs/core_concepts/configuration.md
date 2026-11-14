@@ -93,6 +93,8 @@ pipe.fit_transform(X, y)   # a polars.DataFrame with columns num_age, num_income
 
 Columns rarely want identical treatment. The `feature_preprocessing` dict assigns a strategy
 to individual columns and takes precedence over the global defaults for those columns.
+Each value can be a method string, a mapping with a `method` key, or a
+{class}`~pretab.RepresentationConfig`. You can mix these forms in the same dict.
 
 ```python
 pre = Preprocessor(
@@ -140,6 +142,124 @@ Don't infer the resolved method per column from the constructor arguments alone.
 `get_feature_info(verbose=True)` after `fit` for the definitive per-column table, or set
 `verbose=2` (or higher) on the `Preprocessor` to log the same table at fit time. See
 [Fit-time logging](outputs_and_inspection.md#fit-time-logging).
+```
+
+## Structured per-feature configuration
+
+These three examples use the same training data and a scikit-learn regression pipeline.
+`income` is deliberately left out of each override map, so it uses the global `"none"`
+method and contributes one column.
+
+```python
+import json
+
+import numpy as np
+import pandas as pd
+from sklearn.base import clone
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import Pipeline
+
+from pretab import Preprocessor, RepresentationConfig
+
+frame = pd.DataFrame({
+    "age": np.linspace(18.0, 70.0, 40),
+    "income": np.linspace(25000.0, 90000.0, 40),
+    "city": ["Oslo", "Lima"] * 20,
+})
+target = 0.4 * frame["age"] + 0.0002 * frame["income"]
+common = {
+    "numerical_method": "none",
+    "output_dim": 7,
+    "target_aware": False,
+    "placement_strategy": "uniform",
+    "scaling": "none",
+    "random_state": 17,
+}
+```
+
+### Method strings
+
+Strings select the representation and retain the applicable constructor-wide controls.
+Here `"RBF"` is an alias for `"rbf"`, and `"OHE"` selects one-hot encoding.
+
+```python
+legacy = Preprocessor(
+    **common,
+    feature_preprocessing={"age": "RBF", "city": "OHE"},
+)
+legacy_model = Pipeline([("pre", legacy), ("model", Ridge())]).fit(frame, target)
+
+assert legacy.output_dims_ == {"age": 7, "income": 1, "city": 2}
+assert legacy.transform(frame, return_array=True).shape == (40, 10)
+assert legacy_model.predict(frame).shape == (40,)
+```
+
+### Mappings with local settings
+
+A mapping adds controls for that feature. `age` requests three RBF outputs and a local
+`gamma`; it does not change `income` or the two learned city categories.
+
+```python
+mapped = Preprocessor(
+    **common,
+    feature_preprocessing={
+        "age": {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.5}},
+        "city": "one-hot",
+    },
+)
+mapped_model = Pipeline([("pre", mapped), ("model", Ridge())]).fit(frame, target)
+report = mapped.get_resolved_config()
+
+assert report["output_dim"] == 7
+assert report["feature_preprocessing"]["age"]["output_dim"] == 3
+assert report["feature_preprocessing"]["age"]["params"]["gamma"] == 0.5
+assert mapped.output_dims_ == {"age": 3, "income": 1, "city": 2}
+assert mapped.transform(frame, return_array=True).shape == (40, 6)
+assert mapped_model.predict(frame).shape == (40,)
+```
+
+Family parameters can also appear beside `method`, for example
+`{"method": "rbf", "gamma": 0.5}`. Normalization collects them under `params`.
+Do not supply the same parameter in both places. Common controls such as `output_dim`
+belong at the top level, not inside `params`.
+
+### Immutable values and JSON
+
+`RepresentationConfig` detaches its nested inputs immediately. Its dictionary form can be
+stored as JSON, reconstructed, and used with `clone` and `Pipeline`.
+
+```python
+params = {"gamma": 0.5}
+value = RepresentationConfig(method="RBF", output_dim=3, params=params)
+params["gamma"] = 9.0
+assert value.params["gamma"] == 0.5
+
+payload = json.loads(json.dumps(value.to_dict(), allow_nan=False))
+restored = RepresentationConfig.from_dict(payload)
+assert restored == value
+
+typed = Preprocessor(
+    **common,
+    feature_preprocessing={"age": restored, "city": {"method": "OHE"}},
+)
+fresh = clone(typed)
+assert fresh.get_params() == typed.get_params()
+typed_model = Pipeline([("pre", fresh), ("model", Ridge())]).fit(frame, target)
+
+assert fresh.output_dims_ == {"age": 3, "income": 1, "city": 2}
+np.testing.assert_array_equal(
+    fresh.transform(frame, return_array=True),
+    mapped.transform(frame, return_array=True),
+)
+assert typed_model.predict(frame).shape == (40,)
+```
+
+```{important}
+Raw mappings passed to `Preprocessor` remain live constructor parameters, as required by
+scikit-learn. Edits before fitting affect that fit. Normalization and fitting detach the
+representation settings; editing a raw mapping afterward does not refit the learned
+transformers. Use `RepresentationConfig` when the request itself should be immutable from
+construction onward. Neither form changes an already fitted graph without another fit.
 ```
 
 ## Presets
@@ -199,17 +319,27 @@ the preset's value for that knob, including `numerical_method` itself, for examp
 
 ## Reading the resolved configuration
 
-Because global defaults, per-feature overrides, and presets interact, PreTab lets you read
-back exactly what will be used. `get_resolved_config()` returns the fully resolved settings
-as a plain dict.
+`get_resolved_config()` returns a detached plain dict for the current request. Outer keys
+retain the preset-expanded constructor settings. Each declared `feature_preprocessing`
+entry becomes a mapping with its canonical method, applicable inherited controls, local
+settings, and `params`. Omitted, inapplicable controls are not added.
 
 ```python
 pre = Preprocessor(preset="expanded", feature_preprocessing={"age": "bspline"})
 pre.get_resolved_config()
 ```
 
-This is the authoritative answer to "what did my configuration actually become", and it is
-useful in tests and reproducible experiments.
+You can edit the returned dict, including nested containers, without changing the estimator.
+The report includes only declared overrides, not a row for every input column. It can be read
+before fitting; actual column existence and compatibility with detected feature kinds are
+checked at fit time.
+
+```{note}
+The report stays a current-request view after fitting or freezing. It is not a record of the
+last fit, learned knots, or realized output widths. Changing a live raw request can change
+the report while the fitted transformer continues to produce its original output. Use
+`output_dims_`, `total_output_dim_`, and `get_feature_info()` for fitted results.
+```
 
 ## How the layers combine
 
@@ -220,13 +350,38 @@ The resolution order is deterministic. Later layers win.
 3. Explicit constructor arguments (`numerical_method`, `output_dim`, and so on).
 4. Per-column `feature_preprocessing` entries, for the columns they name.
 
+Within a structured entry, inheritance is per field, not an all-or-nothing replacement.
+
+| Setting             | Effective choice                                                                                                                                     |
+| :------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method              | The local `method`, otherwise the global method for the detected kind.                                                                               |
+| Common controls     | Explicit local values win. Omitted values inherit constructor settings only when the method supports them; other defaults belong to the transformer. |
+| Family `params`     | Local parameters win over applicable inherited `degree`, `task`, or an explicit `random_state`. Other family defaults are left to the transformer.   |
+| Fixed local width   | An explicit local `output_dim` disables inherited adaptive sizing unless that entry also explicitly sets `adaptive=True`.                            |
+| Adaptive bounds     | Omitted bounds inherit only when adaptive sizing is active. Explicit bounds with fixed sizing are rejected; unsupported controls are not forwarded.  |
+| Run-wide processing | Imputation, scaling, missing indicators, and output formatting remain constructor-wide settings, not representation parameters.                      |
+
+Omission is different from an explicit value. For example, a local
+`params={"random_state": None}` overrides an inherited seed where the method accepts it.
+Passing `None` is valid only for options that accept it; it does not mean "inherit".
+
 ```{warning}
-Configuration is validated at `fit` time, not silently coerced. An invalid combination, such
-as a method that requires the target used with `target_aware=False`, or a `task` other than
-`"regression"` / `"classification"`, raises a typed error.
-This is intentional: it surfaces mistakes early rather than producing a quietly wrong
-representation.
+Value construction validates portable data and field types. `get_resolved_config()` and
+`fit` also validate method names, supported options, and target/placement combinations.
+Unknown keys and invalid methods raise typed errors with the feature's configuration path.
+A local override does not make an invalid constructor-wide task or placement combination
+valid. Actual input-column and feature-kind checks still require `fit`.
 ```
+
+## Using existing string configurations
+
+No syntax change is required for supported legacy configuration. Existing method strings,
+aliases, global parameters, and per-column string overrides remain supported. Adopt mappings
+or typed values only where you need local settings; other entries can stay strings.
+
+Equivalent fitted outputs do not imply that differently written requests have identical
+fingerprints. Keep the requested configuration and dependency versions with your experiment;
+see [Reproducibility](reproducibility.md) for fitted artifacts and upgrade precautions.
 
 ## Key parameters at a glance
 

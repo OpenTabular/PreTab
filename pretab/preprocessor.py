@@ -176,10 +176,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         language embeddings). Pass ``None`` (resolved to ``"none"``) to leave categorical
         columns unchanged.
     feature_preprocessing : dict, optional
-        Mapping of individual column names to a method, overriding the global ``numerical_method`` /
-        ``categorical_method`` for those columns only, e.g.
-        ``{"age": "cubicspline", "city": "pretrained"}``. Columns absent from the dict fall back to
-        the global defaults.
+        Mapping of column names to method strings, mappings with a ``method`` key, or
+        :class:`~pretab.RepresentationConfig` values. Forms may be mixed, for example
+        ``{"age": {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.5}}, "city": "one-hot"}``.
+        Local settings override applicable constructor-wide controls; omitted columns use the
+        global methods. A local explicit width disables inherited adaptive sizing unless
+        local ``adaptive=True`` also opts in. Imputation, scaling, and output formatting remain
+        run-wide. Raw mappings stay live until normalization or fit; typed values detach on
+        construction. See :meth:`get_resolved_config` for detached effective declarations,
+        not learned state or realized widths.
     output_dim : int, default=7
         The single width knob shared by every numerical method: the number of non-bias output
         columns produced per input feature (bins for PLE/binning, centers for the feature maps,
