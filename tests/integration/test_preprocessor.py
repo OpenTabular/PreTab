@@ -6,9 +6,12 @@ import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
+from pretab import RepresentationConfig
 from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
 
@@ -224,6 +227,120 @@ def test_clone_preserves_every_param():
     cloned = clone(pre)
     assert isinstance(cloned, Preprocessor)
     assert cloned.get_params() == pre.get_params()
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("fitted", [False, True], ids=["unfitted", "fitted"])
+def test_structured_feature_params_survive_fit_and_clone(sample_data, typed, fitted):
+    frame, target = sample_data
+    frame = frame[["num1"]]
+    settings = {"method": "RBF", "output_dim": 3, "params": {"gamma": 0.5}}
+    representation = RepresentationConfig.from_dict(settings) if typed else settings
+    overrides = {"num1": representation}
+    processor = Preprocessor(
+        numerical_method="none",
+        feature_preprocessing=overrides,
+        output_dim=9,
+        target_aware=False,
+        placement_strategy="quantile",
+        scaling="none",
+    )
+    if fitted:
+        processor.fit(frame, target)
+    for deep in (False, True):
+        assert processor.get_params(deep=deep)["feature_preprocessing"] is overrides
+        assert overrides["num1"] is representation
+
+    fresh = clone(processor)
+    assert isinstance(fresh, Preprocessor)
+    assert fresh.get_params() == processor.get_params()
+    assert isinstance(fresh.feature_preprocessing, dict)
+    assert fresh.feature_preprocessing is not overrides
+    assert fresh.feature_preprocessing["num1"] == representation
+    assert fresh.lifecycle_state_ == "UNFITTED"
+    if not typed:
+        assert fresh.feature_preprocessing["num1"] is not representation
+        settings["params"]["gamma"] = 2.0
+        assert fresh.feature_preprocessing["num1"]["params"]["gamma"] == 0.5
+
+    fresh.fit(frame, target)
+    basis = fresh.column_transformer_.named_transformers_["num_num1"].named_steps["rbf"]
+    assert basis.gamma == 0.5
+    transformed = fresh.transform(frame, return_array=True)
+    assert isinstance(transformed, np.ndarray)
+    assert transformed.shape == (len(frame), 3)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("fitted", [False, True], ids=["unfitted", "fitted"])
+def test_pipeline_set_params_replaces_structured_feature_settings(sample_data, typed, fitted):
+    frame, target = sample_data
+    frame = frame[["num1"]]
+    processor = Preprocessor(numerical_method="none", target_aware=False, placement_strategy="quantile", scaling="none")
+    pipeline = Pipeline([("pre", processor)])
+    if fitted:
+        pipeline.fit(frame, target)
+    settings = {"method": "rbf", "output_dim": 5, "params": {"gamma": 0.75}}
+    overrides = {"num1": RepresentationConfig.from_dict(settings) if typed else settings}
+
+    assert pipeline.set_params(pre__feature_preprocessing=overrides) is pipeline
+    assert processor.get_params()["feature_preprocessing"] is overrides
+    if fitted:
+        assert pipeline.transform(frame).shape == (len(frame), 1)
+
+    pipeline.fit(frame, target)
+    basis = processor.column_transformer_.named_transformers_["num_num1"].named_steps["rbf"]
+    assert basis.gamma == 0.75
+    assert pipeline.transform(frame).shape == (len(frame), 5)
+    assert processor.get_params()["feature_preprocessing"] is overrides
+
+
+@pytest.mark.parametrize("n_jobs", [1, 2], ids=["serial", "processes"])
+def test_grid_search_consumes_structured_feature_settings(sample_data, n_jobs):
+    frame, target = sample_data
+    frame = frame[["num1"]]
+    candidates = [
+        {"num1": {"method": "RBF", "output_dim": 2, "params": {"gamma": 0.25}}},
+        {"num1": RepresentationConfig(method="rbf", output_dim=5, params={"gamma": 0.75})},
+    ]
+    processor = Preprocessor(
+        numerical_method="none", output_dim=9, target_aware=False, placement_strategy="quantile", scaling="none"
+    )
+
+    def fitted_width(estimator, frame, target):
+        fitted = estimator.named_steps["pre"]
+        requested = fitted.feature_preprocessing["num1"]
+        settings = requested.to_dict() if isinstance(requested, RepresentationConfig) else requested
+        basis = fitted.column_transformer_.named_transformers_["num_num1"].named_steps["rbf"]
+        transformed = fitted.transform(frame, return_array=True)
+        assert transformed.shape[1] == settings["output_dim"]
+        assert basis.gamma == settings["params"]["gamma"]
+        assert estimator.named_steps["model"].n_features_in_ == settings["output_dim"]
+        assert np.isfinite(estimator.predict(frame)).all()
+        return float(transformed.shape[1])
+
+    search = GridSearchCV(
+        Pipeline([("pre", processor), ("model", Ridge())]),
+        {"pre__feature_preprocessing": candidates},
+        scoring=fitted_width,
+        cv=2,
+        n_jobs=n_jobs,
+    )
+    search.set_params(error_score="raise")
+    search.fit(frame, target)
+
+    np.testing.assert_array_equal(search.cv_results_["mean_test_score"], [2.0, 5.0])
+    assert search.best_params_["pre__feature_preprocessing"] == candidates[1]
+    assert search.best_estimator_.named_steps["pre"].transform(frame, return_array=True).shape == (len(frame), 5)
+    assert processor.lifecycle_state_ == "UNFITTED"
+    assert processor.feature_preprocessing is None
+    assert candidates[0]["num1"] == {"method": "RBF", "output_dim": 2, "params": {"gamma": 0.25}}
+    assert candidates[1]["num1"].to_dict() == {
+        "method": "rbf",
+        "output_dim": 5,
+        "params": {"gamma": 0.75},
+        "name": None,
+    }
 
 
 def test_set_params_roundtrip():

@@ -426,7 +426,13 @@ def build_column_transformer(
     for (kind, feature), name in zip(blocks, _step_names(blocks), strict=True):
         is_numerical = kind == "num"
         method = config.method_for(feature, is_numerical=is_numerical)
-        pipeline = create_transformer(method, is_numerical=is_numerical, config=config)
+        if isinstance(config.feature_preprocessing.get(feature, method), str):
+            pipeline = create_transformer(method, is_numerical=is_numerical, config=config)
+        else:
+            representation = config.representation_for(feature, is_numerical=is_numerical)
+            pipeline = create_transformer(
+                method, is_numerical=is_numerical, config=config, representation=representation
+            )
         transformers.append((name, pipeline, [str(feature)]))
     return ColumnTransformer(
         transformers=transformers,

@@ -12,7 +12,7 @@ import pytest
 from sklearn import config_context
 from sklearn.pipeline import Pipeline
 
-from pretab import FrozenRepresentationError, Preprocessor
+from pretab import FrozenRepresentationError, Preprocessor, RepresentationConfig
 
 
 @pytest.fixture
@@ -56,6 +56,31 @@ def test_set_params_allowed_before_freeze(frame, target):
     p = _make()
     p.set_params(output_dim=9)
     assert p.output_dim == 9
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("via_pipeline", [False, True], ids=["direct", "pipeline"])
+def test_frozen_structured_feature_settings_cannot_be_replaced(frame, target, typed, via_pipeline):
+    settings = {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.5}}
+    overrides = {"a": RepresentationConfig.from_dict(settings) if typed else settings}
+    processor = _make().set_params(feature_preprocessing=overrides).fit(frame, target).freeze()
+    fingerprint = processor.fingerprint_
+    original = processor.transform(frame, return_array=True)
+    replacement = {"a": RepresentationConfig(method="rbf", output_dim=5)}
+    caller = Pipeline([("pre", processor)]) if via_pipeline else processor
+    parameters = {"pre__feature_preprocessing" if via_pipeline else "feature_preprocessing": replacement}
+
+    with pytest.raises(FrozenRepresentationError, match="frozen"):
+        caller.set_params(**parameters)
+
+    assert processor.get_params()["feature_preprocessing"] is overrides
+    assert processor.fingerprint_ == fingerprint
+    assert processor.set_params() is processor
+    np.testing.assert_array_equal(processor.transform(frame, return_array=True), original)
+    fresh = processor.clone_unfitted()
+    assert fresh.is_frozen() is False
+    assert fresh.set_params(feature_preprocessing=replacement) is fresh
+    assert fresh.get_params()["feature_preprocessing"] is replacement
 
 
 @pytest.mark.parametrize("method", ["fit", "fit_transform"])

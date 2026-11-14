@@ -198,6 +198,28 @@ def test_build_column_transformer_fits_and_transforms(make_config, sample_frame)
     assert out.shape[0] == len(sample_frame)
 
 
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+def test_preprocessor_fits_structured_representation(typed):
+    settings = {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.5}}
+    representation = RepresentationConfig.from_dict(settings) if typed else settings
+    frame = pd.DataFrame({"age": np.linspace(0, 1, 30)})
+    processor = Preprocessor(
+        numerical_method="none",
+        feature_preprocessing={"age": representation},
+        output_dim=9,
+        target_aware=False,
+        placement_strategy="quantile",
+        scaling="none",
+    ).fit(frame)
+
+    basis = processor.column_transformer_.named_transformers_["num_age"].named_steps["rbf"]
+    assert basis.output_dim == 3
+    assert basis.gamma == 0.5
+    transformed = processor.transform(frame, return_array=True)
+    assert isinstance(transformed, np.ndarray)
+    assert transformed.shape == (30, 3)
+
+
 @pytest.mark.parametrize("adaptive", [False, True])
 @pytest.mark.parametrize("random_state", [None, 17])
 @pytest.mark.parametrize(
