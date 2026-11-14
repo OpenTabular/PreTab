@@ -1,10 +1,12 @@
 """Unit tests for :class:`pretab.compose.config.PreprocessorConfig`."""
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import pytest
 
-from pretab import Preprocessor
+from pretab import Preprocessor, RepresentationConfig
+from pretab.compose.registry import TRANSFORMER_REGISTRY
+from pretab.core.parameters import UNSET
 from pretab.exceptions import InvalidParamError
 from pretab.preprocessor import PRESETS
 
@@ -177,3 +179,242 @@ def test_method_for_resolves_in_the_requested_namespace(make_config):
 def test_seed_kwargs_reflects_random_state(make_config):
     assert make_config(random_state=None).seed_kwargs == {}
     assert make_config(random_state=42).seed_kwargs == {"random_state": 42}
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_structured_overrides_detach_and_keep_string_method_lookup(make_config, typed):
+    data = {"method": "RBF", "output_dim": 3, "gamma": 0.5}
+    value = RepresentationConfig.from_dict(data) if typed else data
+    config = make_config(feature_preprocessing={"age": value}, adaptive=True)
+    data["output_dim"] = 9
+    requested = config.feature_preprocessing["age"]
+    resolved = config.representation_for("age", is_numerical=True)
+
+    assert requested == RepresentationConfig(method="RBF", output_dim=3, params={"gamma": 0.5})
+    assert config.method_for("age", is_numerical=True) == "rbf"
+    assert resolved.output_dim == 3
+    assert resolved.adaptive is False
+    assert resolved.min_output_dim is UNSET
+    assert resolved.max_output_dim is UNSET
+    assert resolved.params == {"gamma": 0.5, "task": "regression"}
+    assert requested.target_aware is UNSET
+
+
+@pytest.mark.parametrize("local", [{"adaptive": True}, {}])
+def test_representation_resolution_inherits_applicable_defaults(make_config, local):
+    config = make_config(
+        feature_preprocessing={"age": {"method": "cubic", **local}},
+        output_dim=11,
+        degree=2,
+        adaptive=True,
+        min_output_dim=3,
+        max_output_dim=15,
+        random_state=17,
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    assert resolved == RepresentationConfig(
+        method="cubicspline",
+        output_dim=11,
+        target_aware=False,
+        placement_strategy="uniform",
+        adaptive=True,
+        min_output_dim=3,
+        max_output_dim=15,
+        params={"degree": 2, "task": "regression", "random_state": 17},
+    )
+
+
+def test_representation_resolution_keeps_explicit_adaptive_width_and_bounds(make_config):
+    config = make_config(
+        feature_preprocessing={
+            "age": {"method": "rbf", "output_dim": 3, "adaptive": True, "min_output_dim": None, "max_output_dim": 12}
+        }
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    assert (resolved.output_dim, resolved.adaptive, resolved.min_output_dim, resolved.max_output_dim) == (
+        3,
+        True,
+        None,
+        12,
+    )
+
+
+@pytest.mark.parametrize("method", ["ohe", "ordinal", "identity"])
+def test_representation_resolution_filters_unrelated_constructor_defaults(make_config, method):
+    config = make_config(
+        feature_preprocessing={"city": {"method": method}}, target_aware=True, placement_strategy="cart", adaptive=True
+    )
+    resolved = config.representation_for("city", is_numerical=False)
+    assert resolved == RepresentationConfig(method=config.method_for("city", is_numerical=False))
+
+
+def test_representation_resolution_rejects_effective_placement_conflict(make_config):
+    config = make_config(
+        target_aware=True,
+        placement_strategy="cart",
+        feature_preprocessing={"age": {"method": "rbf", "target_aware": False}},
+    )
+    with pytest.raises(InvalidParamError, match=r"feature_preprocessing\['age'\].placement_strategy"):
+        config.representation_for("age", is_numerical=True)
+
+
+def test_representation_resolution_rejects_explicit_bounds_in_fixed_mode(make_config):
+    config = make_config(feature_preprocessing={"age": {"method": "rbf", "min_output_dim": 2}})
+    with pytest.raises(InvalidParamError, match=r"feature_preprocessing\['age'\].min_output_dim"):
+        config.representation_for("age", is_numerical=True)
+
+
+@pytest.mark.parametrize("form", ["string", "mapping", "value"])
+@pytest.mark.parametrize(
+    ("method", "is_numerical"),
+    [("RBF", True), ("cubic", True), ("b-spline", True), ("OHE", False), ("identity", False)],
+)
+def test_representation_resolution_forms_are_equivalent(make_config, form, method, is_numerical):
+    requested = {"string": method, "mapping": {"method": method}, "value": RepresentationConfig(method=method)}[form]
+    config = make_config(feature_preprocessing={"feature": requested})
+    expected = make_config(feature_preprocessing={"feature": method}).representation_for(
+        "feature", is_numerical=is_numerical
+    )
+    assert config.representation_for("feature", is_numerical=is_numerical) == expected
+    assert config.method_for("feature", is_numerical=is_numerical) == expected.method
+
+
+def test_normalized_feature_requests_snapshot_nested_values_at_the_boundary(make_config, monkeypatch):
+    spec = TRANSFORMER_REGISTRY["rbf"]
+    monkeypatch.setitem(TRANSFORMER_REGISTRY, "rbf", replace(spec, allowed_args=(*spec.allowed_args, "options")))
+    nested = {"values": [1, {"weight": 0.5}]}
+    raw = {"age": {"method": "rbf", "params": {"options": nested}}}
+    preprocessor = Preprocessor(feature_preprocessing=raw)
+    assert preprocessor.get_params(deep=False)["feature_preprocessing"] is raw
+    nested["values"].append(2)
+    config = make_config(feature_preprocessing=raw)
+    nested["values"].append(3)
+    raw["age"]["params"]["options"] = {"changed": True}
+
+    requested = config.feature_preprocessing["age"]
+    assert requested.params["options"]["values"] == (1, {"weight": 0.5}, 2)
+    resolved = config.representation_for("age", is_numerical=True)
+    view = resolved.to_dict()
+    view["params"]["options"]["values"].append(4)
+    assert config.representation_for("age", is_numerical=True) == resolved
+    assert requested.params["options"]["values"] == (1, {"weight": 0.5}, 2)
+
+
+@pytest.mark.parametrize(
+    ("data", "location"),
+    [
+        ({}, "method"),
+        ({"method": "rbf", "output_dim": True}, "output_dim"),
+        ({"method": "rbf", "gamma": 0.5, "params": {"gamma": 0.5}}, "gamma"),
+        ({"method": "rbf", "params": {"output_dim": 3}}, "params"),
+        (None, "value"),
+    ],
+)
+def test_structured_override_shape_errors_keep_the_feature_path(make_config, data, location):
+    with pytest.raises(InvalidParamError) as failure:
+        make_config(feature_preprocessing={"age": data})
+    assert "feature_preprocessing['age']" in str(failure.value)
+    assert location in str(failure.value)
+    with pytest.raises(InvalidParamError) as standalone:
+        RepresentationConfig(method="")
+    assert str(standalone.value).startswith("RepresentationConfig.method")
+
+
+def test_structured_override_namespace_validation_waits_for_feature_detection(make_config):
+    config = make_config(feature_preprocessing={"city": {"method": "ohe"}})
+    assert config.method_for("city", is_numerical=False) == "one-hot"
+    with pytest.raises(InvalidParamError, match=r"feature_preprocessing\['city'\].method"):
+        config.method_for("city", is_numerical=True)
+
+
+@pytest.mark.parametrize("method", ["not_a_method", "ordinal"])
+def test_legacy_method_lookup_still_defers_invalid_names(make_config, method):
+    config = make_config(feature_preprocessing={"age": method})
+    assert config.method_for("age", is_numerical=True) == method
+
+
+def test_representation_resolution_uses_the_global_method_without_an_override(make_config):
+    config = make_config(numerical_method="cubic", degree=2)
+    resolved = config.representation_for("age", is_numerical=True)
+    assert resolved.method == "cubicspline"
+    assert resolved.output_dim == 7
+    assert resolved.params == {"degree": 2, "task": "regression"}
+    assert resolved.adaptive is False
+    assert resolved.min_output_dim is UNSET
+    assert resolved.max_output_dim is UNSET
+
+
+@pytest.mark.parametrize("random_state", [None, 0, 17])
+def test_representation_resolution_preserves_seed_forwarding(make_config, random_state):
+    config = make_config(numerical_method="rbf", random_state=random_state)
+    resolved = config.representation_for("age", is_numerical=True)
+    assert ("random_state" in resolved.params) == (random_state is not None)
+    if random_state is not None:
+        assert resolved.params["random_state"] == random_state
+
+
+def test_explicit_family_options_override_constructor_controls_independently(make_config):
+    config = make_config(
+        degree=3,
+        task="regression",
+        random_state=17,
+        feature_preprocessing={"age": {"method": "cubic", "degree": 2, "task": "classification", "random_state": None}},
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    assert resolved.params == {"degree": 2, "task": "classification", "random_state": None}
+    assert config.task == "regression"
+    assert config.random_state == 17
+
+
+@pytest.mark.parametrize("local", [{"output_dim": 3}, {"adaptive": False}, {"output_dim": 3, "adaptive": False}])
+def test_fixed_local_requests_ignore_inherited_bounds(make_config, local):
+    config = make_config(
+        adaptive=True,
+        min_output_dim=8,
+        max_output_dim=5,
+        feature_preprocessing={"age": {"method": "rbf", **local}},
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    assert resolved.adaptive is False
+    assert resolved.min_output_dim is UNSET
+    assert resolved.max_output_dim is UNSET
+
+
+@pytest.mark.parametrize("adaptive", [False, True])
+def test_local_bounds_alone_do_not_opt_into_adaptive_resolution(make_config, adaptive):
+    config = make_config(adaptive=adaptive, feature_preprocessing={"age": {"method": "rbf", "max_output_dim": 12}})
+    if adaptive:
+        assert config.representation_for("age", is_numerical=True).max_output_dim == 12
+    else:
+        with pytest.raises(InvalidParamError, match=r"feature_preprocessing\['age'\].max_output_dim"):
+            config.representation_for("age", is_numerical=True)
+
+
+def test_active_inherited_bound_relationships_are_validated(make_config):
+    config = make_config(
+        adaptive=True, min_output_dim=8, max_output_dim=5, feature_preprocessing={"age": {"method": "rbf"}}
+    )
+    with pytest.raises(InvalidParamError, match=r"feature_preprocessing\['age'\].max_output_dim"):
+        config.representation_for("age", is_numerical=True)
+
+
+def test_explicit_unsupervised_pair_overrides_supervised_constructor_settings(make_config):
+    config = make_config(
+        target_aware=True,
+        placement_strategy="cart",
+        feature_preprocessing={"age": {"method": "rbf", "target_aware": False, "placement_strategy": "quantile"}},
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    assert resolved.target_aware is False
+    assert resolved.placement_strategy == "quantile"
+
+
+def test_fixed_placement_family_keeps_existing_factory_default_filtering(make_config):
+    config = make_config(
+        target_aware=True, placement_strategy="cart", feature_preprocessing={"age": {"method": "pspline"}}
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    assert resolved.output_dim == 7
+    assert resolved.params == {"degree": 3}
+    assert resolved.placement_strategy is UNSET
+    assert resolved.target_aware is UNSET

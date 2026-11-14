@@ -8,10 +8,9 @@ validates the global ``target_aware`` / ``placement_strategy`` contract and the
 the estimator (as scikit-learn requires); this object is the internal, normalized
 counterpart the composition layer consumes.
 
-Per-column overrides in ``feature_preprocessing`` are kept verbatim because the
-namespace they resolve in (numerical vs categorical) depends on the column type,
-which is only known after feature detection; :meth:`PreprocessorConfig.method_for`
-resolves them in the correct namespace at build time.
+Structured per-column overrides detach at normalization. Their method namespace
+(numerical vs categorical) depends on feature detection; ``method_for`` keeps
+returning a string, while ``representation_for`` resolves applicable settings.
 """
 
 from __future__ import annotations
@@ -270,6 +269,16 @@ def _validate_representation_capabilities(
         _check_optional_dependency("lightgbm", f"{path}.placement_strategy = 'lightgbm'")
 
 
+def _representation_request(value: str | Mapping[str, Any] | RepresentationConfig) -> RepresentationConfig:
+    if isinstance(value, RepresentationConfig):
+        return value
+    if isinstance(value, str):
+        return RepresentationConfig(method=value)
+    if isinstance(value, Mapping):
+        return RepresentationConfig.from_dict(value)
+    raise _representation_error("value", value, "must be a string, mapping, or RepresentationConfig")
+
+
 def _normalize_representation_config(
     value: str | Mapping[str, Any] | RepresentationConfig,
     *,
@@ -286,14 +295,7 @@ def _normalize_representation_config(
     """
     token = _REPRESENTATION_PATH.set(path)
     try:
-        if isinstance(value, RepresentationConfig):
-            config = value
-        elif isinstance(value, str):
-            config = RepresentationConfig(method=value)
-        elif isinstance(value, Mapping):
-            config = RepresentationConfig.from_dict(value)
-        else:
-            raise _representation_error("value", value, "must be a string, mapping, or RepresentationConfig")
+        config = _representation_request(value)
         canonical = NUMERICAL_METHODS if is_numerical else CATEGORICAL_METHODS
         aliases = NUMERICAL_ALIASES if is_numerical else CATEGORICAL_ALIASES
         method = resolve_method(config.method, canonical, aliases)
@@ -332,8 +334,9 @@ class PreprocessorConfig:
     """Frozen, normalized configuration derived from Preprocessor parameters.
 
     Built via :meth:`from_params`, which normalizes the global method names and
-    validates the placement contract and the task. All other knobs are carried
-    through as-is for the factory and orchestration layers.
+    validates the placement contract and the task. Structured overrides detach
+    into immutable requests; their feature-kind resolution is deferred until
+    ``method_for`` or ``representation_for`` is called.
     """
 
     numerical_method: str
@@ -402,10 +405,19 @@ class PreprocessorConfig:
                 "must be None or one of 'error', 'propagate', 'impute', 'impute_with_indicator', 'separate_state'",
                 valid=set(MISSING_POLICIES),
             )
+        overrides = dict(feature_preprocessing or {})
+        for feature, value in overrides.items():
+            if isinstance(value, str):
+                continue
+            token = _REPRESENTATION_PATH.set(f"feature_preprocessing[{feature!r}]")
+            try:
+                overrides[feature] = _representation_request(value)
+            finally:
+                _REPRESENTATION_PATH.reset(token)
         return cls(
             numerical_method=_normalize_method(numerical_method, NUMERICAL_METHODS, NUMERICAL_ALIASES),
             categorical_method=_normalize_method(categorical_method, CATEGORICAL_METHODS, CATEGORICAL_ALIASES),
-            feature_preprocessing=dict(feature_preprocessing or {}),
+            feature_preprocessing=overrides,
             output_dim=output_dim,
             degree=degree,
             target_aware=target_aware,
@@ -444,7 +456,45 @@ class PreprocessorConfig:
         """
         default = self.numerical_method if is_numerical else self.categorical_method
         raw = self.feature_preprocessing.get(feature, default)
+        if isinstance(raw, (Mapping, RepresentationConfig)):
+            return _normalize_representation_config(
+                raw, is_numerical=is_numerical, path=f"feature_preprocessing[{feature!r}]"
+            ).method
         return self.resolve_numerical(raw) if is_numerical else self.resolve_categorical(raw)
+
+    def representation_for(self, feature, *, is_numerical: bool) -> RepresentationConfig:
+        """Resolve one feature request over applicable constructor-wide controls.
+
+        Method defaults remain omitted when the existing factory would not
+        forward a constructor-wide value. Inherited inactive adaptive bounds
+        are dropped, but contradictory explicit local bounds are rejected.
+        """
+        default = self.numerical_method if is_numerical else self.categorical_method
+        raw = self.feature_preprocessing.get(feature, default)
+        path = f"feature_preprocessing[{feature!r}]"
+        requested = _normalize_representation_config(raw, is_numerical=is_numerical, path=path)
+        spec = TRANSFORMER_REGISTRY[requested.method]
+        inherited = {}
+        if "output_dim" in spec.allowed_args or spec.supports_adaptive_resolution:
+            inherited["output_dim"] = self.output_dim
+        if spec.target_usage in ("optional", "required"):
+            inherited["target_aware"] = self.target_aware
+        if spec.placement_strategies and (spec.target_usage != "forbidden" or not self.target_aware):
+            inherited["placement_strategy"] = self.placement_strategy
+        if spec.supports_adaptive_resolution:
+            adaptive = self.adaptive if requested.adaptive is UNSET else requested.adaptive
+            if requested.output_dim is not UNSET and requested.adaptive is UNSET:
+                adaptive = False
+            inherited["adaptive"] = adaptive
+            if adaptive:
+                inherited["min_output_dim"] = self.min_output_dim
+                inherited["max_output_dim"] = self.max_output_dim
+        shared = {"degree": self.degree, "task": self.task, **self.seed_kwargs}
+        params = {key: value for key, value in shared.items() if key in spec.allowed_args}
+        params.update(requested.params)
+        settings = {key: value for key, value in inherited.items() if getattr(requested, key) is UNSET}
+        resolved = replace(requested, **settings, params=params)
+        return _normalize_representation_config(resolved, is_numerical=is_numerical, path=path)
 
     @property
     def seed_kwargs(self) -> dict:
