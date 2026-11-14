@@ -4,7 +4,7 @@ import copy
 import json
 import pickle
 from collections import UserDict
-from dataclasses import FrozenInstanceError, is_dataclass
+from dataclasses import FrozenInstanceError, is_dataclass, replace
 from types import MappingProxyType
 from typing import Any, cast
 
@@ -13,8 +13,16 @@ from sklearn.base import clone
 
 from pretab import Preprocessor
 from pretab.compose.config import RepresentationConfig, _normalize_representation_config
+from pretab.compose.factory import get_categorical_transformer_steps, get_numerical_transformer_steps
+from pretab.compose.registry import TRANSFORMER_REGISTRY
 from pretab.core.parameters import UNSET
 from pretab.exceptions import InvalidParamError
+
+
+@pytest.fixture
+def nested_registry_option(monkeypatch):
+    spec = TRANSFORMER_REGISTRY["rbf"]
+    monkeypatch.setitem(TRANSFORMER_REGISTRY, "rbf", replace(spec, allowed_args=(*spec.allowed_args, "options")))
 
 
 def test_omitted_fields_remain_unset():
@@ -201,8 +209,6 @@ def test_mapping_keys_and_required_values_are_validated():
         (" O_H E ", False, "one-hot"),
         ("ordinal", False, "int"),
         ("one_hot", False, "one-hot"),
-        ("ordinal", True, "ordinal"),
-        ("binning", False, "binning"),
         ("identity", True, "none"),
         ("identity", False, "none"),
     ],
@@ -218,7 +224,9 @@ def test_normalization_forms_are_equivalent_in_their_namespace(form, method, is_
 
 @pytest.mark.parametrize("form", ["mapping", "value"])
 @pytest.mark.parametrize(("method", "is_numerical", "canonical"), [("RBF", True, "rbf"), ("OHE", False, "one-hot")])
-def test_normalization_preserves_explicit_and_omitted_settings(form, method, is_numerical, canonical):
+def test_normalization_preserves_explicit_and_omitted_settings(
+    form, method, is_numerical, canonical, nested_registry_option
+):
     data = {
         "method": method,
         "output_dim": 3,
@@ -242,7 +250,7 @@ def test_normalization_preserves_explicit_and_omitted_settings(form, method, is_
 
 
 @pytest.mark.parametrize("mapping_type", [dict, UserDict, MappingProxyType])
-def test_normalization_detaches_mapping_at_the_boundary(mapping_type):
+def test_normalization_detaches_mapping_at_the_boundary(mapping_type, nested_registry_option):
     data = {"method": "RBF", "gamma": 0.5, "params": {"options": {"values": [1, 2]}}}
     requested = mapping_type(data)
     preprocessor = Preprocessor(feature_preprocessing={"age": requested})
@@ -280,3 +288,96 @@ def test_normalization_rejects_unsupported_input_types(value, is_numerical):
 def test_normalization_reuses_value_shape_validation(data):
     with pytest.raises(InvalidParamError):
         _normalize_representation_config(data, is_numerical=True)
+
+
+@pytest.mark.parametrize("form", ["shorthand", "params", "value"])
+@pytest.mark.parametrize(
+    ("key", "suggestion"),
+    [("output_dimm", "output_dim"), ("target_awre", "target_aware"), ("gama", "gamma"), ("not_a_real_option", None)],
+)
+def test_path_errors_for_unknown_keys_include_close_matches(form, key, suggestion):
+    data: dict[str, Any] = {"method": "RBF"}
+    if form == "shorthand":
+        data[key] = 3
+    else:
+        data["params"] = {key: 3}
+    requested = RepresentationConfig.from_dict(data) if form == "value" else data
+    path = "feature_preprocessing['age']"
+    with pytest.raises(InvalidParamError) as failure:
+        _normalize_representation_config(requested, is_numerical=True, path=path)
+
+    location = key if form == "shorthand" else f"params[{key!r}]"
+    message = str(failure.value)
+    assert f"{path}.{location} = 3 is invalid" in message
+    if suggestion is None:
+        assert "Did you mean" not in message
+    else:
+        assert "Did you mean" in message
+        assert repr(suggestion) in message.split("\nValid values:")[0]
+    assert data["method"] == "RBF"
+
+
+@pytest.mark.parametrize("form", ["string", "mapping", "value"])
+@pytest.mark.parametrize(
+    ("method", "is_numerical"),
+    [("ordinal", True), ("binning", False), ("not_a_method", True), ("not_a_method", False), ("rbf", False)],
+)
+def test_path_errors_for_methods_reuse_canonical_factory_choices(form, method, is_numerical):
+    requested = {"string": method, "mapping": {"method": method}, "value": RepresentationConfig(method=method)}[form]
+    path = "feature_preprocessing['feature']"
+    with pytest.raises(InvalidParamError) as failure:
+        _normalize_representation_config(requested, is_numerical=is_numerical, path=path)
+    factory = get_numerical_transformer_steps if is_numerical else get_categorical_transformer_steps
+    with pytest.raises(InvalidParamError) as existing:
+        factory(method, add_imputer=False)
+
+    assert f"{path}.method" in str(failure.value)
+    assert str(failure.value).split("\nConstraint:")[1] == str(existing.value).split("\nConstraint:")[1]
+
+
+@pytest.mark.parametrize(
+    ("data", "location"),
+    [
+        ({}, "method"),
+        ({"method": None}, "method"),
+        ({"method": "rbf", "output_dim": 0}, "output_dim"),
+        ({"method": "rbf", "output_dim": True}, "output_dim"),
+        ({"method": "rbf", "target_aware": 1}, "target_aware"),
+        ({"method": "rbf", "placement_strategy": ""}, "placement_strategy"),
+        ({"method": "rbf", "adaptive": None}, "adaptive"),
+        ({"method": "rbf", "min_output_dim": -1}, "min_output_dim"),
+        ({"method": "rbf", "params": []}, "params"),
+        ({"method": "rbf", "params": {"method": "ple"}}, "params['method']"),
+        ({"method": "rbf", "params": {"gamma": [float("inf")]}}, "params['gamma'][0]"),
+        ({"method": "rbf", "gamma": 0.5, "params": {"gamma": 0.5}}, "gamma"),
+    ],
+)
+def test_path_errors_reuse_common_and_nested_value_checks(data, location):
+    path = "feature_preprocessing['a.b[0]']"
+    with pytest.raises(InvalidParamError) as failure:
+        _normalize_representation_config(data, is_numerical=True, path=path)
+    assert f"{path}.{location}" in str(failure.value)
+
+
+@pytest.mark.parametrize("succeeds", [False, True])
+def test_path_errors_do_not_leak_into_standalone_value_validation(succeeds):
+    if succeeds:
+        _normalize_representation_config("rbf", is_numerical=True, path="feature_preprocessing['age']")
+    else:
+        with pytest.raises(InvalidParamError):
+            _normalize_representation_config({"method": "rbf", "output_dim": 0}, is_numerical=True, path="other")
+    with pytest.raises(InvalidParamError) as failure:
+        RepresentationConfig(method="")
+    assert str(failure.value).startswith("RepresentationConfig.method")
+
+
+def test_path_errors_follow_the_live_registry_without_checking_applicability(monkeypatch):
+    data = {"method": "rbf", "plugin_strength": 0.5}
+    with pytest.raises(InvalidParamError, match="plugin_strength"):
+        _normalize_representation_config(data, is_numerical=True)
+    spec = TRANSFORMER_REGISTRY["rbf"]
+    monkeypatch.setitem(
+        TRANSFORMER_REGISTRY, "rbf", replace(spec, allowed_args=(*spec.allowed_args, "plugin_strength"))
+    )
+    assert _normalize_representation_config(data, is_numerical=True).params["plugin_strength"] == 0.5
+    assert _normalize_representation_config({"method": "ohe", "degree": 3}, is_numerical=False).params["degree"] == 3

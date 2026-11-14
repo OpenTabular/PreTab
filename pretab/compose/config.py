@@ -17,7 +17,9 @@ resolves them in the correct namespace at build time.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, replace
+from difflib import get_close_matches
 from math import isfinite
 from typing import Any
 
@@ -28,6 +30,7 @@ from .registry import (
     CATEGORICAL_METHODS,
     NUMERICAL_ALIASES,
     NUMERICAL_METHODS,
+    TRANSFORMER_REGISTRY,
     resolve_method,
 )
 
@@ -36,6 +39,14 @@ __all__ = ["PreprocessorConfig", "RepresentationConfig"]
 # Valid values for the high-level ``missing_policy`` orchestration knob. ``None``
 # keeps the explicit imputation parameters authoritative (historical behaviour).
 MISSING_POLICIES = frozenset({"error", "propagate", "impute", "impute_with_indicator", "separate_state"})
+
+
+_REPRESENTATION_PATH = ContextVar("representation_config_path", default="RepresentationConfig")
+
+
+def _representation_error(param, value, constraint, *, valid=None):
+    """Use the standalone value name or the current normalization path."""
+    return invalid_param_error(_REPRESENTATION_PATH.get(), param, value, constraint, valid=valid)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -64,19 +75,17 @@ def _freeze_config_value(value: Any, path: str, active: set[int]) -> Any:
     if type(value) is float and isfinite(value):
         return value
     if not isinstance(value, (Mapping, Sequence)) or isinstance(value, (str, bytes, bytearray, memoryview)):
-        raise invalid_param_error(
-            "RepresentationConfig", path, value, "must contain only finite JSON-compatible values"
-        )
+        raise _representation_error(path, value, "must contain only finite JSON-compatible values")
     identity = id(value)
     if identity in active:
-        raise invalid_param_error("RepresentationConfig", path, value, "must not contain circular references")
+        raise _representation_error(path, value, "must not contain circular references")
     active.add(identity)
     try:
         if isinstance(value, Mapping):
             entries = []
             for key, item in value.items():
                 if type(key) is not str:
-                    raise invalid_param_error("RepresentationConfig", path, key, "mapping keys must be strings")
+                    raise _representation_error(path, key, "mapping keys must be strings")
                 entries.append((key, _freeze_config_value(item, f"{path}[{key!r}]", active)))
             return _FrozenParams(tuple(entries))
         return tuple(_freeze_config_value(item, f"{path}[{index}]", active) for index, item in enumerate(value))
@@ -135,30 +144,29 @@ class RepresentationConfig:
 
     def __post_init__(self) -> None:
         if self.method is UNSET:
-            raise invalid_param_error("RepresentationConfig", "method", self.method, "is required")
+            raise _representation_error("method", self.method, "is required")
         for key in ("method", "placement_strategy", "name"):
             value = getattr(self, key)
             if (key == "placement_strategy" and value is UNSET) or (key == "name" and value is None):
                 continue
             if type(value) is not str or not value.strip():
-                raise invalid_param_error("RepresentationConfig", key, value, "must be a nonempty string")
+                raise _representation_error(key, value, "must be a nonempty string")
         for key in ("output_dim", "min_output_dim", "max_output_dim"):
             value = getattr(self, key)
             if value is UNSET or (key != "output_dim" and value is None):
                 continue
             if type(value) is not int or value < 1:
-                raise invalid_param_error("RepresentationConfig", key, value, "must be a positive integer")
+                raise _representation_error(key, value, "must be a positive integer")
         for key in ("target_aware", "adaptive"):
             value = getattr(self, key)
             if value is not UNSET and type(value) is not bool:
-                raise invalid_param_error("RepresentationConfig", key, value, "must be a boolean")
+                raise _representation_error(key, value, "must be a boolean")
         if not isinstance(self.params, Mapping):
-            raise invalid_param_error("RepresentationConfig", "params", self.params, "must be a mapping")
+            raise _representation_error("params", self.params, "must be a mapping")
         reserved = {item.name for item in fields(self)}
         for key in self.params:
             if key in reserved:
-                raise invalid_param_error(
-                    "RepresentationConfig",
+                raise _representation_error(
                     f"params[{key!r}]",
                     self.params[key],
                     "must be supplied as a top-level field",
@@ -182,51 +190,71 @@ class RepresentationConfig:
         feature-kind context and is not performed by this constructor.
         """
         if not isinstance(data, Mapping):
-            raise invalid_param_error("RepresentationConfig", "data", data, "must be a mapping")
+            raise _representation_error("data", data, "must be a mapping")
         requested = dict(data)
         if any(type(key) is not str for key in requested):
-            raise invalid_param_error("RepresentationConfig", "data", data, "mapping keys must be strings")
+            raise _representation_error("data", data, "mapping keys must be strings")
         if "method" not in requested:
-            raise invalid_param_error("RepresentationConfig", "method", UNSET, "is required")
+            raise _representation_error("method", UNSET, "is required")
         params = requested.pop("params", {})
         if not isinstance(params, Mapping):
-            raise invalid_param_error("RepresentationConfig", "params", params, "must be a mapping")
+            raise _representation_error("params", params, "must be a mapping")
         params = dict(params)
         common = {item.name for item in fields(cls)}
         for key in list(requested):
             if key not in common:
                 if key in params:
-                    raise invalid_param_error(
-                        "RepresentationConfig", key, requested[key], "must not also be supplied inside params"
-                    )
+                    raise _representation_error(key, requested[key], "must not also be supplied inside params")
                 params[key] = requested.pop(key)
         return cls(**requested, params=params)
 
 
 def _normalize_representation_config(
-    value: str | Mapping[str, Any] | RepresentationConfig, *, is_numerical: bool
+    value: str | Mapping[str, Any] | RepresentationConfig,
+    *,
+    is_numerical: bool,
+    path: str = "RepresentationConfig",
 ) -> RepresentationConfig:
     """Normalize one request in its known feature-kind namespace.
 
     Raw mappings detach through ``from_dict``. Typed values retain their
     requested spelling; normalization replaces rather than mutates an alias.
-    Omitted fields remain ``UNSET``. Method applicability, capability checks,
-    and effective defaults are not resolved here.
+    Omitted fields remain ``UNSET``. Unknown methods/options and invalid value
+    shapes raise path-qualified errors. Known but inapplicable options,
+    capability checks, and effective defaults are not resolved here.
     """
-    if isinstance(value, RepresentationConfig):
-        config = value
-    elif isinstance(value, str):
-        config = RepresentationConfig(method=value)
-    elif isinstance(value, Mapping):
-        config = RepresentationConfig.from_dict(value)
-    else:
-        raise invalid_param_error(
-            "RepresentationConfig", "value", value, "must be a string, mapping, or RepresentationConfig"
-        )
-    canonical = NUMERICAL_METHODS if is_numerical else CATEGORICAL_METHODS
-    aliases = NUMERICAL_ALIASES if is_numerical else CATEGORICAL_ALIASES
-    method = resolve_method(config.method, canonical, aliases)
-    return config if method == config.method else replace(config, method=method)
+    token = _REPRESENTATION_PATH.set(path)
+    try:
+        if isinstance(value, RepresentationConfig):
+            config = value
+        elif isinstance(value, str):
+            config = RepresentationConfig(method=value)
+        elif isinstance(value, Mapping):
+            config = RepresentationConfig.from_dict(value)
+        else:
+            raise _representation_error("value", value, "must be a string, mapping, or RepresentationConfig")
+        canonical = NUMERICAL_METHODS if is_numerical else CATEGORICAL_METHODS
+        aliases = NUMERICAL_ALIASES if is_numerical else CATEGORICAL_ALIASES
+        method = resolve_method(config.method, canonical, aliases)
+        if method not in canonical:
+            kind = "numerical" if is_numerical else "categorical"
+            raise _representation_error(
+                "method", method, f"unrecognized {kind} preprocessing method", valid=set(canonical)
+            )
+        common = {item.name for item in fields(RepresentationConfig)}
+        known = common | {key for spec in TRANSFORMER_REGISTRY.values() for key in spec.allowed_args}
+        applicable = common | set(TRANSFORMER_REGISTRY[method].allowed_args)
+        for key in config.params:
+            if key not in known:
+                location = key if isinstance(value, Mapping) and key in value else f"params[{key!r}]"
+                matches = get_close_matches(key, sorted(applicable), n=3)
+                constraint = "unrecognized representation option"
+                if matches:
+                    constraint += f". Did you mean {', '.join(repr(match) for match in matches)}?"
+                raise _representation_error(location, config.params[key], constraint, valid=applicable)
+        return config if method == config.method else replace(config, method=method)
+    finally:
+        _REPRESENTATION_PATH.reset(token)
 
 
 def _normalize_method(method, canonical, aliases) -> str:
