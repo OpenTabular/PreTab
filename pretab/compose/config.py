@@ -23,8 +23,9 @@ from difflib import get_close_matches
 from math import isfinite
 from typing import Any
 
+from ..core.dependencies import _check_optional_dependency
 from ..core.parameters import UNSET, _Unset, validate_placement, validate_task
-from ..exceptions import invalid_param_error
+from ..exceptions import InvalidParamError, invalid_param_error
 from .registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
@@ -209,6 +210,66 @@ class RepresentationConfig:
         return cls(**requested, params=params)
 
 
+def _validate_representation_capabilities(
+    config: RepresentationConfig, *, is_numerical: bool, source: str | Mapping[str, Any] | RepresentationConfig
+) -> None:
+    """Check explicit settings against the live spec without choosing defaults."""
+    spec = TRANSFORMER_REGISTRY[config.method]
+    kind = "numerical" if is_numerical else "categorical"
+    if kind not in spec.feature_kind:
+        raise _representation_error("method", config.method, f"does not support {kind} features")
+    if not spec.preprocessor_compatible:
+        raise _representation_error("method", config.method, "is not selectable through Preprocessor")
+    for key, value in config.params.items():
+        if key not in spec.allowed_args:
+            location = key if isinstance(source, Mapping) and key in source else f"params[{key!r}]"
+            raise _representation_error(
+                location, value, f"is not applicable to method {config.method!r}", valid=spec.allowed_args
+            )
+    if (
+        config.output_dim is not UNSET
+        and "output_dim" not in spec.allowed_args
+        and not spec.supports_adaptive_resolution
+    ):
+        raise _representation_error("output_dim", config.output_dim, f"is not applicable to method {config.method!r}")
+    for key in ("adaptive", "min_output_dim", "max_output_dim"):
+        value = getattr(config, key)
+        if value is not UNSET and not spec.supports_adaptive_resolution:
+            raise _representation_error(key, value, f"method {config.method!r} does not support adaptive resolution")
+    if config.target_aware is True and spec.target_usage == "forbidden":
+        raise _representation_error("target_aware", True, f"method {config.method!r} cannot use the target")
+    if config.target_aware is False and spec.target_usage == "required":
+        raise _representation_error("target_aware", False, f"method {config.method!r} requires the target")
+    if isinstance(config.placement_strategy, str):
+        if config.placement_strategy not in spec.placement_strategies:
+            raise _representation_error(
+                "placement_strategy",
+                config.placement_strategy,
+                f"is not supported by method {config.method!r}",
+                valid=spec.placement_strategies,
+            )
+        target_aware = config.target_aware
+        if target_aware is UNSET and spec.target_usage != "optional":
+            target_aware = spec.target_usage == "required"
+        if isinstance(target_aware, bool):
+            try:
+                validate_placement(target_aware, config.placement_strategy)
+            except InvalidParamError as error:
+                raise _representation_error("placement_strategy", config.placement_strategy, str(error)) from error
+    for key in ("min_output_dim", "max_output_dim"):
+        value = getattr(config, key)
+        if config.adaptive is False and value is not UNSET:
+            raise _representation_error(key, value, "must not be supplied with adaptive=False")
+    if config.adaptive is True and type(config.min_output_dim) is int and type(config.max_output_dim) is int:
+        if config.min_output_dim > config.max_output_dim:
+            raise _representation_error("max_output_dim", config.max_output_dim, "must be >= min_output_dim")
+    path = _REPRESENTATION_PATH.get()
+    if spec.optional_dependency:
+        _check_optional_dependency(spec.optional_dependency, f"{path}.method = {config.method!r}")
+    if config.placement_strategy == "lightgbm":
+        _check_optional_dependency("lightgbm", f"{path}.placement_strategy = 'lightgbm'")
+
+
 def _normalize_representation_config(
     value: str | Mapping[str, Any] | RepresentationConfig,
     *,
@@ -220,8 +281,8 @@ def _normalize_representation_config(
     Raw mappings detach through ``from_dict``. Typed values retain their
     requested spelling; normalization replaces rather than mutates an alias.
     Omitted fields remain ``UNSET``. Unknown methods/options and invalid value
-    shapes raise path-qualified errors. Known but inapplicable options,
-    capability checks, and effective defaults are not resolved here.
+    shapes raise path-qualified errors. Explicit options are checked against
+    live registry capabilities; omitted effective defaults remain unresolved.
     """
     token = _REPRESENTATION_PATH.set(path)
     try:
@@ -252,7 +313,9 @@ def _normalize_representation_config(
                 if matches:
                     constraint += f". Did you mean {', '.join(repr(match) for match in matches)}?"
                 raise _representation_error(location, config.params[key], constraint, valid=applicable)
-        return config if method == config.method else replace(config, method=method)
+        normalized = config if method == config.method else replace(config, method=method)
+        _validate_representation_capabilities(normalized, is_numerical=is_numerical, source=value)
+        return normalized
     finally:
         _REPRESENTATION_PATH.reset(token)
 

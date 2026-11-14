@@ -16,13 +16,14 @@ from pretab.compose.config import RepresentationConfig, _normalize_representatio
 from pretab.compose.factory import get_categorical_transformer_steps, get_numerical_transformer_steps
 from pretab.compose.registry import TRANSFORMER_REGISTRY
 from pretab.core.parameters import UNSET
-from pretab.exceptions import InvalidParamError
+from pretab.exceptions import InvalidParamError, OptionalDependencyError
 
 
 @pytest.fixture
 def nested_registry_option(monkeypatch):
-    spec = TRANSFORMER_REGISTRY["rbf"]
-    monkeypatch.setitem(TRANSFORMER_REGISTRY, "rbf", replace(spec, allowed_args=(*spec.allowed_args, "options")))
+    for method in ("rbf", "cubicspline"):
+        spec = TRANSFORMER_REGISTRY[method]
+        monkeypatch.setitem(TRANSFORMER_REGISTRY, method, replace(spec, allowed_args=(*spec.allowed_args, "options")))
 
 
 def test_omitted_fields_remain_unset():
@@ -223,7 +224,9 @@ def test_normalization_forms_are_equivalent_in_their_namespace(form, method, is_
 
 
 @pytest.mark.parametrize("form", ["mapping", "value"])
-@pytest.mark.parametrize(("method", "is_numerical", "canonical"), [("RBF", True, "rbf"), ("OHE", False, "one-hot")])
+@pytest.mark.parametrize(
+    ("method", "is_numerical", "canonical"), [("RBF", True, "rbf"), ("Cubic", True, "cubicspline")]
+)
 def test_normalization_preserves_explicit_and_omitted_settings(
     form, method, is_numerical, canonical, nested_registry_option
 ):
@@ -371,7 +374,7 @@ def test_path_errors_do_not_leak_into_standalone_value_validation(succeeds):
     assert str(failure.value).startswith("RepresentationConfig.method")
 
 
-def test_path_errors_follow_the_live_registry_without_checking_applicability(monkeypatch):
+def test_path_errors_follow_the_live_registry_and_check_applicability(monkeypatch):
     data = {"method": "rbf", "plugin_strength": 0.5}
     with pytest.raises(InvalidParamError, match="plugin_strength"):
         _normalize_representation_config(data, is_numerical=True)
@@ -380,4 +383,130 @@ def test_path_errors_follow_the_live_registry_without_checking_applicability(mon
         TRANSFORMER_REGISTRY, "rbf", replace(spec, allowed_args=(*spec.allowed_args, "plugin_strength"))
     )
     assert _normalize_representation_config(data, is_numerical=True).params["plugin_strength"] == 0.5
-    assert _normalize_representation_config({"method": "ohe", "degree": 3}, is_numerical=False).params["degree"] == 3
+    with pytest.raises(InvalidParamError, match="degree"):
+        _normalize_representation_config({"method": "ohe", "degree": 3}, is_numerical=False)
+
+
+@pytest.mark.parametrize(
+    ("data", "is_numerical", "location"),
+    [
+        ({"method": "ohe", "degree": 3}, False, "degree"),
+        ({"method": "rbf", "params": {"degree": 3}}, True, "params['degree']"),
+        ({"method": "polynomial", "gamma": 1.0}, True, "gamma"),
+        ({"method": "ohe", "output_dim": 3}, False, "output_dim"),
+        ({"method": "minmax", "adaptive": False}, True, "adaptive"),
+        ({"method": "custombin", "adaptive": True}, True, "adaptive"),
+        ({"method": "ohe", "min_output_dim": None}, False, "min_output_dim"),
+        ({"method": "ple", "target_aware": False}, True, "target_aware"),
+        ({"method": "pspline", "target_aware": True}, True, "target_aware"),
+        ({"method": "pspline", "placement_strategy": "quantile"}, True, "placement_strategy"),
+        ({"method": "ohe", "placement_strategy": "uniform"}, False, "placement_strategy"),
+        ({"method": "rbf", "placement_strategy": "even"}, True, "placement_strategy"),
+        ({"method": "rbf", "target_aware": False, "placement_strategy": "cart"}, True, "placement_strategy"),
+        ({"method": "rbf", "target_aware": True, "placement_strategy": "uniform"}, True, "placement_strategy"),
+        ({"method": "rbf", "adaptive": False, "max_output_dim": None}, True, "max_output_dim"),
+        ({"method": "rbf", "adaptive": True, "min_output_dim": 5, "max_output_dim": 3}, True, "max_output_dim"),
+    ],
+)
+def test_capability_errors_name_the_explicit_option_and_source(data, is_numerical, location):
+    path = "feature_preprocessing['age']"
+    with pytest.raises(InvalidParamError) as failure:
+        _normalize_representation_config(data, is_numerical=is_numerical, path=path)
+    assert f"{path}.{location}" in str(failure.value)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"method": "rbf", "output_dim": 3, "gamma": 0.5},
+        {"method": "bspline", "output_dim": 3},
+        {"method": "mspline", "output_dim": 5},
+        {"method": "ispline", "output_dim": 5},
+        {"method": "pspline", "output_dim": 5, "target_aware": False, "placement_strategy": "uniform"},
+        {"method": "ple", "target_aware": True, "placement_strategy": "cart", "adaptive": True},
+        {"method": "rbf", "placement_strategy": "quantile"},
+        {"method": "rbf", "target_aware": False},
+        {"method": "rbf", "adaptive": True, "min_output_dim": None, "max_output_dim": None},
+    ],
+)
+def test_capability_validation_preserves_explicit_requests_without_filling_defaults(data):
+    normalized = _normalize_representation_config(data, is_numerical=True)
+    assert normalized == RepresentationConfig.from_dict(data)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("feature_kind", frozenset({"categorical"})),
+        ("preprocessor_compatible", False),
+        ("supports_adaptive_resolution", False),
+    ],
+)
+def test_capability_validation_uses_live_metadata_even_when_derived_views_are_unchanged(monkeypatch, field, value):
+    spec = TRANSFORMER_REGISTRY["rbf"]
+    monkeypatch.setitem(TRANSFORMER_REGISTRY, "rbf", replace(spec, **{field: value}))
+    with pytest.raises(InvalidParamError):
+        _normalize_representation_config({"method": "rbf", "adaptive": True}, is_numerical=True)
+
+
+@pytest.mark.parametrize("method", ["tensor", "thinplate", "rff", "nystroem"])
+def test_capability_validation_does_not_make_standalone_methods_selectable(method):
+    with pytest.raises(InvalidParamError, match="method"):
+        _normalize_representation_config(method, is_numerical=True)
+
+
+@pytest.mark.parametrize("available", [False, True])
+@pytest.mark.parametrize(("method", "is_numerical"), [("pretrained", False), ("rbf", True)])
+def test_optional_dependency_metadata_is_checked_without_import_or_construction(
+    monkeypatch, method, is_numerical, available
+):
+    discovered = []
+
+    def discover(module_name):
+        discovered.append(module_name)
+        return object() if available else None
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("normalization must not import optional packages or construct a transformer")
+
+    spec = TRANSFORMER_REGISTRY[method]
+    monkeypatch.setitem(
+        TRANSFORMER_REGISTRY, method, replace(spec, optional_dependency="embeddings", transformer_cls=unexpected)
+    )
+    monkeypatch.setattr("pretab.core.dependencies.importlib.util.find_spec", discover)
+    monkeypatch.setattr("pretab.core.dependencies.importlib.import_module", unexpected)
+    path = "feature_preprocessing['city']"
+    if available:
+        assert _normalize_representation_config(method, is_numerical=is_numerical, path=path).method == method
+    else:
+        with pytest.raises(OptionalDependencyError) as failure:
+            _normalize_representation_config(method, is_numerical=is_numerical, path=path)
+        assert f"{path}.method" in str(failure.value)
+        assert "pip install pretab[embeddings]" in str(failure.value)
+    assert discovered == ["sentence_transformers"]
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_explicit_lightgbm_placement_uses_import_free_dependency_check(monkeypatch, available):
+    discovered = []
+
+    def discover(module_name):
+        discovered.append(module_name)
+        return object() if available else None
+
+    monkeypatch.setattr("pretab.core.dependencies.importlib.util.find_spec", discover)
+    data = {"method": "rbf", "target_aware": True, "placement_strategy": "lightgbm"}
+    if available:
+        assert _normalize_representation_config(data, is_numerical=True).placement_strategy == "lightgbm"
+    else:
+        with pytest.raises(OptionalDependencyError, match=r"RepresentationConfig.placement_strategy.*lightgbm"):
+            _normalize_representation_config(data, is_numerical=True)
+    assert discovered == ["lightgbm"]
+
+
+def test_capability_validation_does_not_check_unselected_optional_dependencies(monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("no optional dependency is selected")
+
+    monkeypatch.setattr("pretab.core.dependencies.importlib.util.find_spec", unexpected)
+    assert _normalize_representation_config("rbf", is_numerical=True).target_aware is UNSET
