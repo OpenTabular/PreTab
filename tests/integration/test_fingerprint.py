@@ -8,12 +8,22 @@ contents.
 import subprocess
 import sys
 import textwrap
+from contextlib import nullcontext
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.base import clone
 
 from pretab import Preprocessor
+from pretab.compose.registry import (
+    CATEGORICAL_ALIASES,
+    CATEGORICAL_METHODS,
+    NUMERICAL_ALIASES,
+    NUMERICAL_METHODS,
+    TRANSFORMER_REGISTRY,
+)
 
 
 @pytest.fixture
@@ -43,6 +53,73 @@ def test_fingerprint_is_hex_sha256(frame, target):
 
 def test_fingerprint_deterministic_same_fit(frame, target):
     assert _fit(frame, target).fingerprint_ == _fit(frame, target).fingerprint_
+
+
+@pytest.mark.parametrize("per_feature", [False, True], ids=["global", "override"])
+@pytest.mark.parametrize(
+    ("feature", "method", "canonical"),
+    [
+        pytest.param(feature, method, canonical, id=f"{feature}-{method}")
+        for feature, methods, aliases in (
+            ("a", NUMERICAL_METHODS, NUMERICAL_ALIASES),
+            ("c", CATEGORICAL_METHODS, CATEGORICAL_ALIASES),
+        )
+        for method, canonical in [
+            *((name, name) for name in sorted(methods)),
+            *((alias, name) for alias, name in sorted(aliases.items()) if name in methods),
+        ]
+        if TRANSFORMER_REGISTRY[canonical].optional_dependency is None
+    ],
+)
+def test_legacy_strings_keep_fitted_artifact_through_report_and_clone(
+    frame, target, feature, method, canonical, per_feature
+):
+    frame = pd.concat([frame.assign(c=pd.Categorical(frame["c"]).codes)] * 20, ignore_index=True)
+    target = np.tile(target, 20)
+    supervised = TRANSFORMER_REGISTRY[canonical].requires_target
+    parameters: dict[str, Any] = {
+        "numerical_method": "none",
+        "categorical_method": "none",
+        "target_aware": supervised,
+        "placement_strategy": "cart" if supervised else "uniform",
+        "random_state": 17,
+        "scaling": "none",
+    }
+    if per_feature:
+        parameters["feature_preprocessing"] = {feature: method}
+    else:
+        parameters["numerical_method" if feature == "a" else "categorical_method"] = method
+    with (
+        pytest.warns(DeprecationWarning, match="OneHotFromOrdinalTransformer is deprecated")
+        if canonical == "onehot_from_ordinal"
+        else nullcontext()
+    ):
+        processor = Preprocessor(**parameters).fit(frame, target)
+    original = np.asarray(processor.transform(frame, return_array=True))
+    names = processor.get_feature_names_out()
+    widths = dict(processor.output_dims_)
+    fingerprint = processor.fingerprint_
+    requested = processor.get_params()
+
+    processor.get_resolved_config()
+    fresh = clone(processor)
+    assert isinstance(fresh, Preprocessor)
+    with (
+        pytest.warns(DeprecationWarning, match="OneHotFromOrdinalTransformer is deprecated")
+        if canonical == "onehot_from_ordinal"
+        else nullcontext()
+    ):
+        fresh.fit(frame, target)
+    for candidate in (processor, fresh):
+        actual = np.asarray(candidate.transform(frame, return_array=True))
+        assert actual.dtype == original.dtype
+        assert actual.shape == original.shape
+        assert actual.tobytes() == original.tobytes()
+        np.testing.assert_array_equal(candidate.get_feature_names_out(), names)
+        assert candidate.output_dims_ == widths
+        assert candidate.total_output_dim_ == original.shape[1]
+        assert candidate.fingerprint_ == fingerprint
+        assert candidate.get_params() == requested
 
 
 def test_fingerprint_survives_round_trip(frame, target):

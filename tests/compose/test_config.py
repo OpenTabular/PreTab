@@ -1,8 +1,13 @@
 """Unit tests for :class:`pretab.compose.config.PreprocessorConfig`."""
 
+import json
 from dataclasses import asdict, replace
+from typing import Any
 
+import numpy as np
+import pandas as pd
 import pytest
+from sklearn.base import clone
 
 from pretab import Preprocessor, RepresentationConfig
 from pretab.compose.registry import TRANSFORMER_REGISTRY
@@ -277,6 +282,73 @@ def test_representation_resolution_forms_are_equivalent(make_config, form, metho
     )
     assert config.representation_for("feature", is_numerical=is_numerical) == expected
     assert config.method_for("feature", is_numerical=is_numerical) == expected.method
+
+
+@pytest.mark.parametrize("form", ["string", "mapping", "value"])
+@pytest.mark.parametrize(("method", "is_numerical"), [("RBF", True), ("OHE", False)])
+def test_representation_forms_agree_through_clone_json_report_and_fit(form, method, is_numerical):
+    requested = {"string": method, "mapping": {"method": method}, "value": RepresentationConfig(method=method)}[form]
+    overrides = {"feature": requested}
+    settings: dict[str, Any] = {
+        "output_dim": 7,
+        "target_aware": False,
+        "placement_strategy": "uniform",
+        "scaling": "none",
+        "random_state": 17,
+    }
+    values = np.linspace(0, 1, 40) if is_numerical else ["a", "b"] * 20
+    frame = pd.DataFrame({"feature": values})
+    processor = Preprocessor(feature_preprocessing=overrides, **settings)
+    fresh = clone(processor)
+    assert isinstance(fresh, Preprocessor)
+    assert fresh.get_params() == processor.get_params()
+    assert processor.get_params()["feature_preprocessing"] is overrides
+    assert overrides["feature"] is requested
+
+    report = fresh.get_resolved_config()
+    restored_report = json.loads(json.dumps(report, allow_nan=False))
+    assert restored_report == report
+    resolved = RepresentationConfig.from_dict(restored_report["feature_preprocessing"]["feature"])
+    assert resolved.to_dict() == report["feature_preprocessing"]["feature"]
+
+    actual = np.asarray(fresh.fit_transform(frame, return_array=True))
+    reference = Preprocessor(feature_preprocessing={"feature": method}, **settings).fit(frame)
+    expected = np.asarray(reference.transform(frame, return_array=True))
+    assert actual.dtype == expected.dtype
+    assert actual.shape == expected.shape
+    assert actual.tobytes() == expected.tobytes()
+    np.testing.assert_array_equal(fresh.get_feature_names_out(), reference.get_feature_names_out())
+    assert fresh.output_dims_ == reference.output_dims_
+    assert fresh.total_output_dim_ == reference.total_output_dim_
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["raw", "typed"])
+def test_fit_boundary_detaches_params_without_changing_requested_identity(typed):
+    params = {"gamma": 0.5}
+    settings = {"method": "rbf", "output_dim": 3, "params": params}
+    requested = RepresentationConfig.from_dict(settings) if typed else settings
+    overrides = {"age": requested}
+    processor = Preprocessor(
+        feature_preprocessing=overrides, target_aware=False, placement_strategy="uniform", scaling="none"
+    )
+    params["gamma"] = 0.75
+    expected_gamma = 0.5 if typed else 0.75
+    frame = pd.DataFrame({"age": np.linspace(0, 1, 40)})
+    processor.fit(frame)
+    original = np.asarray(processor.transform(frame, return_array=True))
+    basis = processor.column_transformer_.named_transformers_["num_age"].named_steps["rbf"]
+    assert basis.gamma == expected_gamma
+
+    report = processor.get_resolved_config()
+    report["feature_preprocessing"]["age"]["params"]["gamma"] = 9.0
+    params["gamma"] = 1.25
+
+    assert processor.get_params()["feature_preprocessing"] is overrides
+    assert overrides["age"] is requested
+    assert basis.gamma == expected_gamma
+    assert np.asarray(processor.transform(frame, return_array=True)).tobytes() == original.tobytes()
+    live = processor.get_resolved_config()["feature_preprocessing"]["age"]
+    assert live["params"]["gamma"] == (0.5 if typed else 1.25)
 
 
 def test_normalized_feature_requests_snapshot_nested_values_at_the_boundary(make_config, monkeypatch):
