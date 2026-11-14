@@ -462,16 +462,25 @@ class PreprocessorConfig:
             ).method
         return self.resolve_numerical(raw) if is_numerical else self.resolve_categorical(raw)
 
-    def representation_for(self, feature, *, is_numerical: bool) -> RepresentationConfig:
+    def representation_for(self, feature, *, is_numerical: bool | None = None) -> RepresentationConfig:
         """Resolve one feature request over applicable constructor-wide controls.
 
         Method defaults remain omitted when the existing factory would not
         forward a constructor-wide value. Inherited inactive adaptive bounds
         are dropped, but contradictory explicit local bounds are rejected.
+        Without a detected kind, resolve the declared method's namespace only;
+        compatibility with the actual input still belongs to fitting.
         """
-        default = self.numerical_method if is_numerical else self.categorical_method
+        default = self.categorical_method if is_numerical is False else self.numerical_method
         raw = self.feature_preprocessing.get(feature, default)
         path = f"feature_preprocessing[{feature!r}]"
+        if is_numerical is None:
+            token = _REPRESENTATION_PATH.set(path)
+            try:
+                method = _representation_request(raw).method
+            finally:
+                _REPRESENTATION_PATH.reset(token)
+            is_numerical = self.resolve_categorical(method) not in CATEGORICAL_METHODS
         requested = _normalize_representation_config(raw, is_numerical=is_numerical, path=path)
         spec = TRANSFORMER_REGISTRY[requested.method]
         inherited = {}

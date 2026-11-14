@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import warnings
+from dataclasses import fields
 from typing import cast
 
 import numpy as np
@@ -893,10 +894,14 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         When ``preset`` is set, its bundled values fill in every parameter the
         caller left at its default while explicitly-set parameters win; the
-        ``preset`` key itself is removed. When ``preset`` is ``None`` this is simply
-        :meth:`get_params` without the ``preset`` entry. The returned dict is the
-        configuration ``fit`` builds from, so it makes a preset's effect inspectable
-        before fitting.
+        ``preset`` key itself is removed. Declared ``feature_preprocessing``
+        entries become ordinary mappings with canonical methods and applicable
+        inherited settings, using the same resolver as fitting. Other global
+        keys retain their preset-expanded values.
+
+        The result is detached from caller-owned containers and resolves current
+        parameters before or after fit. It does not describe the last fitted
+        graph, infer an input schema, or guarantee realized output widths.
 
         Returns
         -------
@@ -906,9 +911,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Raises
         ------
         InvalidParamError
-            If ``task`` or ``preset`` is invalid, exactly as ``fit`` would raise.
+            If ``task``, ``preset``, or a declared representation is invalid.
         """
-        return self._resolved_params()
+        resolved = self._resolved_params()
+        if resolved["feature_preprocessing"]:
+            config = PreprocessorConfig.from_params(
+                **{field.name: resolved[field.name] for field in fields(PreprocessorConfig)}
+            )
+            resolved["feature_preprocessing"] = {
+                feature: config.representation_for(feature).to_dict() for feature in config.feature_preprocessing
+            }
+        return copy.deepcopy(resolved)
 
     def get_feature_names_out(self, input_features=None):
         """

@@ -321,6 +321,8 @@ def test_preprocessor_routes_one_normalized_config_through_the_factory(sample_fr
     }
     assert set(resolved) == config_fields | facade_fields
     assert config_fields.isdisjoint(facade_fields)
+    fit_parameters = {name: resolved[name] for name in config_fields}
+    fit_parameters["feature_preprocessing"] = feature_overrides
 
     normalized_configs: list[PreprocessorConfig] = []
     from_params = PreprocessorConfig.from_params
@@ -351,7 +353,7 @@ def test_preprocessor_routes_one_normalized_config_through_the_factory(sample_fr
 
         preprocessor.fit(sample_frame, np.array([0, 1, 0, 1, 0, 1]))
 
-        normalize.assert_called_once_with(**{name: resolved[name] for name in config_fields})
+        normalize.assert_called_once_with(**fit_parameters)
         (config,) = normalized_configs
         assert all(item.kwargs["config"] is config for item in create.call_args_list)
         assert all(item.args[0] is config for item in method_for.call_args_list + imputation_plan.call_args_list)
