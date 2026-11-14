@@ -5,6 +5,7 @@ Covers P10.2 (``register_representation`` + entry points) and P10.4
 """
 
 import importlib.metadata as importlib_metadata
+from dataclasses import fields
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,8 @@ from pretab import (
     register_representation,
 )
 from pretab.compose import registry
+from pretab.compose.config import PreprocessorConfig
+from pretab.compose.factory import create_transformer
 from pretab.exceptions import ConfigWarning
 
 
@@ -199,6 +202,21 @@ def test_register_categorical_end_to_end_through_preprocessor():
     pipeline = pre.column_transformer_.named_transformers_["cat_city"]
     assert isinstance(pipeline.named_steps["cat_reg"], _CatStringLength)
     assert pipeline.named_steps["cat_reg"].degree == 2
+
+
+def test_registered_categorical_factory_accepts_resolved_family_options():
+    register_representation("cat_reg", _CatStringLength, allowed_args=("degree",))
+    parameters = Preprocessor(
+        degree=2,
+        feature_preprocessing={"city": {"method": "cat_reg", "degree": 5}},
+    ).get_resolved_config()
+    config = PreprocessorConfig.from_params(**{item.name: parameters[item.name] for item in fields(PreprocessorConfig)})
+    resolved = config.representation_for("city", is_numerical=False)
+    block = create_transformer("cat_reg", is_numerical=False, config=config, representation=resolved)
+    result = block.fit_transform(np.array([["Rome"], ["Berlin"], ["Oslo"]], dtype=object))
+    np.testing.assert_array_equal(result[:, 0], [20.0, 30.0, 20.0])
+    assert resolved.params["degree"] == 5
+    assert config.degree == 2
 
 
 def test_duplicate_registration_requires_override():

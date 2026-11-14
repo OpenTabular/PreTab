@@ -19,7 +19,7 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
 from ..preprocessing.floats import ToFloatTransformer
 from ..preprocessing.missing import MissingStateIndicator, _CategoricalMissingNormalizer
-from .config import PreprocessorConfig
+from .config import PreprocessorConfig, RepresentationConfig, _normalize_representation_config
 from .registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
@@ -268,12 +268,20 @@ def get_categorical_transformer_steps(
     return steps
 
 
-def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorConfig) -> Pipeline | FeatureUnion:
+def create_transformer(
+    method: str,
+    *,
+    is_numerical: bool,
+    config: PreprocessorConfig,
+    representation: RepresentationConfig | None = None,
+) -> Pipeline | FeatureUnion:
     """Build the per-column :class:`~sklearn.pipeline.Pipeline` for one feature.
 
     ``method`` is the resolved method name; ``is_numerical`` selects the numerical
-    or categorical construction path. All width / placement / seeding knobs are
-    taken from ``config``.
+    or categorical construction path. When ``representation`` is supplied, its
+    resolved settings replace the run-wide representation controls. Otherwise
+    existing calls use ``config`` unchanged. Imputation, scaling, and indicator
+    policy always come from ``config``.
 
     Raises
     ------
@@ -282,10 +290,43 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
         run is configured with ``target_aware=False``; such a combination cannot be
         satisfied and is rejected instead of silently ignored.
     """
+    if representation is None:
+        shared_kwargs = {
+            "task": config.task,
+            "target_aware": config.target_aware,
+            "output_dim": config.output_dim,
+            "adaptive": config.adaptive,
+            "min_output_dim": config.min_output_dim if config.adaptive else None,
+            "max_output_dim": config.max_output_dim if config.adaptive else None,
+            "degree": config.degree,
+            "placement_strategy": config.placement_strategy,
+            **config.seed_kwargs,
+        }
+    else:
+        if not isinstance(representation, RepresentationConfig):
+            raise invalid_param_error(
+                "create_transformer", "representation", representation, "must be a RepresentationConfig or None"
+            )
+        representation = _normalize_representation_config(
+            representation, is_numerical=is_numerical, path="create_transformer.representation"
+        )
+        resolved_method = config.resolve_numerical(method) if is_numerical else config.resolve_categorical(method)
+        if resolved_method != representation.method:
+            raise invalid_param_error(
+                "create_transformer",
+                "representation.method",
+                representation.method,
+                f"must match the selected method {resolved_method!r}",
+            )
+        method = representation.method
+        settings = representation.to_dict()
+        shared_kwargs = {key: value for key, value in settings.items() if key not in {"method", "params", "name"}}
+        shared_kwargs.update(settings["params"])
+
     known = method in NUMERICAL_METHODS if is_numerical else method in CATEGORICAL_METHODS
     if known:
         spec = get_spec(method)
-        if spec.requires_target and not config.target_aware:
+        if representation is None and spec.requires_target and not config.target_aware:
             raise IncompatibleParamsError(
                 f"method {method!r} is always target-aware and requires target_aware=True "
                 f"with placement_strategy in {{'cart', 'lightgbm'}}; got target_aware=False."
@@ -295,33 +336,14 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
     if is_numerical:
         steps = get_numerical_transformer_steps(
             method=method,
-            task=config.task,
-            target_aware=config.target_aware,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
-            output_dim=config.output_dim,
-            adaptive=config.adaptive,
-            min_output_dim=config.min_output_dim if config.adaptive else None,
-            max_output_dim=config.max_output_dim if config.adaptive else None,
-            degree=config.degree,
             scaling=config.scaling,
-            placement_strategy=config.placement_strategy,
-            **config.seed_kwargs,
+            **shared_kwargs,
         )
     else:
         constructor_kwargs = {}
         if known:
-            shared_kwargs = {
-                "task": config.task,
-                "target_aware": config.target_aware,
-                "output_dim": config.output_dim,
-                "adaptive": config.adaptive,
-                "min_output_dim": config.min_output_dim if config.adaptive else None,
-                "max_output_dim": config.max_output_dim if config.adaptive else None,
-                "degree": config.degree,
-                "placement_strategy": config.placement_strategy,
-                **config.seed_kwargs,
-            }
             constructor_kwargs = _filter_kwargs(spec.allowed_args, shared_kwargs)
             constructor_kwargs.update(_placement_kwargs(spec, shared_kwargs))
         steps = get_categorical_transformer_steps(

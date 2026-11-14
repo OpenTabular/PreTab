@@ -6,11 +6,12 @@ from unittest.mock import Mock, call, patch
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.sparse import issparse
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import FeatureUnion, Pipeline
 
 from pretab import Preprocessor
-from pretab.compose.config import PreprocessorConfig
+from pretab.compose.config import PreprocessorConfig, RepresentationConfig
 from pretab.compose.factory import (
     _placement_kwargs,
     build_column_transformer,
@@ -19,6 +20,7 @@ from pretab.compose.factory import (
     get_numerical_transformer_steps,
 )
 from pretab.compose.registry import TransformerSpec, get_spec
+from pretab.core.parameters import UNSET
 from pretab.exceptions import ConfigWarning, InvalidParamError
 
 
@@ -365,3 +367,201 @@ def test_preprocessor_routes_one_normalized_config_through_the_factory(sample_fr
     assert preprocessor.get_params(deep=False) == requested
     assert preprocessor.get_resolved_config() == resolved
     assert feature_overrides == {"age": "rbf", "city": "int"}
+
+
+@pytest.mark.parametrize("output_dim", [2, 3, 5])
+def test_resolved_representation_controls_width_and_family_options(make_config, output_dim):
+    config = make_config(
+        output_dim=11,
+        adaptive=True,
+        feature_preprocessing={"age": {"method": "rbf", "output_dim": output_dim, "gamma": 0.5}},
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    block = create_transformer("rbf", is_numerical=True, config=config, representation=resolved)
+    assert isinstance(block, Pipeline)
+    transformer = block.named_steps["rbf"]
+    assert transformer.output_dim == output_dim
+    assert transformer.gamma == 0.5
+    assert transformer.adaptive is False
+    assert block.fit_transform(np.linspace(0, 1, 16).reshape(-1, 1)).shape == (16, output_dim)
+    assert config.output_dim == 11
+    assert config.adaptive is True
+
+
+def test_resolved_representation_target_usage_overrides_run_wide_setting(make_config):
+    config = make_config(
+        feature_preprocessing={"age": {"method": "ple", "target_aware": True, "placement_strategy": "cart"}}
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    block = create_transformer("ple", is_numerical=True, config=config, representation=resolved)
+    assert isinstance(block, Pipeline)
+    assert block.named_steps["ple"].placement_strategy == "cart"
+    assert config.target_aware is False
+
+
+def test_resolved_representation_method_must_match_selected_method(make_config):
+    with pytest.raises(InvalidParamError, match=r"create_transformer.representation.method.*rbf"):
+        create_transformer(
+            "standardization",
+            is_numerical=True,
+            config=make_config(),
+            representation=RepresentationConfig(method="rbf"),
+        )
+
+
+@pytest.mark.parametrize("method", ["bspline", "mspline", "ispline"])
+@pytest.mark.parametrize(("output_dim", "expected"), [(3, 5), (51, 50)])
+def test_resolved_representation_reuses_bmi_clamping(make_config, method, output_dim, expected):
+    config = make_config(feature_preprocessing={"age": {"method": method, "output_dim": output_dim}})
+    resolved = config.representation_for("age", is_numerical=True)
+    with pytest.warns(ConfigWarning, match=f"output_dim={output_dim}.*using {expected}"):
+        block = create_transformer(method, is_numerical=True, config=config, representation=resolved)
+    assert isinstance(block, Pipeline)
+    assert block.named_steps[method].output_dim == expected
+    assert resolved.output_dim == output_dim
+
+
+@pytest.mark.parametrize(("method", "is_numerical"), [("cubic", True), ("b-spline", True), ("ohe", False)])
+def test_resolved_representation_accepts_matching_method_aliases(make_config, method, is_numerical):
+    config = make_config(feature_preprocessing={"feature": {"method": method}})
+    resolved = config.representation_for("feature", is_numerical=is_numerical)
+    block = create_transformer(method, is_numerical=is_numerical, config=config, representation=resolved)
+    assert isinstance(block, Pipeline)
+    assert get_spec(resolved.method).transformer_cls in {type(step) for step in block.named_steps.values()}
+
+
+@pytest.mark.parametrize(
+    ("random_state", "options", "expected"),
+    [(None, {}, UNSET), (17, {}, 17), (17, {"random_state": None}, None), (17, {"random_state": 0}, 0)],
+)
+def test_resolved_representation_preserves_omitted_and_explicit_seeds(make_config, random_state, options, expected):
+    config = make_config(random_state=random_state, feature_preprocessing={"age": {"method": "rbf", **options}})
+    resolved = config.representation_for("age", is_numerical=True)
+    with patch(
+        "pretab.compose.factory.get_numerical_transformer_steps", wraps=get_numerical_transformer_steps
+    ) as steps:
+        block = create_transformer("rbf", is_numerical=True, config=config, representation=resolved)
+    assert isinstance(block, Pipeline)
+    if expected is UNSET:
+        assert "random_state" not in steps.call_args.kwargs
+        assert block.named_steps["rbf"].random_state == get_spec("rbf").transformer_cls().random_state
+    else:
+        assert steps.call_args.kwargs["random_state"] == expected
+        assert block.named_steps["rbf"].random_state == expected
+
+
+def test_resolved_representation_keeps_explicit_adaptive_bounds(make_config):
+    config = make_config(
+        feature_preprocessing={
+            "age": {
+                "method": "rbf",
+                "output_dim": 9,
+                "adaptive": True,
+                "min_output_dim": 3,
+                "max_output_dim": 12,
+            }
+        }
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    block = create_transformer("rbf", is_numerical=True, config=config, representation=resolved)
+    assert isinstance(block, Pipeline)
+    transformer = block.named_steps["rbf"]
+    assert (transformer.output_dim, transformer.adaptive, transformer.min_output_dim, transformer.max_output_dim) == (
+        9,
+        True,
+        3,
+        12,
+    )
+
+
+def test_resolved_representation_overrides_supervised_run_without_leaking_defaults(make_config):
+    config = make_config(
+        target_aware=True,
+        placement_strategy="cart",
+        feature_preprocessing={
+            "age": {
+                "method": "rbf",
+                "target_aware": False,
+                "placement_strategy": "quantile",
+                "output_dim": 3,
+            }
+        },
+    )
+    resolved = config.representation_for("age", is_numerical=True)
+    block = create_transformer("rbf", is_numerical=True, config=config, representation=resolved)
+    assert isinstance(block, Pipeline)
+    transformer = block.named_steps["rbf"]
+    assert transformer.target_aware is False
+    assert transformer.placement_strategy == "quantile"
+    assert block.fit_transform(np.linspace(0, 1, 16).reshape(-1, 1)).shape == (16, 3)
+
+
+@pytest.mark.parametrize("is_numerical", [False, True])
+@pytest.mark.parametrize("missing_policy", [None, "impute", "impute_with_indicator", "separate_state"])
+def test_resolved_representation_preserves_missing_value_and_indicator_assembly(
+    make_config, is_numerical, missing_policy
+):
+    method = "rbf" if is_numerical else "one-hot"
+    options = {"output_dim": 3} if is_numerical else {}
+    config = make_config(
+        missing_policy=missing_policy, feature_preprocessing={"feature": {"method": method, **options}}
+    )
+    resolved = config.representation_for("feature", is_numerical=is_numerical)
+    block = create_transformer(method, is_numerical=is_numerical, config=config, representation=resolved)
+    data = (
+        np.array([[0.0], [1.0], [np.nan], [2.0]])
+        if is_numerical
+        else np.array([["a"], ["b"], [np.nan], ["a"]], dtype=object)
+    )
+    result = block.fit_transform(data)
+    indicator = missing_policy in {"impute_with_indicator", "separate_state"}
+    assert result.shape == (4, (3 if is_numerical else 2) + int(indicator))
+    assert isinstance(block, FeatureUnion if indicator else Pipeline)
+    representation = dict(block.transformer_list)["representation"] if isinstance(block, FeatureUnion) else block
+    assert isinstance(representation, Pipeline)
+    assert representation.named_steps["imputer"].strategy == ("median" if is_numerical else "most_frequent")
+    if indicator:
+        values = result.toarray() if issparse(result) else result
+        np.testing.assert_array_equal(values[:, -1], [0, 0, 1, 0])
+
+
+def test_resolved_representation_keeps_run_wide_scaling(make_config):
+    config = make_config(scaling="standardization", feature_preprocessing={"age": {"method": "rbf", "output_dim": 3}})
+    block = create_transformer(
+        "rbf", is_numerical=True, config=config, representation=config.representation_for("age", is_numerical=True)
+    )
+    assert isinstance(block, Pipeline)
+    assert _names(block.steps) == ["imputer", "scaler", "rbf"]
+
+
+@pytest.mark.parametrize(("method", "is_numerical"), [("rbf", True), ("one-hot", False)])
+def test_explicit_none_representation_keeps_exact_legacy_calls(make_config, method, is_numerical):
+    config = make_config()
+    target = (
+        "pretab.compose.factory.get_numerical_transformer_steps"
+        if is_numerical
+        else "pretab.compose.factory.get_categorical_transformer_steps"
+    )
+    builder = get_numerical_transformer_steps if is_numerical else get_categorical_transformer_steps
+    with patch(target, wraps=builder) as steps:
+        create_transformer(method, is_numerical=is_numerical, config=config)
+        omitted = steps.call_args
+        create_transformer(method, is_numerical=is_numerical, config=config, representation=None)
+    assert steps.call_args == omitted
+
+
+@pytest.mark.parametrize("value", [{"method": "rbf"}, "rbf", False])
+def test_factory_resolved_input_requires_a_typed_value(make_config, value):
+    with pytest.raises(InvalidParamError, match="must be a RepresentationConfig or None"):
+        create_transformer("rbf", is_numerical=True, config=make_config(), representation=value)
+
+
+@pytest.mark.parametrize(("selected", "requested", "is_numerical"), [("int", "rbf", False), ("rff", "rff", True)])
+def test_factory_resolved_input_does_not_broaden_method_selection(make_config, selected, requested, is_numerical):
+    with pytest.raises(InvalidParamError):
+        create_transformer(
+            selected,
+            is_numerical=is_numerical,
+            config=make_config(),
+            representation=RepresentationConfig(method=requested),
+        )
