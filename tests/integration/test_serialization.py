@@ -15,8 +15,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab import Preprocessor, PretabSerializationError, RepresentationPolicy
-from pretab.compose.serialize import SCHEMA_VERSION, _encode_mapping
+from pretab import Preprocessor, PretabSerializationError, RepresentationConfig, RepresentationPolicy
+from pretab.compose.serialize import SCHEMA_VERSION, _decode, _encode, _encode_mapping
+from pretab.core.parameters import UNSET
+from pretab.exceptions import InvalidParamError
 from pretab.preprocessing.floats import NoTransformer, ToFloatTransformer
 
 
@@ -449,7 +451,8 @@ def test_from_spec_refuses_estimator_not_a_base_estimator():
         Preprocessor.from_spec(spec)
 
 
-def test_from_spec_refuses_dataclass_not_in_allowlist():
+@pytest.mark.parametrize("class_name", ["PreprocessorConfig", "_FrozenParams"])
+def test_from_spec_refuses_dataclass_not_in_allowlist(class_name):
     """An allowed-module, genuinely-a-dataclass class must still be refused unless
     it is one of the specifically approved dataclasses.
 
@@ -461,13 +464,60 @@ def test_from_spec_refuses_dataclass_not_in_allowlist():
     spec = {
         "schema_version": SCHEMA_VERSION,
         "state": {
-            "__dict__": [
-                ["evil", {"__dataclass__": {"class": "pretab.compose.config:PreprocessorConfig", "fields": {}}}]
-            ]
+            "__dict__": [["evil", {"__dataclass__": {"class": f"pretab.compose.config:{class_name}", "fields": {}}}]]
         },
     }
     with pytest.raises(PretabSerializationError, match="disallowed dataclass"):
         Preprocessor.from_spec(spec)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"method": "RBF"},
+        {"method": "rbf", "output_dim": 3, "adaptive": False, "name": "local"},
+        {
+            "method": "rbf",
+            "adaptive": True,
+            "min_output_dim": None,
+            "max_output_dim": 7,
+            "params": {"random_state": None, "nested": {"levels": [True, 2, 0.5, None]}},
+        },
+    ],
+)
+def test_representation_config_codec_preserves_portable_values(settings):
+    value = RepresentationConfig.from_dict(settings)
+    text = json.dumps(_encode(value), allow_nan=False)
+    assert "_FrozenParams" not in text
+    restored = _decode(json.loads(text))
+    assert type(restored) is RepresentationConfig
+    assert restored == value
+    assert restored.to_dict() == value.to_dict()
+    for field in ("output_dim", "target_aware", "placement_strategy", "adaptive", "min_output_dim", "max_output_dim"):
+        if field not in settings:
+            assert getattr(restored, field) is UNSET
+    detached = restored.to_dict()
+    detached["params"]["changed"] = True
+    assert restored == value
+
+
+@pytest.mark.parametrize(
+    ("fields", "constraint"),
+    [
+        ({"output_dim": 0}, "must be a positive integer"),
+        ({"adaptive": "yes"}, "must be a boolean"),
+        ({"params": {"gamma": math.inf}}, "finite JSON-compatible values"),
+    ],
+)
+def test_representation_config_decoder_runs_value_validation(fields, constraint):
+    payload = {
+        "__dataclass__": {
+            "class": "pretab.compose.config:RepresentationConfig",
+            "fields": _encode_mapping({"method": "rbf", **fields}),
+        }
+    }
+    with pytest.raises(InvalidParamError, match=constraint):
+        _decode(payload)
 
 
 def test_from_spec_rejects_bad_source_type():

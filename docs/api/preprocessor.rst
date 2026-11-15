@@ -119,6 +119,20 @@ configuration needs no syntax change, and can be mixed with structured entries.
 Configuration, output, and reproducibility
 ------------------------------------------
 
+Fitted preprocessors using string, mapping, or
+:class:`~pretab.RepresentationConfig` entries can be saved with
+:meth:`~pretab.Preprocessor.to_spec` and restored with
+:meth:`~pretab.Preprocessor.from_spec` in the same environment. Restored names,
+lineage, widths, output values, and fingerprints retain the fitted state,
+including adaptive sizing and separate missing indicators. Representation
+summaries describe the representation itself, excluding separate indicators;
+output budgets and reported output dimensions include those indicators.
+
+.. warning::
+
+    Load specs only from trusted sources. Dependency versions recorded in a
+    spec do not guarantee compatibility with a different environment.
+
 Supporting types returned or consumed by the preprocessor.
 
 .. autosummary::

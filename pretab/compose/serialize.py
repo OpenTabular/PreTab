@@ -39,6 +39,7 @@ from ..core.representation import FeatureLineage, RepresentationSpec
 from ..exceptions import PretabSerializationError
 from ..placement.base import PlacementResult
 from ..preprocessing.floats import NoTransformer, ToFloatTransformer
+from .config import RepresentationConfig
 from .inspection import representation_leaf
 from .registry import TransformerSpec
 
@@ -59,7 +60,7 @@ _ALLOWED_TOP_LEVEL = frozenset({"pretab", "sklearn", "numpy", "scipy"})
 # let a spec construct an arbitrary sklearn/numpy/scipy dataclass with
 # attacker-controlled fields.
 _ALLOWED_DATACLASSES = frozenset(
-    {RepresentationPolicy, RepresentationSpec, FeatureLineage, PlacementResult, TransformerSpec}
+    {RepresentationPolicy, RepresentationSpec, FeatureLineage, PlacementResult, TransformerSpec, RepresentationConfig}
 )
 
 
@@ -154,6 +155,9 @@ def _encode(obj):
         return [_encode(v) for v in obj]
     if isinstance(obj, BaseEstimator):
         return {"__estimator__": {"class": _qualname(obj), "state": _encode_mapping(vars(obj))}}
+    if type(obj) is RepresentationConfig:
+        fields = {key: _encode(value) for key, value in obj.to_dict().items()}
+        return {"__dataclass__": {"class": _qualname(obj), "fields": fields}}
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         fields = {f.name: _encode(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
         return {"__dataclass__": {"class": _qualname(obj), "fields": fields}}

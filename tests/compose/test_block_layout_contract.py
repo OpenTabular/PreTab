@@ -1,19 +1,22 @@
 """Agreement between fitted block spans and the public output-layout APIs."""
 
+import json
+from contextlib import nullcontext
 from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
 import pytest
 from scipy import sparse
+from sklearn.base import clone
 from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.utils.validation import check_is_fitted
 
-from pretab import BaseRepresentation, Preprocessor, register_representation
+from pretab import BaseRepresentation, Preprocessor, RepresentationConfig, register_representation
 from pretab.compose import registry
 from pretab.compose.inspection import block_name, build_feature_lineage, get_output_slices
 from pretab.embedding.language import LanguageEmbeddingTransformer
-from pretab.exceptions import IncompatibleParamsError
+from pretab.exceptions import ConfigWarning, IncompatibleParamsError, OutputBudgetError
 
 
 class _PositiveOnly(BaseRepresentation):
@@ -188,6 +191,104 @@ def test_fitted_block_layout_agrees_across_views(layout_data, output_format, par
         for name, feature in (("num_value", "value"), ("num_other", "other"), ("cat_city", "city")):
             if options.get("missing_policy") == "separate_state" or frame[feature].isna().any():
                 np.testing.assert_array_equal(_dense(blocks[name])[:, -1], frame[feature].isna().astype(float))
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+@pytest.mark.parametrize("missing_policy", [None, "separate_state"])
+@pytest.mark.parametrize("sizing", ["fixed", "adaptive", "clamped"])
+def test_structured_fitted_widths_agree_across_views(layout_data, typed, output_format, missing_policy, sizing):
+    frame, target = layout_data
+    requests = {
+        "value": {"method": "rbf", "output_dim": 12, "adaptive": True}
+        if sizing == "adaptive"
+        else {"method": "rbf", "output_dim": 2},
+        "other": {"method": "bspline", "output_dim": 3 if sizing == "clamped" else 6, "params": {"degree": 2}},
+        "city": {"method": "one-hot", "params": {"drop": "first"}},
+    }
+    preprocessor = Preprocessor(
+        output_dim=12,
+        adaptive=True,
+        min_output_dim=3,
+        max_output_dim=4,
+        target_aware=True,
+        placement_strategy="cart",
+        random_state=17,
+        missing_policy=missing_policy,
+        output_format=output_format,
+        feature_preprocessing={
+            feature: RepresentationConfig.from_dict(settings) if typed else settings
+            for feature, settings in requests.items()
+        },
+    )
+    with pytest.warns(ConfigWarning) if sizing == "clamped" else nullcontext():
+        Pipeline([("preprocessor", preprocessor)]).fit(frame, target)
+
+    _assert_block_layout(preprocessor, frame)
+    indicator = int(missing_policy == "separate_state")
+    dimensions = preprocessor.output_dims_
+    if sizing == "adaptive":
+        assert 3 <= dimensions["value"] - indicator <= 4
+        assert dimensions["value"] - indicator < requests["value"]["output_dim"]
+    else:
+        assert dimensions["value"] == 2 + indicator
+    assert dimensions["other"] == (5 if sizing == "clamped" else 6) + indicator
+    assert dimensions["city"] == frame["city"].nunique() - 1 + indicator
+
+    names = preprocessor.get_feature_names_out()
+    transformed = _dense(preprocessor.transform(frame, return_array=True))
+    fingerprint = preprocessor.fingerprint_
+    report = preprocessor.reproducibility_report()
+    spec = json.loads(json.dumps(preprocessor.to_spec(), allow_nan=False))
+    representations = {entry["columns"][0]: entry for entry in spec["representations"]}
+    assert set(representations) == {"value", "other"}
+    for feature, entry in representations.items():
+        assert entry["output_dim"] == len(entry["output_features"]) == dimensions[feature] - indicator
+    assert spec["feature_names_out"] == list(names)
+    assert report["n_features_in"] == frame.shape[1]
+    assert report["n_output_features"] == transformed.shape[1] == sum(dimensions.values())
+    assert report["fingerprint"] == fingerprint
+    assert report["representations"] == {feature: entry["family"] for feature, entry in representations.items()}
+
+    restored = Preprocessor.from_spec(spec)
+    _assert_block_layout(restored, frame)
+    assert restored.output_dims_ == dimensions
+    assert restored.get_feature_info(verbose=False) == preprocessor.get_feature_info(verbose=False)
+    assert restored.get_feature_lineage() == preprocessor.get_feature_lineage()
+    assert restored.reproducibility_report() == report
+    assert restored.fingerprint_ == fingerprint
+    np.testing.assert_array_equal(restored.get_feature_names_out(), names)
+    np.testing.assert_array_equal(_dense(restored.transform(frame, return_array=True)), transformed)
+
+    assert preprocessor.estimate_output_shape(frame) == transformed.shape
+    assert preprocessor.estimate_memory(frame) == transformed.nbytes
+    limits = {
+        "max_output_features": transformed.shape[1],
+        "max_features_per_input": max(dimensions.values()),
+        "max_dense_memory": transformed.nbytes,
+    }
+    bounded = clone(preprocessor)
+    assert isinstance(bounded, Preprocessor)
+    bounded.set_params(**limits)
+    with pytest.warns(ConfigWarning) if sizing == "clamped" else nullcontext():
+        bounded.fit(frame, target)
+    _assert_block_layout(bounded, frame)
+    assert bounded.output_dims_ == dimensions
+    np.testing.assert_array_equal(_dense(bounded.transform(frame, return_array=True)), transformed)
+
+    expected_details = {
+        "max_output_features": f"total output columns ({transformed.shape[1]})",
+        "max_features_per_input": f"feature 'other' expands to {dimensions['other']} columns",
+        "max_dense_memory": f"needs ~{transformed.nbytes} bytes",
+    }
+    for budget, limit in limits.items():
+        rejected = clone(preprocessor)
+        assert isinstance(rejected, Preprocessor)
+        rejected.set_params(**{budget: limit - 1})
+        with pytest.raises(OutputBudgetError, match=budget) as error:
+            with pytest.warns(ConfigWarning) if sizing == "clamped" else nullcontext():
+                rejected.fit(frame, target)
+        assert expected_details[budget] in str(error.value)
 
 
 @pytest.mark.parametrize("output_format", ["dense", "sparse"])
