@@ -13,6 +13,7 @@ from sklearn.pipeline import FeatureUnion, Pipeline
 from pretab import Preprocessor
 from pretab.compose.config import PreprocessorConfig, RepresentationConfig
 from pretab.compose.factory import (
+    _clamp_spline_basis,
     _placement_kwargs,
     build_column_transformer,
     create_transformer,
@@ -218,6 +219,163 @@ def test_preprocessor_fits_structured_representation(typed):
     transformed = processor.transform(frame, return_array=True)
     assert isinstance(transformed, np.ndarray)
     assert transformed.shape == (30, 3)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize(
+    ("method", "canonical", "output_dim", "params"),
+    [("RBF", "rbf", 3, {"gamma": 0.5}), ("b-spline", "bspline", 6, {"degree": 2})],
+)
+def test_preprocessor_routes_local_options_through_both_step_builders(typed, method, canonical, output_dim, params):
+    settings = {
+        "age": {"method": method, "output_dim": output_dim, "params": params, "name": "age-basis"},
+        "city": {"method": "OHE", "params": {"drop": "first", "sparse_output": False}},
+    }
+    overrides = {
+        feature: RepresentationConfig.from_dict(value) if typed else value for feature, value in settings.items()
+    }
+    frame = pd.DataFrame({"age": np.linspace(0, 1, 40), "city": ["a", "b"] * 20})
+    processor = Preprocessor(
+        feature_preprocessing=overrides,
+        output_dim=11,
+        degree=3,
+        random_state=17,
+        target_aware=False,
+        placement_strategy="quantile",
+        scaling="standardization",
+    )
+
+    with (
+        patch("pretab.compose.factory.create_transformer", wraps=create_transformer) as create,
+        patch(
+            "pretab.compose.factory.get_numerical_transformer_steps", wraps=get_numerical_transformer_steps
+        ) as numerical,
+        patch(
+            "pretab.compose.factory.get_categorical_transformer_steps", wraps=get_categorical_transformer_steps
+        ) as categorical,
+    ):
+        processor.fit(frame)
+
+    assert [entry.args[0] for entry in create.call_args_list] == [canonical, "one-hot"]
+    assert all(isinstance(entry.kwargs["representation"], RepresentationConfig) for entry in create.call_args_list)
+    numerical.assert_called_once()
+    options = numerical.call_args.kwargs
+    assert options["method"] == canonical
+    assert options["output_dim"] == output_dim
+    assert options["target_aware"] is False
+    assert options["placement_strategy"] == "quantile"
+    assert options["scaling"] == "standardization"
+    assert "name" not in options
+    if canonical == "rbf":
+        assert "degree" not in options
+    for key, value in params.items():
+        assert options[key] == value
+    categorical.assert_called_once_with(
+        "one-hot", add_imputer=True, imputer_strategy="most_frequent", drop="first", sparse_output=False
+    )
+
+    numeric = processor.column_transformer_.named_transformers_["num_age"]
+    assert _names(numeric.steps) == ["imputer", "scaler", canonical]
+    basis = numeric.named_steps[canonical]
+    assert basis.output_dim == output_dim
+    assert basis.target_aware is False
+    assert basis.placement_strategy == "quantile"
+    for key, value in params.items():
+        assert getattr(basis, key) == value
+    encoder = processor.column_transformer_.named_transformers_["cat_city"].named_steps["onehot"]
+    assert encoder.drop == "first"
+    assert encoder.sparse_output is False
+    transformed = processor.transform(frame, return_array=True)
+    assert isinstance(transformed, np.ndarray)
+    assert transformed.shape == (40, output_dim + 1)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("method", ["bspline", "mspline", "ispline"])
+def test_preprocessor_clamps_each_local_spline_width(typed, method):
+    settings = {
+        "age": {"method": method, "output_dim": 3, "placement_strategy": "quantile", "degree": 2},
+        "income": {"method": method, "output_dim": 51, "placement_strategy": "uniform", "degree": 3},
+    }
+    overrides = {
+        feature: RepresentationConfig.from_dict(value) if typed else value for feature, value in settings.items()
+    }
+    frame = pd.DataFrame({"age": np.linspace(0, 1, 80) ** 3, "income": np.linspace(2, 8, 80) ** 2})
+    with (
+        patch("pretab.compose.factory._clamp_spline_basis", wraps=_clamp_spline_basis) as clamp,
+        pytest.warns(ConfigWarning) as emitted,
+    ):
+        processor = Preprocessor(
+            feature_preprocessing=overrides,
+            output_dim=11,
+            target_aware=False,
+            placement_strategy="uniform",
+            scaling="none",
+        ).fit(frame)
+
+    assert clamp.call_args_list == [call(3), call(51)]
+    assert len(emitted) == 2
+    for feature, expected in (("age", 5), ("income", 50)):
+        basis = processor.column_transformer_.named_transformers_[f"num_{feature}"].named_steps[method]
+        assert basis.output_dim == expected
+        assert basis.degree == settings[feature]["degree"]
+        assert basis.placement_strategy == settings[feature]["placement_strategy"]
+    transformed = processor.transform(frame, return_array=True)
+    assert isinstance(transformed, np.ndarray)
+    assert transformed.shape == (80, 55)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("handle_unknown", ["error", "ignore"])
+def test_preprocessor_forwards_portable_one_hot_constructor_options(typed, handle_unknown):
+    params = {
+        "categories": [["a", "b", "c"]],
+        "drop": ["a"],
+        "sparse_output": False,
+        "dtype": "float32",
+        "handle_unknown": handle_unknown,
+        "min_frequency": None,
+        "max_categories": None,
+        "feature_name_combiner": "concat",
+    }
+    settings = {"method": "one-hot", "params": params}
+    requested = RepresentationConfig.from_dict(settings) if typed else settings
+    frame = pd.DataFrame({"city": ["a", "b", "c"] * 10})
+    processor = Preprocessor(feature_preprocessing={"city": requested}).fit(frame)
+    block = processor.column_transformer_.named_transformers_["cat_city"]
+    encoder = block.named_steps["onehot"]
+    assert {key: encoder.get_params()[key] for key in params} == params
+    np.testing.assert_array_equal(processor.transform(frame, return_array=True)[:3], [[0, 0], [1, 0], [0, 1]])
+    if handle_unknown == "error":
+        with pytest.raises(ValueError, match="unknown categories"):
+            processor.transform(pd.DataFrame({"city": ["unseen"]}), return_array=True)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+def test_preprocessor_applies_each_local_placement_capability(typed):
+    settings = {
+        "supervised": {"method": "ple", "output_dim": 3, "target_aware": True, "placement_strategy": "cart"},
+        "unsupervised": {"method": "rbf", "output_dim": 4, "target_aware": False, "placement_strategy": "quantile"},
+        "penalized": {"method": "pspline", "output_dim": 6, "target_aware": False, "placement_strategy": "uniform"},
+    }
+    overrides = {
+        feature: RepresentationConfig.from_dict(value) if typed else value for feature, value in settings.items()
+    }
+    values = np.linspace(0, 1, 80)
+    frame = pd.DataFrame({feature: values ** (index + 1) for index, feature in enumerate(settings)})
+    with patch("pretab.compose.factory._placement_kwargs", wraps=_placement_kwargs) as placement:
+        processor = Preprocessor(feature_preprocessing=overrides, scaling="none").fit(frame, np.sin(6 * values))
+
+    assert [entry.args[0].name for entry in placement.call_args_list] == ["ple", "rbf", "pspline"]
+    for feature, requested in settings.items():
+        basis = processor.column_transformer_.named_transformers_[f"num_{feature}"].named_steps[requested["method"]]
+        assert basis.output_dim == requested["output_dim"]
+        assert basis.placement_strategy == requested["placement_strategy"]
+        if requested["method"] == "rbf":
+            assert basis.target_aware is False
+    transformed = processor.transform(frame, return_array=True)
+    assert isinstance(transformed, np.ndarray)
+    assert transformed.shape == (80, 13)
 
 
 @pytest.mark.parametrize("adaptive", [False, True])

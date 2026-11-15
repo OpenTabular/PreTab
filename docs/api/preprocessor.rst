@@ -50,6 +50,13 @@ Fields and conversion
 ``params``
     Family-specific constructor options, such as ``{"gamma": 0.5}`` for
     RBF. Common fields belong at the top level, not in this mapping.
+    One-hot entries accept encoder options such as ``categories``, ``drop``,
+    ``handle_unknown``, and ``sparse_output``. For example,
+    ``{"method": "one-hot", "params": {"drop": "first", "sparse_output": False}}``
+    drops one category and requests dense encoding. Encoder ``dtype`` values
+    must be portable, such as ``"float32"``, rather than NumPy scalar classes.
+    Use the preprocessor's ``dtype`` to control the final output dtype;
+    encoder settings do not bypass subsequent output conversion.
 
 ``name``
     Optional nonempty metadata label, default ``None``. It does not rename

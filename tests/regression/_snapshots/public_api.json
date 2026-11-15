@@ -555,7 +555,16 @@
       "transformer_cls": "pretab.kernel_approximation.nystroem.NystroemFeaturesTransformer"
     },
     "one-hot": {
-      "allowed_args": [],
+      "allowed_args": [
+        "categories",
+        "drop",
+        "sparse_output",
+        "dtype",
+        "handle_unknown",
+        "min_frequency",
+        "max_categories",
+        "feature_name_combiner"
+      ],
       "arity": "univariate",
       "derived_capabilities": {
         "is_categorical": true,

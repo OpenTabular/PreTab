@@ -333,7 +333,22 @@ _SPECS: tuple[TransformerSpec, ...] = (
     _spec("none", NoTransformer, feature_kind=frozenset({NUMERICAL, CATEGORICAL})),
     # --- categorical-only methods ---
     _spec("int", ContinuousOrdinalTransformer, feature_kind=frozenset({CATEGORICAL})),
-    _spec("one-hot", OneHotEncoder, feature_kind=frozenset({CATEGORICAL}), sparse_output=True),
+    _spec(
+        "one-hot",
+        OneHotEncoder,
+        (
+            "categories",
+            "drop",
+            "sparse_output",
+            "dtype",
+            "handle_unknown",
+            "min_frequency",
+            "max_categories",
+            "feature_name_combiner",
+        ),
+        feature_kind=frozenset({CATEGORICAL}),
+        sparse_output=True,
+    ),
     _spec("onehot_from_ordinal", OneHotFromOrdinalTransformer, feature_kind=frozenset({CATEGORICAL})),
     _spec(
         "pretrained",
