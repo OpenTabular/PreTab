@@ -18,7 +18,9 @@ from typing import cast
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.base import clone
 
+from pretab import RepresentationConfig
 from pretab.exceptions import InvalidParamError
 from pretab.expansion.spline.b_spline import BSplineTransformer
 from pretab.expansion.spline.i_spline import ISplineTransformer
@@ -175,6 +177,48 @@ def test_adaptive_width_within_window(data, method):
     assert fixed == 10
     assert 3 <= adaptive <= 5
     assert adaptive < fixed
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("global_adaptive", [False, True], ids=["global-fixed", "global-adaptive"])
+@pytest.mark.parametrize("method", ADAPTIVE_VIA_PREPROCESSOR + BMI_SPLINE_METHODS + TARGET_AWARE_LEGACY_SPLINE_METHODS)
+def test_per_feature_explicit_width_and_adaptive_opt_in_are_deterministic(data, typed, global_adaptive, method):
+    X, y = data
+    requests = {
+        "fixed": {"method": method, "output_dim": 10},
+        "opt_out": {"method": method, "output_dim": 10, "adaptive": False},
+        "opt_in": {"method": method, "output_dim": 10, "adaptive": True},
+        "inherited": {"method": method},
+    }
+    features = pd.DataFrame(dict.fromkeys(requests, X["x"]))
+    pre = Preprocessor(
+        categorical_method="none",
+        output_dim=12,
+        adaptive=global_adaptive,
+        min_output_dim=5,
+        max_output_dim=7,
+        target_aware=True,
+        placement_strategy="cart",
+        task="regression",
+        random_state=17,
+        feature_preprocessing={
+            name: RepresentationConfig.from_dict(settings) if typed else settings for name, settings in requests.items()
+        },
+    )
+    repeated = clone(pre)
+    assert isinstance(repeated, Preprocessor)
+    blocks = cast("dict[str, np.ndarray]", pre.fit(features, y).transform(features, return_array=False))
+    repeated_blocks = cast("dict[str, np.ndarray]", repeated.fit(features, y).transform(features, return_array=False))
+
+    assert blocks["num_fixed"].shape == blocks["num_opt_out"].shape == (len(features), 10)
+    assert 5 <= blocks["num_opt_in"].shape[1] <= 7
+    if global_adaptive:
+        assert 5 <= blocks["num_inherited"].shape[1] <= 7
+    else:
+        assert blocks["num_inherited"].shape == (len(features), 12)
+    np.testing.assert_array_equal(blocks["num_fixed"], blocks["num_opt_out"])
+    for name in requests:
+        np.testing.assert_array_equal(blocks[f"num_{name}"], repeated_blocks[f"num_{name}"])
 
 
 # --------------------------------------------------------------------------- #
