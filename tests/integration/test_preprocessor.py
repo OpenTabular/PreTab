@@ -500,6 +500,73 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
 
 
+@pytest.mark.parametrize("operation", ["fit", "fit_transform"])
+@pytest.mark.parametrize("syntax", ["shorthand", "nested", "value"])
+@pytest.mark.parametrize(
+    ("feature", "settings", "option", "constraint"),
+    [
+        pytest.param(
+            "color", {"method": "one-hot", "degree": 3}, "degree", "is not applicable", id="categorical-degree"
+        ),
+        pytest.param("num1", {"method": "rbf", "degree": 3}, "degree", "is not applicable", id="rbf-degree"),
+        pytest.param("num1", {"method": "minmax", "gamma": 0.5}, "gamma", "is not applicable", id="scaler-gamma"),
+        pytest.param("color", {"method": "OHE", "gamma": 0.5}, "gamma", "is not applicable", id="alias-gamma"),
+        pytest.param(
+            "color", {"method": "one-hot", "output_dim": 3}, "output_dim", "is not applicable", id="categorical-width"
+        ),
+        pytest.param(
+            "color",
+            {"method": "one-hot", "adaptive": True},
+            "adaptive",
+            "method 'one-hot' does not support adaptive resolution",
+            id="categorical-adaptive",
+        ),
+        pytest.param(
+            "color",
+            {"method": "one-hot", "target_aware": True},
+            "target_aware",
+            "method 'one-hot' cannot use the target",
+            id="forbidden-target",
+        ),
+        pytest.param(
+            "num1",
+            {"method": "ple", "target_aware": False},
+            "target_aware",
+            "method 'ple' requires the target",
+            id="required-target",
+        ),
+        pytest.param(
+            "num1",
+            {"method": "pspline", "placement_strategy": "quantile"},
+            "placement_strategy",
+            "is not supported by method 'pspline'",
+            id="unsupported-placement",
+        ),
+    ],
+)
+def test_inapplicable_feature_options_report_feature_path(
+    sample_data, operation, syntax, feature, settings, option, constraint
+):
+    X, y = sample_data
+    X = X.rename(columns={"cat1": "color"})
+    if syntax == "shorthand":
+        representation = settings
+    elif syntax == "nested":
+        representation = RepresentationConfig.from_dict(settings).to_dict()
+    else:
+        representation = RepresentationConfig.from_dict(settings)
+    pre = Preprocessor(feature_preprocessing={feature: representation})
+
+    with pytest.raises(InvalidParamError) as error:
+        getattr(pre, operation)(X, y)
+
+    message = str(error.value)
+    heading = message.splitlines()[0]
+    assert f"feature_preprocessing[{feature!r}]." in heading
+    assert option in heading
+    assert f"Constraint: {constraint}" in message
+
+
 # --- positional width check at transform (issue #72) ------------------------------
 
 
