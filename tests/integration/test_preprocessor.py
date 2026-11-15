@@ -8,11 +8,12 @@ from sklearn.exceptions import NotFittedError
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import GridSearchCV
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.utils.validation import check_is_fitted
 
 from pretab import RepresentationConfig
 from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
+from pretab.expansion.functional.rbf import RBFExpansionTransformer
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
 
 
@@ -269,6 +270,142 @@ def test_structured_feature_params_survive_fit_and_clone(sample_data, typed, fit
     transformed = fresh.transform(frame, return_array=True)
     assert isinstance(transformed, np.ndarray)
     assert transformed.shape == (len(frame), 3)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("missing_policy", [None, "separate_state"])
+@pytest.mark.parametrize("target_aware", [False, True], ids=["quantile", "cart"])
+def test_same_method_features_keep_independent_fitted_state(typed, missing_policy, target_aware):
+    values = np.linspace(1.0, 9.0, 80)
+    frame = pd.DataFrame({"first": values, "second": values**2 + 20.0})
+    frame.loc[3, "first"] = np.nan
+    frame.loc[7, "second"] = np.nan
+    target = np.sin(values)
+    settings = {
+        "first": {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.25}},
+        "second": {"method": "rbf", "output_dim": 5, "params": {"gamma": 0.75}},
+    }
+    processor = Preprocessor(
+        feature_preprocessing={
+            feature: RepresentationConfig.from_dict(options) if typed else options
+            for feature, options in settings.items()
+        },
+        target_aware=target_aware,
+        placement_strategy="cart" if target_aware else "quantile",
+        scaling="standardization",
+        random_state=17,
+        missing_policy=missing_policy,
+        output_structure="blocks",
+    ).fit(frame, target)
+    pipelines = []
+    missing_states = []
+    for feature in settings:
+        block = processor.column_transformer_.named_transformers_[f"num_{feature}"]
+        if missing_policy == "separate_state":
+            assert isinstance(block, FeatureUnion)
+            branches = dict(block.transformer_list)
+            missing_states.append(branches["missing"])
+            block = branches["representation"]
+        assert isinstance(block, Pipeline)
+        pipelines.append(block)
+    first, second = pipelines
+    assert first is not second
+    if missing_states:
+        assert missing_states[0] is not missing_states[1]
+    for name in first.named_steps:
+        assert first.named_steps[name] is not second.named_steps[name]
+    first_basis = first.named_steps["rbf"]
+    second_basis = second.named_steps["rbf"]
+    assert isinstance(first_basis, RBFExpansionTransformer)
+    assert isinstance(second_basis, RBFExpansionTransformer)
+    assert (first_basis.output_dim, first_basis.gamma) == (3, 0.25)
+    assert (second_basis.output_dim, second_basis.gamma) == (5, 0.75)
+    assert first_basis.centers_ is not second_basis.centers_
+    assert not np.shares_memory(first_basis.centers_[0], second_basis.centers_[0])
+    for step, attribute in (("imputer", "statistics_"), ("scaler", "mean_"), ("scaler", "scale_")):
+        assert not np.shares_memory(
+            getattr(first.named_steps[step], attribute), getattr(second.named_steps[step], attribute)
+        )
+    sibling_centers = second_basis.centers_[0].copy()
+    sibling_statistics = second.named_steps["imputer"].statistics_.copy()
+    sibling_mean = second.named_steps["scaler"].mean_.copy()
+    sibling_scale = second.named_steps["scaler"].scale_.copy()
+    reference = processor.transform(frame)
+    assert isinstance(reference, dict)
+    indicator = int(missing_policy == "separate_state")
+    assert processor.output_dims_ == {"first": 3 + indicator, "second": 5 + indicator}
+
+    first_basis.centers_[0] += 0.25
+    first.named_steps["imputer"].statistics_ += 1.0
+    first.named_steps["scaler"].mean_ += 0.5
+    changed = processor.transform(frame)
+    assert isinstance(changed, dict)
+    assert not np.array_equal(changed["num_first"], reference["num_first"])
+    np.testing.assert_array_equal(changed["num_second"], reference["num_second"])
+
+    first.fit(frame[["first"]] ** 2, target)
+    refitted = processor.transform(frame)
+    assert isinstance(refitted, dict)
+    np.testing.assert_array_equal(refitted["num_second"], reference["num_second"])
+    np.testing.assert_array_equal(second_basis.centers_[0], sibling_centers)
+    np.testing.assert_array_equal(second.named_steps["imputer"].statistics_, sibling_statistics)
+    np.testing.assert_array_equal(second.named_steps["scaler"].mean_, sibling_mean)
+    np.testing.assert_array_equal(second.named_steps["scaler"].scale_, sibling_scale)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("missing_policy", [None, "separate_state"])
+def test_one_hot_features_keep_independent_fitted_state(typed, missing_policy):
+    frame = pd.DataFrame({"first": ["a", "b", "a", None] * 20, "second": ["x", "y", "z", "x"] * 20})
+    settings = {
+        "first": {"method": "one-hot", "params": {"drop": "first", "sparse_output": False}},
+        "second": {"method": "one-hot", "params": {"drop": None, "sparse_output": False}},
+    }
+    processor = Preprocessor(
+        feature_preprocessing={
+            feature: RepresentationConfig.from_dict(options) if typed else options
+            for feature, options in settings.items()
+        },
+        missing_policy=missing_policy,
+        output_structure="blocks",
+    ).fit(frame)
+    pipelines = []
+    for feature in settings:
+        block = processor.column_transformer_.named_transformers_[f"cat_{feature}"]
+        if missing_policy == "separate_state":
+            assert isinstance(block, FeatureUnion)
+            block = dict(block.transformer_list)["representation"]
+        assert isinstance(block, Pipeline)
+        pipelines.append(block)
+    first, second = pipelines
+    assert first is not second
+    for name in first.named_steps:
+        assert first.named_steps[name] is not second.named_steps[name]
+    first_encoder = first.named_steps["onehot"]
+    second_encoder = second.named_steps["onehot"]
+    assert first_encoder.drop == "first"
+    assert second_encoder.drop is None
+    assert first_encoder.categories_ is not second_encoder.categories_
+    assert not np.shares_memory(first_encoder.categories_[0], second_encoder.categories_[0])
+    assert not np.shares_memory(first.named_steps["imputer"].statistics_, second.named_steps["imputer"].statistics_)
+    sibling_categories = second_encoder.categories_[0].copy()
+    sibling_statistics = second.named_steps["imputer"].statistics_.copy()
+    sibling_block = processor.column_transformer_.named_transformers_["cat_second"]
+    reference = sibling_block.transform(frame[["second"]])
+    indicator = int(missing_policy == "separate_state")
+    assert processor.output_dims_ == {"first": 1 + indicator, "second": 3 + indicator}
+
+    first_encoder.categories_[0][0] = "changed"
+    first.named_steps["imputer"].statistics_[0] = "changed"
+    np.testing.assert_array_equal(second_encoder.categories_[0], sibling_categories)
+    np.testing.assert_array_equal(second.named_steps["imputer"].statistics_, sibling_statistics)
+    np.testing.assert_array_equal(sibling_block.transform(frame[["second"]]), reference)
+
+    first.fit(frame[["first"]].replace({"a": "q", "b": "r"}))
+    np.testing.assert_array_equal(first_encoder.categories_[0], ["q", "r"])
+    np.testing.assert_array_equal(second_encoder.categories_[0], sibling_categories)
+    np.testing.assert_array_equal(second.named_steps["imputer"].statistics_, sibling_statistics)
+    np.testing.assert_array_equal(sibling_block.transform(frame[["second"]]), reference)
 
 
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
