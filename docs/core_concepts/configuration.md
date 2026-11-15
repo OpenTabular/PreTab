@@ -146,7 +146,7 @@ Don't infer the resolved method per column from the constructor arguments alone.
 
 ## Structured per-feature configuration
 
-These three examples use the same training data and a scikit-learn regression pipeline.
+The first three examples use the same training data and a scikit-learn regression pipeline.
 `income` is deliberately left out of each override map, so it uses the global `"none"`
 method and contributes one column.
 
@@ -261,6 +261,62 @@ representation settings; editing a raw mapping afterward does not refit the lear
 transformers. Use `RepresentationConfig` when the request itself should be immutable from
 construction onward. Neither form changes an already fitted graph without another fit.
 ```
+
+### Different widths for the same method
+
+Each column can use the same representation with a different width. With
+`output_structure="blocks"`, numerical block keys have a `num_` prefix, while
+`output_dims_` and `get_feature_info()` use the source column names.
+
+```python
+import numpy as np
+import pandas as pd
+
+from pretab import Preprocessor
+
+numeric_frame = pd.DataFrame({
+    "age": np.linspace(18.0, 70.0, 80),
+    "income": np.linspace(25000.0, 90000.0, 80),
+    "tenure": np.linspace(0.0, 30.0, 80),
+})
+widths = Preprocessor(
+    feature_preprocessing={
+        "age": {"method": "rbf", "output_dim": 2},
+        "income": {"method": "rbf", "output_dim": 3},
+        "tenure": {"method": "rbf", "output_dim": 5},
+    },
+    target_aware=False,
+    placement_strategy="uniform",
+    scaling="none",
+    output_structure="blocks",
+)
+blocks = widths.fit_transform(numeric_frame)
+
+assert widths.output_dims_ == {"age": 2, "income": 3, "tenure": 5}
+assert widths.total_output_dim_ == 10
+numerical, categorical, embeddings = widths.get_feature_info(verbose=False)
+assert {name: info["dimension"] for name, info in numerical.items()} == widths.output_dims_
+assert categorical == embeddings == {}
+names = widths.get_feature_names_out()
+assert names.tolist() == [
+    f"num_{feature}_rbf{index}"
+    for feature, width in widths.output_dims_.items()
+    for index in range(width)
+]
+assert {name: block.shape for name, block in blocks.items()} == {
+    "num_age": (80, 2),
+    "num_income": (80, 3),
+    "num_tenure": (80, 5),
+}
+np.testing.assert_array_equal(
+    np.hstack([blocks["num_age"], blocks["num_income"], blocks["num_tenure"]]),
+    widths.transform(numeric_frame, return_array=True),
+)
+```
+
+The blocks contain two, three and five columns in source order. Their concatenation
+matches the ten-column matrix returned by `return_array=True`. Size each input
+block from the fitted dimensions, not the constructor-wide `output_dim`.
 
 ## Presets
 

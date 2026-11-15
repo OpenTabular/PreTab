@@ -291,6 +291,51 @@ def test_structured_fitted_widths_agree_across_views(layout_data, typed, output_
         assert expected_details[budget] in str(error.value)
 
 
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+def test_same_method_widths_2_3_5_match_block_contract(typed, output_format):
+    frame = pd.DataFrame(
+        {
+            "age": np.linspace(18.0, 70.0, 80),
+            "income": np.linspace(25000.0, 90000.0, 80),
+            "tenure": np.linspace(0.0, 30.0, 80),
+        }
+    )
+    requests = {
+        "age": {"method": "rbf", "output_dim": 2},
+        "income": {"method": "rbf", "output_dim": 3},
+        "tenure": {"method": "rbf", "output_dim": 5},
+    }
+    preprocessor = Preprocessor(
+        feature_preprocessing={
+            feature: RepresentationConfig.from_dict(settings) if typed else settings
+            for feature, settings in requests.items()
+        },
+        target_aware=False,
+        placement_strategy="uniform",
+        scaling="none",
+        output_structure="blocks",
+        output_format=output_format,
+    )
+    Pipeline([("preprocessor", preprocessor)]).fit(frame)
+
+    _assert_block_layout(preprocessor, frame)
+    assert preprocessor.output_dims_ == {"age": 2, "income": 3, "tenure": 5}
+    assert preprocessor.total_output_dim_ == 10
+    assert get_output_slices(preprocessor.column_transformer_) == [
+        ("num_age", 0, 2),
+        ("num_income", 2, 3),
+        ("num_tenure", 5, 5),
+    ]
+    blocks = preprocessor.transform(frame)
+    assert isinstance(blocks, dict)
+    assert {name: np.shape(block) for name, block in blocks.items()} == {
+        "num_age": (80, 2),
+        "num_income": (80, 3),
+        "num_tenure": (80, 5),
+    }
+
+
 @pytest.mark.parametrize("output_format", ["dense", "sparse"])
 def test_language_embedding_block_layout(layout_data, monkeypatch, output_format):
     frame, _ = layout_data
