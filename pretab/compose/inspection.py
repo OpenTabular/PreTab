@@ -8,6 +8,8 @@ collects per-feature preprocessing / dimension / category metadata, and
 """
 
 import copy
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
@@ -54,6 +56,30 @@ def block_name(step_name, columns):
     return step_name if block is None else f"{block[0]}_{block[1]}"
 
 
+@dataclass(frozen=True)
+class _FittedBlock:
+    """Read-only block metadata retaining the fitted transformer and selector references."""
+
+    step_name: str
+    transformer: Any
+    columns: Any
+    _column_transformer: Any
+
+    @property
+    def public_name(self) -> str:
+        return block_name(self.step_name, self.columns)
+
+    @property
+    def span(self) -> slice:
+        return self._column_transformer.output_indices_[self.step_name]
+
+
+def _iter_fitted_blocks(column_transformer) -> Iterator[_FittedBlock]:
+    """Yield every fitted block in order, leaving filtering and span access to callers."""
+    for name, transformer, columns in column_transformer.transformers_:
+        yield _FittedBlock(name, transformer, columns, column_transformer)
+
+
 def get_output_slices(column_transformer):
     """Return ordered ``(name, start, width)`` spans for each output block.
 
@@ -63,16 +89,16 @@ def get_output_slices(column_transformer):
     """
     indices = column_transformer.output_indices_
     slices = []
-    for name, transformer, columns in column_transformer.transformers_:
-        if transformer == "drop":
+    for block in _iter_fitted_blocks(column_transformer):
+        if block.transformer == "drop" or block.step_name not in indices:
             continue
-        span = indices.get(name)
+        span = block.span
         if span is None:
             continue
         width = span.stop - span.start
         if width == 0:
             continue
-        slices.append((block_name(name, columns), span.start, width))
+        slices.append((block.public_name, span.start, width))
     return slices
 
 
@@ -93,7 +119,8 @@ def feature_names_out(column_transformer, input_features=None):
 
     rename = {str(label): str(name) for label, name in zip(fitted_labels, input_features, strict=True)}
     raw_names = []
-    for name, transformer, columns in column_transformer.transformers_:
+    for block in _iter_fitted_blocks(column_transformer):
+        name, transformer, columns = block.step_name, block.transformer, block.columns
         if transformer == "drop" or len(columns) == 0:
             continue
         labels = [rename[str(column)] for column in columns]
@@ -144,9 +171,9 @@ def clean_feature_names(column_transformer, names, *, rename=None):
     """
     rename = rename or {}
     step_to_columns = {
-        name: [rename.get(str(column), column) for column in columns]
-        for name, _transformer, columns in column_transformer.transformers_
-        if name != "remainder" and len(columns) == 1
+        block.step_name: [rename.get(str(column), column) for column in block.columns]
+        for block in _iter_fitted_blocks(column_transformer)
+        if block.step_name != "remainder" and len(block.columns) == 1
     }
     cleaned = []
     for raw in names:
@@ -214,14 +241,11 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
         else {}
     )
 
-    for (
-        name,
-        transformer_pipeline,
-        columns,
-    ) in column_transformer.transformers_:
+    for block in _iter_fitted_blocks(column_transformer):
+        name, transformer_pipeline, columns = block.step_name, block.transformer, block.columns
         if transformer_pipeline == "drop" or len(columns) == 0:
             continue
-        span = column_transformer.output_indices_[name]
+        span = block.span
         dimension = span.stop - span.start
         separate_state = _separate_state_branches(transformer_pipeline)
         if separate_state is not None:
@@ -416,8 +440,11 @@ def build_feature_lineage(column_transformer):
     output_indices = column_transformer.output_indices_
     feature_names_in = getattr(column_transformer, "feature_names_in_", None)
     records = []
-    for name, transformer, columns in column_transformer.transformers_:
-        span = output_indices.get(name)
+    for block in _iter_fitted_blocks(column_transformer):
+        name, transformer, columns = block.step_name, block.transformer, block.columns
+        if name not in output_indices:
+            continue
+        span = block.span
         if span is None:
             continue
         width = span.stop - span.start

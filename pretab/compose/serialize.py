@@ -40,7 +40,7 @@ from ..exceptions import PretabSerializationError
 from ..placement.base import PlacementResult
 from ..preprocessing.floats import NoTransformer, ToFloatTransformer
 from .config import RepresentationConfig
-from .inspection import representation_leaf
+from .inspection import _iter_fitted_blocks, representation_leaf
 from .registry import TransformerSpec
 
 SCHEMA_VERSION = 1
@@ -311,14 +311,14 @@ def _representation_summary(preprocessor) -> list:
     column_transformer = getattr(preprocessor, "column_transformer_", None)
     if column_transformer is None:
         return summary
-    for name, transformer, columns in column_transformer.transformers_:
-        if name == "remainder":
+    for block in _iter_fitted_blocks(column_transformer):
+        if block.step_name == "remainder":
             continue
-        leaf = representation_leaf(transformer)
+        leaf = representation_leaf(block.transformer)
         spec_fn = getattr(leaf, "get_representation_spec", None)
         if spec_fn is None:
             continue
-        block_columns = [str(col) for col in columns]
+        block_columns = [str(col) for col in block.columns]
         # A leaf with more inputs than its block has columns (one fitted behind
         # the imputer's built-in missing indicator, add_missing_indicator=True)
         # names its own inputs.

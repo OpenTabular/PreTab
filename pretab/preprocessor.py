@@ -24,7 +24,7 @@ from .compose.feature_detection import (
     with_string_labels,
 )
 from .compose.inspection import (
-    block_name,
+    _iter_fitted_blocks,
     block_uses_target,
     build_feature_info,
     build_feature_lineage,
@@ -1015,20 +1015,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
         check_is_fitted(self)
         column_transformer = self.column_transformer_
-        output_indices = column_transformer.output_indices_
         input_labels = self._input_labels()
         dims: dict = {}
-        for name, _transformer, columns in column_transformer.transformers_:
-            span = output_indices[name]
+        for block in _iter_fitted_blocks(column_transformer):
+            span = block.span
             width = span.stop - span.start
             if width == 0:
                 continue
-            if name == "remainder":
+            if block.step_name == "remainder":
                 # Passthrough columns: one output column per untransformed feature.
                 for full in column_transformer.get_feature_names_out()[span]:
                     feature = full.split("__", 1)[-1] if "__" in full else full
                     dims[feature] = dims.get(feature, 0) + 1
             else:
+                columns = block.columns
                 dims[input_labels.get(columns[0], columns[0])] = width
         return dims
 
@@ -1176,16 +1176,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         X_ct = self._column_transformer_input(self._align_input(X))
         column_transformer = copy.copy(self.column_transformer_)
         column_transformer.transformers_ = []
-        for name, transformer, columns in self.column_transformer_.transformers_:
+        for block in _iter_fitted_blocks(self.column_transformer_):
+            name, transformer, columns = block.step_name, block.transformer, block.columns
             fold_transformer = transformer
             if name != "remainder" and block_uses_target(transformer):
                 fold_transformer = refit_block_representation(transformer, X_ct[list(columns)], y)
-                span = self.column_transformer_.output_indices_[name]
+                span = block.span
                 expected_width = span.stop - span.start
                 width = len(fold_transformer.get_feature_names_out(list(columns)))
                 if width != expected_width:
                     raise IncompatibleParamsError(
-                        f"Cross-fitting requires a fixed output width for block {block_name(name, columns)!r}; "
+                        f"Cross-fitting requires a fixed output width for block {block.public_name!r}; "
                         f"expected {expected_width}, got {width}. The block's width depends on the training rows; "
                         "configure the representation to produce the same columns on every fold."
                     )
@@ -1353,9 +1354,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     def _log_internal_decisions(self):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
-        for step_name, transformer, columns in self.column_transformer_.transformers_:
-            name = block_name(step_name, columns)
-            last_step = representation_leaf(transformer)
+        for block in _iter_fitted_blocks(self.column_transformer_):
+            name = block.public_name
+            last_step = representation_leaf(block.transformer)
             for attr in (
                 "thresholds_",
                 "knots_",

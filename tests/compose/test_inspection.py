@@ -1,6 +1,8 @@
 """Unit tests for :mod:`pretab.compose.inspection`."""
 
 import warnings
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock
 
 import numpy as np
@@ -12,6 +14,7 @@ from sklearn.preprocessing import FunctionTransformer, MaxAbsScaler, PolynomialF
 
 from pretab.compose.factory import build_column_transformer, get_categorical_transformer_steps
 from pretab.compose.inspection import (
+    _iter_fitted_blocks,
     _locate_block_representation,
     block_uses_target,
     build_feature_info,
@@ -127,6 +130,59 @@ def test_get_output_slices_are_ordered_and_named(fitted_ct):
     starts = [start for _, start, _ in slices]
     assert starts == sorted(starts)
     assert all(width >= 1 for _, _, width in slices)
+
+
+def test_fitted_block_view_retains_entries_and_fitted_references():
+    transformer = Mock(spec=["fit", "transform", "get_feature_names_out", "get_representation_spec"])
+    columns = ["age__years"]
+    ct = SimpleNamespace(
+        transformers_=[
+            ("num_0", transformer, columns),
+            ("cat_city", "drop", ["city"]),
+            ("empty", "passthrough", []),
+            ("unmapped", "passthrough", ["other"]),
+            ("remainder", "passthrough", [1]),
+        ],
+        output_indices_={
+            "num_0": slice(0, 2),
+            "cat_city": slice(0, 0),
+            "empty": slice(2, 2),
+            "remainder": slice(2, 3),
+        },
+    )
+    original_blocks = ct.transformers_.copy()
+    original_indices = ct.output_indices_.copy()
+
+    blocks = list(_iter_fitted_blocks(ct))
+
+    assert [block.step_name for block in blocks] == [entry[0] for entry in original_blocks]
+    for block, (_, fitted, selector) in zip(blocks, original_blocks, strict=True):
+        assert block.transformer is fitted
+        assert block.columns is selector
+    assert blocks[0].public_name == "num_age__years"
+    assert blocks[0].span is ct.output_indices_["num_0"]
+    with pytest.raises(AttributeError):
+        cast(Any, blocks[0]).step_name = "replacement"
+    with pytest.raises(KeyError, match="unmapped"):
+        _ = blocks[3].span
+    assert get_output_slices(ct) == [("num_age__years", 0, 2), ("remainder", 2, 1)]
+    assert ct.transformers_ == original_blocks
+    assert ct.output_indices_ == original_indices
+    assert transformer.mock_calls == []
+
+
+def test_fitted_block_view_does_not_eagerly_read_names_or_spans():
+    columns = slice(0, 2)
+    transformer = object()
+    ct = SimpleNamespace(transformers_=[("joint", transformer, columns)])
+
+    block = next(_iter_fitted_blocks(ct))
+
+    assert block.step_name == "joint"
+    assert block.transformer is transformer
+    assert block.columns is columns
+    with pytest.raises(AttributeError, match="output_indices_"):
+        _ = block.span
 
 
 def test_build_feature_info_splits_numerical_and_categorical(fitted_ct):
