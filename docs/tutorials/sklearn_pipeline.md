@@ -5,7 +5,9 @@ they drop straight into a `ColumnTransformer` and `Pipeline`, and work with
 `cross_val_score`, `GridSearchCV`, and every other `sklearn` utility. The high-level
 `Preprocessor` composes the same way (it returns a single stacked array by default), but this
 page focuses on wiring each column's transformer by hand for fine-grained, per-transformer
-control: addressable hyperparameters (`step__param`), one estimator per column.
+control: addressable hyperparameters (`step__param`), one estimator per column. The
+[mixed-column example](#configure-mixed-columns-with-preprocessor) then uses `Preprocessor`
+to configure, inspect and save the fitted preprocessing step.
 
 This tutorial builds the regression task from the
 [nonlinear regression tutorial](nonlinear_regression.md) as a single, self-contained
@@ -107,6 +109,144 @@ best CV R2:  0.949
 ```
 
 Every pretab transformer participates in the search grid just like a native `sklearn` step.
+
+## Configure mixed columns with Preprocessor
+
+Run this example in the
+{download}`companion notebook <../../examples/per-feature-configuration.ipynb>`.
+
+`Preprocessor` can select column types and build the preprocessing step for you.
+This independent example uses three numerical columns, a Boolean column and a
+string category. Keep their dtypes in a `DataFrame`: Booleans are categorical,
+while these floating-point columns are numerical.
+
+```python
+import json
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import Pipeline
+
+from pretab import Preprocessor, RepresentationConfig
+
+frame = pd.DataFrame({
+    "age": np.linspace(18.0, 70.0, 80),
+    "income": np.linspace(25000.0, 90000.0, 80),
+    "tenure": np.linspace(0.0, 30.0, 80),
+    "active": [True, False] * 40,
+    "city": ["Oslo", "Lima", "Perth", "Oslo"] * 20,
+})
+target = 0.4 * frame["age"] + 2.0 * frame["active"]
+```
+
+### Request local settings
+
+Method strings, mappings and immutable `RepresentationConfig` values can coexist.
+The three numerical columns use RBF expansions with different widths. The Boolean
+uses integer encoding, and the city encoder drops its first learned category.
+Override declaration order does not determine output order.
+
+```python
+pre = Preprocessor(
+    numerical_method="none",
+    output_dim=7,
+    target_aware=False,
+    placement_strategy="uniform",
+    scaling="none",
+    output_format="dense",
+    random_state=17,
+    feature_preprocessing={
+        "city": {"method": "one-hot", "params": {"drop": "first"}},
+        "tenure": RepresentationConfig(method="rbf", output_dim=5),
+        "active": "int",
+        "income": {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.25}},
+        "age": RepresentationConfig(method="RBF", output_dim=2),
+    },
+)
+requested = pre.get_params(deep=False)
+assert requested["output_dim"] == 7
+assert requested["feature_preprocessing"]["age"].output_dim == 2
+```
+
+### Read the resolved configuration
+
+`get_resolved_config()` normalizes aliases and applies configuration precedence
+without fitting. The constructor-wide width remains seven, but each numerical
+override supplies its own width. This report does not contain learned categories
+or guarantee the realized output width.
+
+```python
+resolved = pre.get_resolved_config()
+assert resolved["output_dim"] == 7
+assert resolved["feature_preprocessing"]["age"]["method"] == "rbf"
+assert resolved["feature_preprocessing"]["age"]["output_dim"] == 2
+assert resolved["feature_preprocessing"]["income"]["params"]["gamma"] == 0.25
+assert not hasattr(pre, "output_dims_")
+```
+
+### Inspect the fitted state and width
+
+Fit inside the pipeline so training and prediction use the same preprocessing.
+The fitted dimensions account for the learned city vocabulary and its dropped
+category, not just the requested RBF widths.
+
+```python
+mixed_model = Pipeline([("pre", pre), ("ridge", Ridge(alpha=1.0))])
+mixed_model.fit(frame, target)
+
+assert pre.numerical_features_ == ["age", "income", "tenure"]
+assert pre.categorical_features_ == ["active", "city"]
+expected_dims = {"age": 2, "income": 3, "tenure": 5, "active": 1, "city": 2}
+assert pre.output_dims_ == expected_dims
+assert list(pre.output_dims_) == list(expected_dims)
+assert pre.total_output_dim_ == 13
+
+numerical, categorical, embeddings = pre.get_feature_info(verbose=False)
+assert {name: info["dimension"] for name, info in numerical.items()} == {
+    "age": 2, "income": 3, "tenure": 5,
+}
+assert {name: info["dimension"] for name, info in categorical.items()} == {
+    "active": 1, "city": 2,
+}
+assert embeddings == {}
+matrix = pre.transform(frame, return_array=True)
+assert isinstance(matrix, np.ndarray)
+assert matrix.shape == (80, 13)
+assert pre.get_feature_names_out().shape == (13,)
+predictions = mixed_model.predict(frame)
+assert isinstance(predictions, np.ndarray)
+assert predictions.shape == (80,)
+```
+
+```{important}
+Use fitted attributes and inspection methods to size downstream inputs. Numerical
+outputs precede categorical outputs, with source-column order within each kind.
+Changing constructor parameters after fitting changes the request, not the
+learned transformers. Fit again to apply a new request.
+```
+
+### Save and restore the fitted preprocessor
+
+`to_spec()` captures the fitted preprocessing state, including the typed local
+settings. Pass the JSON-decoded specification to `from_spec()` to restore it
+without fitting again. This saves the preprocessing step, not the Ridge model.
+
+```python
+spec = json.loads(json.dumps(pre.to_spec(), allow_nan=False))
+replayed = Preprocessor.from_spec(spec)
+
+assert replayed.output_dims_ == expected_dims
+assert replayed.total_output_dim_ == 13
+np.testing.assert_array_equal(replayed.get_feature_names_out(), pre.get_feature_names_out())
+np.testing.assert_array_equal(replayed.transform(frame, return_array=True), matrix)
+assert replayed.fingerprint_ == pre.fingerprint_
+```
+
+For precedence and copy semantics, see
+[Structured per-feature configuration](../core_concepts/configuration.md#structured-per-feature-configuration).
+For artifact trust and persistence details, see
+[Reproducibility](../core_concepts/reproducibility.md).
 
 ## When to use which
 

@@ -1,12 +1,13 @@
 """Executes the python code fences in the tutorial pages so API drift breaks CI
 instead of the docs quietly going stale.
 
-Notebook execution (``myst-nb`` / ``nbmake``) is intentionally out of scope for
-1.0; this is the lighter-weight alternative: each tutorial's ```python blocks run
-in one shared namespace, in source order, exactly as written on the page. Blocks
-that only show expected console output (```text fences) are not touched.
+Each tutorial's ```python blocks run in one shared namespace, in source order,
+exactly as written on the page. Blocks that only show expected console output
+(```text fences) are not touched. The companion notebook is kept in sync with its
+executed tutorial section without notebook-rendering dependencies in CI.
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -85,3 +86,18 @@ def test_tutorial_code_runs(tutorial, section):
             exec(compile(source, str(tutorial), "exec"), namespace)  # noqa: S102
         except Exception as exc:
             raise AssertionError(f"{tutorial.name}:{start_line} raised {exc!r}") from exc
+
+
+def test_per_feature_notebook_matches_tutorial():
+    notebook_path = ROOT / "examples" / "per-feature-configuration.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook_sources = ["".join(cell["source"]).strip() for cell in notebook["cells"] if cell["cell_type"] == "code"]
+    tutorial_sources = [
+        source.strip()
+        for _, source in _code_blocks(
+            TUTORIALS_DIR / "sklearn_pipeline.md", "Configure mixed columns with Preprocessor"
+        )
+    ]
+    assert notebook["nbformat"] == 4
+    assert len(notebook_sources) == 5
+    assert notebook_sources == tutorial_sources
