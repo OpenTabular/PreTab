@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab import Preprocessor
+from pretab import Preprocessor, RepresentationConfig
 from pretab.exceptions import DataWarning
 
 pl = pytest.importorskip("polars")
@@ -79,6 +79,62 @@ def test_polars_input_matches_pandas_input(frames, params):
     # Columns are matched by name, so a reordered polars frame transforms the same.
     reordered = polars_frame.select(polars_frame.columns[::-1])
     np.testing.assert_allclose(np.asarray(from_polars.transform(reordered)), expected)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+def test_mixed_structured_inputs_preserve_polars_column_types(frames, typed, output_format):
+    from scipy import sparse
+
+    pandas_frame, polars_frame, _ = frames
+    original = polars_frame.clone()
+    settings = {
+        "flag": "int",
+        "city": {"method": "one-hot", "params": {"drop": "first"}},
+        "visits": "rbf",
+        "plan": "one-hot",
+        "income": {"method": "rbf", "output_dim": 2, "params": {"gamma": 0.25}},
+    }
+    options = {
+        "feature_preprocessing": {
+            feature: RepresentationConfig.from_dict(value) if typed and isinstance(value, dict) else value
+            for feature, value in settings.items()
+        },
+        "numerical_method": "none",
+        "output_dim": 3,
+        "target_aware": False,
+        "placement_strategy": "uniform",
+        "scaling": "none",
+        "random_state": 17,
+        "output_format": output_format,
+    }
+    from_pandas = Preprocessor(**options).fit(pandas_frame)
+    from_polars = Preprocessor(**options).fit(polars_frame)
+    expected = from_pandas.transform(pandas_frame)
+    assert not isinstance(expected, dict)
+    expected = expected.toarray() if sparse.issparse(expected) else np.asarray(expected)
+    assert from_polars.numerical_features_ == ["income", "visits"]
+    assert from_polars.categorical_features_ == ["rooms", "plan", "city", "flag"]
+    dimensions = {"income": 2, "visits": 3, "rooms": 1, "plan": 2, "city": 2, "flag": 1}
+    assert from_polars.output_dims_ == dimensions
+    assert list(from_polars.output_dims_) == list(dimensions)
+    assert from_polars.get_feature_info(verbose=False) == from_pandas.get_feature_info(verbose=False)
+    assert from_polars.get_feature_lineage() == from_pandas.get_feature_lineage()
+    np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
+    for preprocessor, incoming in (
+        (from_polars, polars_frame.select(polars_frame.columns[::-1])),
+        (from_polars, pandas_frame.iloc[:, ::-1]),
+        (from_pandas, polars_frame.select(polars_frame.columns[::-1])),
+    ):
+        result = preprocessor.transform(incoming)
+        assert not isinstance(result, dict)
+        assert sparse.issparse(result) == (output_format == "sparse")
+        np.testing.assert_array_equal(result.toarray() if sparse.issparse(result) else np.asarray(result), expected)
+        blocks = preprocessor.transform(incoming, return_array=False)
+        assert isinstance(blocks, dict)
+        assert list(blocks) == ["num_income", "num_visits", "cat_rooms", "cat_plan", "cat_city", "cat_flag"]
+        assert [np.shape(block)[1] for block in blocks.values()] == list(dimensions.values())
+    assert polars_frame.equals(original)
 
 
 def test_polars_input_with_polars_output(frames):

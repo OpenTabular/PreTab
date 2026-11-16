@@ -18,7 +18,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import make_pipeline
 
-from pretab import Preprocessor
+from pretab import Preprocessor, RepresentationConfig
 from pretab.compose.inspection import refit_block_representation
 from pretab.core.supervised import CrossFittedTransformer
 from pretab.exceptions import PretabDataError
@@ -36,6 +36,91 @@ def _passthrough(**kwargs):
 
 def _blocks(out):
     return cast("dict[str, np.ndarray]", out)
+
+
+@pytest.mark.parametrize("input_kind", ["pandas", "numpy", "polars"])
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("reverse_settings", [False, True], ids=["forward", "reversed"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+def test_mixed_structured_inputs_keep_feature_order(input_kind, typed, reverse_settings, output_format):
+    from scipy import sparse
+
+    frame = pd.DataFrame(
+        {
+            "feature_0": np.resize([3, 1, 2, 1], 80),
+            "feature_1": np.arange(18, 98),
+            "feature_2": np.resize([1, 0], 80),
+            "feature_3": np.arange(80),
+            "feature_4": np.resize([10, 20, 30, 10], 80),
+        }
+    )
+    settings = {
+        "feature_0": "one-hot",
+        "feature_1": {"method": "rbf", "output_dim": 2, "params": {"gamma": 0.25}},
+        "feature_2": "int",
+        "feature_3": "rbf",
+        "feature_4": {"method": "one-hot", "params": {"drop": "first", "sparse_output": False}},
+    }
+    parameters = {
+        "numerical_method": "none",
+        "output_dim": 3,
+        "target_aware": False,
+        "placement_strategy": "uniform",
+        "scaling": "none",
+        "cat_cutoff": 5,
+        "random_state": 17,
+    }
+    reference = Preprocessor(feature_preprocessing=settings, **parameters).fit(frame)
+    expected = reference.transform(frame, return_array=True)
+    entries = list(settings.items())[::-1] if reverse_settings else list(settings.items())
+    overrides = {
+        feature: RepresentationConfig.from_dict(options) if typed and isinstance(options, dict) else options
+        for feature, options in entries
+    }
+    if input_kind == "polars":
+        polars = pytest.importorskip("polars")
+        incoming = polars.DataFrame(frame.to_dict(orient="list"))
+    elif input_kind == "numpy":
+        incoming = frame.to_numpy()
+    else:
+        incoming = frame
+    original = deepcopy(incoming)
+    preprocessor = Preprocessor(feature_preprocessing=overrides, output_format=output_format, **parameters)
+    transformed = preprocessor.fit_transform(incoming)
+    assert not isinstance(transformed, dict)
+    assert sparse.issparse(transformed) == (output_format == "sparse")
+    actual = transformed.toarray() if sparse.issparse(transformed) else np.asarray(transformed)
+    np.testing.assert_array_equal(actual, expected)
+    assert preprocessor.numerical_features_ == ["feature_1", "feature_3"]
+    assert preprocessor.categorical_features_ == ["feature_0", "feature_2", "feature_4"]
+    dimensions = {"feature_1": 2, "feature_3": 3, "feature_0": 3, "feature_2": 1, "feature_4": 2}
+    assert preprocessor.output_dims_ == dimensions
+    assert list(preprocessor.output_dims_) == list(dimensions)
+    assert preprocessor.total_output_dim_ == 11
+    assert preprocessor.get_feature_info(verbose=False) == reference.get_feature_info(verbose=False)
+    assert preprocessor.get_feature_lineage() == reference.get_feature_lineage()
+    np.testing.assert_array_equal(preprocessor.get_feature_names_out(), reference.get_feature_names_out())
+    blocks = preprocessor.transform(incoming, return_array=False)
+    assert isinstance(blocks, dict)
+    assert list(blocks) == ["num_feature_1", "num_feature_3", "cat_feature_0", "cat_feature_2", "cat_feature_4"]
+    assert [np.shape(block)[1] for block in blocks.values()] == list(dimensions.values())
+    stacked = np.hstack([block.toarray() if sparse.issparse(block) else np.asarray(block) for block in blocks.values()])
+    np.testing.assert_array_equal(stacked, expected)
+    if isinstance(incoming, np.ndarray):
+        with pytest.raises(PretabDataError, match="X has 4 features, but Preprocessor is expecting 5"):
+            preprocessor.transform(incoming[:, :-1])
+        np.testing.assert_array_equal(incoming, original)
+    else:
+        if isinstance(incoming, pd.DataFrame):
+            reordered = incoming.iloc[:, ::-1]
+            assert isinstance(original, pd.DataFrame)
+            pd.testing.assert_frame_equal(incoming, original)
+        else:
+            reordered = incoming.select(incoming.columns[::-1])
+            assert incoming.equals(original)
+        result = preprocessor.transform(reordered, return_array=True)
+        assert not isinstance(result, dict)
+        np.testing.assert_array_equal(result.toarray() if sparse.issparse(result) else np.asarray(result), expected)
 
 
 @pytest.fixture(params=["string", "integer"])
