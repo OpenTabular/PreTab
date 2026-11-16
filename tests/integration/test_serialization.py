@@ -16,6 +16,7 @@ import pandas as pd
 import pytest
 
 from pretab import Preprocessor, PretabSerializationError, RepresentationConfig, RepresentationPolicy
+from pretab.compose.registry import TransformerSpec
 from pretab.compose.serialize import SCHEMA_VERSION, _decode, _encode, _encode_mapping
 from pretab.core.parameters import UNSET
 from pretab.exceptions import InvalidParamError
@@ -518,6 +519,31 @@ def test_representation_config_decoder_runs_value_validation(fields, constraint)
     }
     with pytest.raises(InvalidParamError, match=constraint):
         _decode(payload)
+
+
+@pytest.mark.parametrize(
+    ("group_fields", "expected"),
+    [
+        ({}, (False, 1, 1)),
+        ({"group_compatible": False, "min_arity": 1, "max_arity": 1}, (False, 1, 1)),
+        ({"group_compatible": True, "min_arity": 2, "max_arity": None}, (True, 2, None)),
+    ],
+    ids=["legacy", "standalone", "group"],
+)
+def test_registry_spec_decoder_uses_additive_group_metadata(group_fields, expected):
+    payload = {
+        "__dataclass__": {
+            "class": "pretab.compose.registry:TransformerSpec",
+            "fields": {"name": "custom", "transformer_cls": _encode(NoTransformer), **group_fields},
+        }
+    }
+
+    restored = _decode(json.loads(json.dumps(payload, allow_nan=False)))
+
+    assert isinstance(restored, TransformerSpec)
+    assert restored.name == "custom"
+    assert restored.transformer_cls is NoTransformer
+    assert (restored.group_compatible, restored.min_arity, restored.max_arity) == expected
 
 
 def test_from_spec_rejects_bad_source_type():

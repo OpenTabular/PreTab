@@ -126,6 +126,15 @@ class TransformerSpec:
     sparse_output : bool
         Whether the method can emit a sparse matrix (e.g. one-hot). Surfaced
         through :func:`pretab.list_representations`.
+    group_compatible : bool
+        Whether the method declares support for explicit column groups.
+        Independent of single-column ``preprocessor_compatible`` selection.
+    min_arity : int
+        Minimum declared group size, relevant only when ``group_compatible``
+        is true. Does not constrain standalone transformer input dimensions.
+    max_arity : int or None
+        Maximum declared group size, or ``None`` for no declared upper bound.
+        Relevant only when ``group_compatible`` is true.
     """
 
     name: str
@@ -140,6 +149,9 @@ class TransformerSpec:
     optional_dependency: str | None = None
     periodic: bool = False
     sparse_output: bool = False
+    group_compatible: bool = False
+    min_arity: int = 1
+    max_arity: int | None = 1
 
     @property
     def is_numerical(self) -> bool:
@@ -286,6 +298,9 @@ _SPECS: tuple[TransformerSpec, ...] = (
         arity="multivariate",
         placement_strategies=_UNSUPERVISED_STRATEGIES,
         preprocessor_compatible=False,
+        group_compatible=True,
+        min_arity=2,
+        max_arity=None,
     ),
     # --- numerical: kernel-based thin-plate spline (knot-free, multivariate) ---
     _spec(
@@ -294,6 +309,9 @@ _SPECS: tuple[TransformerSpec, ...] = (
         ("n_components", "landmark_strategy", "rank_strategy", "random_state"),
         arity="multivariate",
         preprocessor_compatible=False,
+        group_compatible=True,
+        min_arity=2,
+        max_arity=None,
     ),
     # --- numerical: kernel-approximation feature maps (multivariate, standalone) ---
     _spec(

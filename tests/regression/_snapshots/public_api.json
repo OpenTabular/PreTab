@@ -241,6 +241,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "box-cox",
       "optional_dependency": null,
       "periodic": false,
@@ -271,6 +274,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "bspline",
       "optional_dependency": null,
       "periodic": false,
@@ -303,6 +309,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "cubicspline",
       "optional_dependency": null,
       "periodic": false,
@@ -326,6 +335,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "custombin",
       "optional_dependency": null,
       "periodic": false,
@@ -354,6 +366,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "fourier",
       "optional_dependency": null,
       "periodic": true,
@@ -377,6 +392,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["categorical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "int",
       "optional_dependency": null,
       "periodic": false,
@@ -407,6 +425,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "ispline",
       "optional_dependency": null,
       "periodic": false,
@@ -430,6 +451,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "minmax",
       "optional_dependency": null,
       "periodic": false,
@@ -460,6 +484,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "mspline",
       "optional_dependency": null,
       "periodic": false,
@@ -491,6 +518,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "naturalspline",
       "optional_dependency": null,
       "periodic": false,
@@ -514,6 +544,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["categorical", "numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "none",
       "optional_dependency": null,
       "periodic": false,
@@ -544,6 +577,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "nystroem",
       "optional_dependency": null,
       "periodic": false,
@@ -576,6 +612,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["categorical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "one-hot",
       "optional_dependency": null,
       "periodic": false,
@@ -599,6 +638,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["categorical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "onehot_from_ordinal",
       "optional_dependency": null,
       "periodic": false,
@@ -629,6 +671,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "ple",
       "optional_dependency": null,
       "periodic": false,
@@ -652,6 +697,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "polynomial",
       "optional_dependency": null,
       "periodic": false,
@@ -675,6 +723,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["categorical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "pretrained",
       "optional_dependency": "embeddings",
       "periodic": false,
@@ -698,6 +749,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "pspline",
       "optional_dependency": null,
       "periodic": false,
@@ -721,6 +775,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "quantile",
       "optional_dependency": null,
       "periodic": false,
@@ -752,6 +809,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "rbf",
       "optional_dependency": null,
       "periodic": false,
@@ -782,6 +842,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "relu",
       "optional_dependency": null,
       "periodic": false,
@@ -805,6 +868,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "rff",
       "optional_dependency": null,
       "periodic": false,
@@ -828,6 +894,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "robust",
       "optional_dependency": null,
       "periodic": false,
@@ -858,6 +927,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "sigmoid",
       "optional_dependency": null,
       "periodic": false,
@@ -881,6 +953,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "standardization",
       "optional_dependency": null,
       "periodic": false,
@@ -912,6 +987,9 @@
         "target_aware_capable": true
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "tanh",
       "optional_dependency": null,
       "periodic": false,
@@ -935,6 +1013,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": true,
+      "max_arity": null,
+      "min_arity": 2,
       "name": "tensorspline",
       "optional_dependency": null,
       "periodic": false,
@@ -963,6 +1044,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": true,
+      "max_arity": null,
+      "min_arity": 2,
       "name": "tprs",
       "optional_dependency": null,
       "periodic": false,
@@ -986,6 +1070,9 @@
         "target_aware_capable": false
       },
       "feature_kind": ["numerical"],
+      "group_compatible": false,
+      "max_arity": 1,
+      "min_arity": 1,
       "name": "yeo-johnson",
       "optional_dependency": null,
       "periodic": false,
