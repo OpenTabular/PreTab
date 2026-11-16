@@ -807,6 +807,223 @@ def test_wrapped_preprocessor_keeps_the_separate_state_missing_branch(array_with
     np.testing.assert_array_equal(out[:, columns], np.column_stack((expected, np.isnan(X[:, 0]).astype(float))))
 
 
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("missing_policy", [None, "impute_with_indicator", "separate_state"])
+def test_structured_cross_fitting_refits_only_target_representation(
+    array_with_one_missing_value, monkeypatch, typed, missing_policy
+):
+    import pandas as pd
+    from sklearn.base import clone
+    from sklearn.pipeline import FeatureUnion, Pipeline
+
+    from pretab import Preprocessor, RepresentationConfig
+
+    values, target = array_with_one_missing_value
+    frame = pd.DataFrame(values, columns=pd.Index(["supervised", "fixed"]), index=np.arange(len(values)) * 3 + 5)
+    frame["city"] = np.resize(["a", "b", "c"], len(frame))
+    frame.loc[frame.index[7], "city"] = "rare"
+    requests = {
+        "supervised": {
+            "method": "rbf",
+            "output_dim": 3,
+            "target_aware": True,
+            "placement_strategy": "cart",
+            "params": {"gamma": 0.25},
+        },
+        "fixed": {
+            "method": "rbf",
+            "output_dim": 5,
+            "target_aware": False,
+            "placement_strategy": "uniform",
+            "params": {"gamma": 0.75},
+        },
+        "city": {"method": "one-hot", "params": {"drop": "first", "sparse_output": False}},
+    }
+    wrapped = Preprocessor(
+        feature_preprocessing={
+            feature: RepresentationConfig.from_dict(settings) if typed else settings
+            for feature, settings in requests.items()
+        },
+        missing_policy=missing_policy,
+        random_state=0,
+    )
+    reference = clone(wrapped)
+    assert isinstance(reference, Preprocessor)
+    reference.fit(frame, target)
+    folds = []
+    original = Preprocessor._cross_fit_fold
+
+    def record_fold(fitted, train_frame, train_target):
+        fold = original(fitted, train_frame, train_target)
+        folds.append(fold)
+        return fold
+
+    monkeypatch.setattr(Preprocessor, "_cross_fit_fold", record_fold)
+    cross_fitted = CrossFittedTransformer(wrapped, n_folds=5, random_state=0)
+    out = cross_fitted.fit_transform(frame, target)
+    fitted = cross_fitted.estimator_
+    assert isinstance(fitted, Preprocessor)
+    full = np.asarray(cross_fitted.transform(frame))
+    np.testing.assert_array_equal(full, reference.transform(frame))
+    assert len(folds) == 5
+    indicator = int(missing_policy is not None)
+    separate = int(missing_policy == "separate_state")
+    assert fitted.output_dims_ == {"supervised": 3 + indicator, "fixed": 5 + separate, "city": 3 + separate}
+    assert out.shape == full.shape == (len(frame), 11 + indicator + 2 * separate)
+    all_blocks = fitted.column_transformer_.named_transformers_
+    full_block = all_blocks["num_supervised"]
+    if indicator:
+        assert isinstance(full_block, FeatureUnion)
+        representation = dict(full_block.transformer_list)["representation"]
+    else:
+        representation = full_block
+    assert isinstance(representation, Pipeline)
+    for fold in folds:
+        fold_blocks = fold.column_transformer_.named_transformers_
+        fold_block = fold_blocks["num_supervised"]
+        if indicator:
+            assert isinstance(fold_block, FeatureUnion)
+            assert dict(fold_block.transformer_list)["missing"] is dict(full_block.transformer_list)["missing"]
+            fold_representation = dict(fold_block.transformer_list)["representation"]
+        else:
+            fold_representation = fold_block
+        assert isinstance(fold_representation, Pipeline)
+        assert fold_representation.named_steps["imputer"] is representation.named_steps["imputer"]
+        assert fold_representation.named_steps["minmax"] is representation.named_steps["minmax"]
+        assert fold_representation.named_steps["rbf"] is not representation.named_steps["rbf"]
+        assert fold_representation.named_steps["rbf"].output_dim == 3
+        assert fold_representation.named_steps["rbf"].gamma == 0.25
+        assert fold_blocks["num_fixed"] is all_blocks["num_fixed"]
+        assert fold_blocks["cat_city"] is all_blocks["cat_city"]
+        assert fold.output_dims_ == fitted.output_dims_
+        np.testing.assert_array_equal(fold.get_feature_names_out(), fitted.get_feature_names_out())
+    supervised = [
+        record.output_index
+        for record in fitted.get_feature_lineage()
+        if record.source_features == ("supervised",) and record.uses_target
+    ]
+    assert len(supervised) == 3
+    expected = _refit_representation_per_fold(representation, frame[["supervised"]], target)
+    np.testing.assert_array_equal(out[:, supervised], expected)
+    assert not np.allclose(out[:, supervised], full[:, supervised])
+    unchanged = [index for index in range(out.shape[1]) if index not in supervised]
+    np.testing.assert_array_equal(out[:, unchanged], full[:, unchanged])
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("container", ["dense", "sparse", "auto", "pandas", "polars"])
+def test_structured_cross_fitting_preserves_output_container(array_with_rare_category, typed, container):
+    import pandas as pd
+    from scipy import sparse
+
+    from pretab import Preprocessor, RepresentationConfig
+
+    polars = pytest.importorskip("polars") if container == "polars" else None
+    values, target = array_with_rare_category
+    frame = pd.DataFrame(
+        values,
+        columns=pd.Index(["signal", "count", "city"]),
+        index=pd.Index(np.arange(len(values))[::-1] * 3, name="row"),
+    )
+    requests = {
+        "signal": {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.25}},
+        "city": {"method": "one-hot", "params": {"drop": "first"}},
+    }
+    parameters = {
+        "feature_preprocessing": {
+            feature: RepresentationConfig.from_dict(settings) if typed else settings
+            for feature, settings in requests.items()
+        },
+        "random_state": 0,
+        "dtype": np.float32,
+    }
+    wrapped = Preprocessor(output_format=container if container in {"sparse", "auto"} else "dense", **parameters)
+    if container in {"pandas", "polars"}:
+        wrapped.set_output(transform=container)
+    cross_fitted, out = _cross_fit(wrapped, frame, target)
+    full = cross_fitted.transform(frame)
+    assert type(out) is type(full)
+    if container == "sparse":
+        assert sparse.isspmatrix_csr(out)
+    if sparse.issparse(out):
+        assert sparse.issparse(full)
+        assert out.format == full.format == "csr"
+        out_values = out.toarray()
+    elif isinstance(out, pd.DataFrame):
+        assert isinstance(full, pd.DataFrame)
+        pd.testing.assert_index_equal(out.index, frame.index)
+        pd.testing.assert_index_equal(out.columns, full.columns)
+        assert out.columns.tolist() == cross_fitted.get_feature_names_out().tolist()
+        assert out.dtypes.equals(full.dtypes)
+        out_values = out.to_numpy()
+    elif container == "polars":
+        assert polars is not None
+        assert isinstance(out, polars.DataFrame)
+        assert out.columns == full.columns == cross_fitted.get_feature_names_out().tolist()
+        assert out.schema == full.schema
+        out_values = out.to_numpy()
+    else:
+        assert isinstance(out, np.ndarray)
+        out_values = out
+    _, dense = _cross_fit(Preprocessor(**parameters), frame, target)
+    assert out_values.shape == (len(frame), 7)
+    assert out_values.dtype == np.float32
+    np.testing.assert_array_equal(out_values, dense)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+def test_structured_cross_fitting_checks_each_block_width(array_with_one_missing_value, monkeypatch, typed):
+    from pretab import Preprocessor, RepresentationConfig
+    from pretab.expansion.functional.rbf import RBFExpansionTransformer
+
+    values, target = array_with_one_missing_value
+    requests = {
+        "feature_0": {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.25}},
+        "feature_1": {
+            "method": "rbf",
+            "output_dim": 5,
+            "target_aware": False,
+            "placement_strategy": "uniform",
+        },
+    }
+    original = RBFExpansionTransformer.fit
+
+    def change_fold_width(estimator, fold_values, fold_target=None):
+        if len(fold_values) < len(values) and estimator.gamma == 0.25:
+            estimator.set_params(output_dim=2)
+        return original(estimator, fold_values, fold_target)
+
+    monkeypatch.setattr(RBFExpansionTransformer, "fit", change_fold_width)
+    wrapped = Preprocessor(
+        feature_preprocessing={
+            feature: RepresentationConfig.from_dict(settings) if typed else settings
+            for feature, settings in requests.items()
+        },
+        random_state=0,
+    )
+    with pytest.raises(
+        IncompatibleParamsError,
+        match="fixed output width for block 'num_feature_0'; expected 3, got 2",
+    ) as error:
+        _cross_fit(wrapped, values, target)
+    assert "same columns on every fold" in str(error.value)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+def test_structured_cross_fitting_still_rejects_dictionary_output(integer_array, typed):
+    from pretab import Preprocessor, RepresentationConfig
+
+    values, target = integer_array
+    settings = {"method": "rbf", "output_dim": 3}
+    wrapped = Preprocessor(
+        feature_preprocessing={"feature_0": RepresentationConfig.from_dict(settings) if typed else settings},
+        output_structure="blocks",
+        random_state=0,
+    )
+    with pytest.raises(IncompatibleParamsError, match="dict of blocks"):
+        _cross_fit(wrapped, values, target)
+
+
 # --- DataFrame input is passed through (issue #58) --------------------------------
 
 
