@@ -270,14 +270,14 @@ def test_empty_groups_preserve_single_column_values_names_and_fingerprint(sample
     assert processor.get_resolved_config() == expected_config
 
 
-def test_nonempty_groups_cannot_be_silently_ignored_by_single_column_fitting(monkeypatch):
-    def reject_conversion(_data):
-        raise AssertionError("Group refusal must precede data conversion and estimator fitting")
+def test_nonempty_groups_cannot_be_silently_ignored_by_single_column_fitting(sample_frame, monkeypatch):
+    def reject_construction(*args, **kwargs):
+        raise AssertionError("Group refusal must precede factory construction and estimator fitting")
 
-    monkeypatch.setattr("pretab.preprocessor.to_dataframe", reject_conversion)
-    processor = Preprocessor(feature_groups={"location": {"columns": ["x", "y"], "representation": "tprs"}})
+    monkeypatch.setattr("pretab.preprocessor.build_column_transformer", reject_construction)
+    processor = Preprocessor(feature_groups={"location": {"columns": ["age", "second"], "representation": "tprs"}})
     with pytest.raises(InvalidParamError, match="single-column composition route"):
-        processor.fit(object())
+        processor.fit(sample_frame.assign(second=sample_frame["age"] + 1))
     assert not hasattr(processor, "column_transformer_")
 
 

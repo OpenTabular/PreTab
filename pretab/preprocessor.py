@@ -628,6 +628,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         )
 
         if config.feature_groups:
+            group_frame = to_dataframe(X)
+            group_numerical, _ = detect_column_types(
+                group_frame,
+                cat_cutoff=resolved["cat_cutoff"],
+                treat_all_integers_as_numerical=resolved["treat_all_integers_as_numerical"],
+                estimator_name=type(self).__name__,
+            )
+            config.validate_feature_groups(group_frame.columns, group_numerical, y=y)
+            with_string_labels(group_frame)
             raise invalid_param_error(
                 type(self).__name__,
                 "feature_groups",

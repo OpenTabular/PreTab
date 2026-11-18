@@ -25,7 +25,7 @@ from typing import Any
 
 from ..core.dependencies import _check_optional_dependency
 from ..core.parameters import UNSET, _Unset, validate_placement, validate_task
-from ..exceptions import InvalidParamError, invalid_param_error
+from ..exceptions import IncompatibleParamsError, InvalidParamError, invalid_param_error
 from .registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
@@ -608,6 +608,50 @@ class PreprocessorConfig:
             is_group=True,
             path=f"feature_groups[{group.name!r}].representation",
         )
+
+    def validate_feature_groups(self, columns, numerical_features, *, y=None) -> None:
+        """Check group ownership and capabilities against the detected input schema."""
+        available = set(columns)
+        numerical = set(numerical_features)
+        owners = {}
+        for group in self.feature_groups:
+            path = f"feature_groups[{group.name!r}]"
+            representation = self.group_representation_for(group)
+            spec = TRANSFORMER_REGISTRY[representation.method]
+            for index, label in enumerate(group.columns):
+                location = f"columns[{index}]"
+                if label in owners:
+                    owner, source_index = owners[label]
+                    raise invalid_param_error(
+                        path,
+                        location,
+                        label,
+                        f"already assigned to feature_groups[{owner!r}].columns[{source_index}]",
+                    )
+                if label in self.feature_preprocessing:
+                    raise invalid_param_error(
+                        path, location, label, f"must not also be assigned in feature_preprocessing[{label!r}]"
+                    )
+                if label not in available:
+                    raise invalid_param_error(path, location, label, "must name a column present in X", valid=columns)
+                kind = "numerical" if label in numerical else "categorical"
+                if kind not in spec.feature_kind:
+                    raise invalid_param_error(
+                        path, location, label, f"detected {kind} source is not supported by method {spec.name!r}"
+                    )
+                owners[label] = (group.name, index)
+            arity = len(group.columns)
+            if arity < spec.min_arity or (spec.max_arity is not None and arity > spec.max_arity):
+                bounds = (
+                    f"at least {spec.min_arity}" if spec.max_arity is None else f"{spec.min_arity} to {spec.max_arity}"
+                )
+                raise invalid_param_error(
+                    path, "columns", group.columns, f"method {spec.name!r} requires {bounds} source columns"
+                )
+            if y is None and (spec.requires_target or representation.target_aware is True):
+                raise IncompatibleParamsError(
+                    f"{path}.representation.method = {spec.name!r} requires y at fit time; got y=None."
+                )
 
     def _resolve_representation(self, raw, *, is_numerical: bool, path: str, is_group: bool = False):
         requested = _normalize_representation_config(raw, is_numerical=is_numerical, path=path, is_group=is_group)
