@@ -351,6 +351,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         and one-hot encodes categoricals, and ``"adaptive"`` sizes each feature's width
         from the data within ``[7, 15]``. Call :meth:`get_resolved_config` to see the
         effective parameters. ``None`` (default) uses the individual parameters unchanged.
+    feature_groups : mapping or sequence, default=None
+        Ordered named declarations of source columns and representation settings.
+        Constructor inputs remain unchanged; :meth:`get_resolved_config` returns
+        detached declarations with canonical methods and applicable settings.
+        ``None`` or an empty collection keeps single-column processing. Nonempty
+        declarations are rejected by ``fit``.
 
     Attributes
     ----------
@@ -501,6 +507,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         dtype=None,
         verbose=0,
         preset=None,
+        *,
+        feature_groups=None,
     ):
         """
         Initialize the Preprocessor with various transformation options for tabular data.
@@ -538,9 +546,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.dtype = dtype
         self.verbose = verbose
         self.preset = preset
+        self.feature_groups = feature_groups
 
     def __setstate__(self, state):
         super().__setstate__(state)
+        if not hasattr(self, "feature_groups"):
+            self.feature_groups = None
         _repair_legacy_sparse_feature_counts(self)
 
     def fit(self, X, y=None, embeddings=None):
@@ -613,7 +624,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             add_missing_indicator=resolved["add_missing_indicator"],
             missing_policy=resolved["missing_policy"],
             verbose=resolved["verbose"],
+            feature_groups=resolved["feature_groups"],
         )
+
+        if config.feature_groups:
+            raise invalid_param_error(
+                type(self).__name__,
+                "feature_groups",
+                tuple(group.name for group in config.feature_groups),
+                "nonempty group declarations cannot be fitted through the single-column composition route",
+            )
 
         fitted_on_array = not has_column_labels(X)
         X = to_dataframe(X)
@@ -901,8 +921,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         caller left at its default while explicitly-set parameters win; the
         ``preset`` key itself is removed. Declared ``feature_preprocessing``
         entries become ordinary mappings with canonical methods and applicable
-        inherited settings, using the same resolver as fitting. Other global
-        keys retain their preset-expanded values.
+        inherited settings, using the same resolver as fitting. Explicit
+        ``feature_groups`` become an ordered list of mappings with original
+        source labels and resolved representation settings. Other global keys
+        retain their preset-expanded values.
 
         The result is detached from caller-owned containers and resolves current
         parameters before or after fit. It does not describe the last fitted
@@ -919,13 +941,23 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             If ``task``, ``preset``, or a declared representation is invalid.
         """
         resolved = self._resolved_params()
-        if resolved["feature_preprocessing"]:
+        if resolved["feature_preprocessing"] or resolved["feature_groups"] is not None:
             config = PreprocessorConfig.from_params(
                 **{field.name: resolved[field.name] for field in fields(PreprocessorConfig)}
             )
-            resolved["feature_preprocessing"] = {
-                feature: config.representation_for(feature).to_dict() for feature in config.feature_preprocessing
-            }
+            if resolved["feature_preprocessing"]:
+                resolved["feature_preprocessing"] = {
+                    feature: config.representation_for(feature).to_dict() for feature in config.feature_preprocessing
+                }
+            if resolved["feature_groups"] is not None:
+                resolved["feature_groups"] = [
+                    {
+                        "name": group.name,
+                        "columns": list(group.columns),
+                        "representation": config.group_representation_for(group).to_dict(),
+                    }
+                    for group in config.feature_groups
+                ]
         return copy.deepcopy(resolved)
 
     def get_feature_names_out(self, input_features=None):
@@ -1451,6 +1483,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             for key, value in spec["state"].items()
             if key not in {"output_report_", "_frozen", "_stale_reason"}
         }
+        if not getattr(self, "feature_groups", None):
+            state.pop("feature_groups", None)
         return {
             "schema_version": spec["schema_version"],
             "pretab_version": spec["pretab_version"],

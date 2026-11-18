@@ -26,6 +26,7 @@ and mappings with a ``method`` key are accepted there as well.
    :toctree: _autosummary
    :nosignatures:
 
+    FeatureGroup
    RepresentationConfig
 
 Fields and conversion

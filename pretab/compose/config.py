@@ -20,6 +20,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, replace
 from difflib import get_close_matches
 from math import isfinite
+from re import fullmatch
 from typing import Any
 
 from ..core.dependencies import _check_optional_dependency
@@ -34,7 +35,7 @@ from .registry import (
     resolve_method,
 )
 
-__all__ = ["PreprocessorConfig", "RepresentationConfig"]
+__all__ = ["FeatureGroup", "PreprocessorConfig", "RepresentationConfig"]
 
 # Valid values for the high-level ``missing_policy`` orchestration knob. ``None``
 # keeps the explicit imputation parameters authoritative (historical behaviour).
@@ -42,6 +43,7 @@ MISSING_POLICIES = frozenset({"error", "propagate", "impute", "impute_with_indic
 
 
 _REPRESENTATION_PATH = ContextVar("representation_config_path", default="RepresentationConfig")
+_FEATURE_GROUP_PATH = ContextVar("feature_group_path", default="FeatureGroup")
 
 
 def _representation_error(param, value, constraint, *, valid=None):
@@ -210,14 +212,20 @@ class RepresentationConfig:
 
 
 def _validate_representation_capabilities(
-    config: RepresentationConfig, *, is_numerical: bool, source: str | Mapping[str, Any] | RepresentationConfig
+    config: RepresentationConfig,
+    *,
+    is_numerical: bool,
+    source: str | Mapping[str, Any] | RepresentationConfig,
+    is_group: bool = False,
 ) -> None:
     """Check explicit settings against the live spec without choosing defaults."""
     spec = TRANSFORMER_REGISTRY[config.method]
     kind = "numerical" if is_numerical else "categorical"
     if kind not in spec.feature_kind:
         raise _representation_error("method", config.method, f"does not support {kind} features")
-    if not spec.preprocessor_compatible:
+    if is_group and not spec.group_compatible:
+        raise _representation_error("method", config.method, "does not support explicit feature groups")
+    if not is_group and not spec.preprocessor_compatible:
         raise _representation_error("method", config.method, "is not selectable through Preprocessor")
     for key, value in config.params.items():
         if key not in spec.allowed_args:
@@ -279,11 +287,65 @@ def _representation_request(value: str | Mapping[str, Any] | RepresentationConfi
     raise _representation_error("value", value, "must be a string, mapping, or RepresentationConfig")
 
 
+@dataclass(frozen=True)
+class FeatureGroup:
+    """Immutable declaration of ordered source columns and their representation.
+
+    Parameters
+    ----------
+    name : str
+        ASCII identifier beginning with a letter, without double underscores.
+    columns : sequence
+        Nonempty ordered source labels. Labels retain their original types;
+        integer labels identify named columns rather than positions.
+    representation : str, mapping, or RepresentationConfig
+        Representation request. Mappings use the same common fields and family
+        options as :class:`RepresentationConfig`.
+
+    Notes
+    -----
+    Columns become a tuple and representation settings detach into an immutable
+    value. This declaration has no fitted state and does not resolve an input
+    schema or perform a transformation.
+    """
+
+    name: str
+    columns: Sequence[Any]
+    representation: str | Mapping[str, Any] | RepresentationConfig
+
+    def __post_init__(self) -> None:
+        path = _FEATURE_GROUP_PATH.get()
+        if type(self.name) is not str or fullmatch(r"[A-Za-z][A-Za-z0-9_]*", self.name) is None or "__" in self.name:
+            raise invalid_param_error(path, "name", self.name, "must be an ASCII identifier without double underscores")
+        if not isinstance(self.columns, Sequence) or isinstance(self.columns, (str, bytes, bytearray, memoryview)):
+            raise invalid_param_error(path, "columns", self.columns, "must be a nonempty ordered sequence of labels")
+        if not self.columns:
+            raise invalid_param_error(path, "columns", self.columns, "must be a nonempty ordered sequence of labels")
+        columns = tuple(self.columns)
+        for index, label in enumerate(columns):
+            try:
+                hash(label)
+            except TypeError as error:
+                raise invalid_param_error(
+                    path, f"columns[{index}]", label, "must be a hashable column label"
+                ) from error
+        token = _REPRESENTATION_PATH.set(f"{path}.representation")
+        try:
+            representation = _representation_request(self.representation)
+            if representation.name is not None and representation.name != self.name:
+                raise _representation_error("name", representation.name, "must match the group name")
+        finally:
+            _REPRESENTATION_PATH.reset(token)
+        object.__setattr__(self, "columns", columns)
+        object.__setattr__(self, "representation", representation)
+
+
 def _normalize_representation_config(
     value: str | Mapping[str, Any] | RepresentationConfig,
     *,
     is_numerical: bool,
     path: str = "RepresentationConfig",
+    is_group: bool = False,
 ) -> RepresentationConfig:
     """Normalize one request in its known feature-kind namespace.
 
@@ -296,7 +358,7 @@ def _normalize_representation_config(
     token = _REPRESENTATION_PATH.set(path)
     try:
         config = _representation_request(value)
-        canonical = NUMERICAL_METHODS if is_numerical else CATEGORICAL_METHODS
+        canonical = TRANSFORMER_REGISTRY if is_group else (NUMERICAL_METHODS if is_numerical else CATEGORICAL_METHODS)
         aliases = NUMERICAL_ALIASES if is_numerical else CATEGORICAL_ALIASES
         method = resolve_method(config.method, canonical, aliases)
         if method not in canonical:
@@ -316,10 +378,62 @@ def _normalize_representation_config(
                     constraint += f". Did you mean {', '.join(repr(match) for match in matches)}?"
                 raise _representation_error(location, config.params[key], constraint, valid=applicable)
         normalized = config if method == config.method else replace(config, method=method)
-        _validate_representation_capabilities(normalized, is_numerical=is_numerical, source=value)
+        _validate_representation_capabilities(normalized, is_numerical=is_numerical, source=value, is_group=is_group)
         return normalized
     finally:
         _REPRESENTATION_PATH.reset(token)
+
+
+def _normalize_feature_groups(value) -> tuple[FeatureGroup, ...]:
+    if value is None:
+        return ()
+    mapping_form = isinstance(value, Mapping)
+    if mapping_form:
+        entries = value.items()
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray, memoryview)):
+        entries = enumerate(value)
+    else:
+        raise invalid_param_error("Preprocessor", "feature_groups", value, "must be an ordered mapping or sequence")
+    groups = []
+    names = set()
+    for key, entry in entries:
+        path = f"feature_groups[{key!r}]"
+        token = _FEATURE_GROUP_PATH.set(path)
+        try:
+            if mapping_form:
+                if not isinstance(key, str):
+                    raise invalid_param_error(path, "name", key, "must be a string")
+                if not isinstance(entry, Mapping) or set(entry) != {"columns", "representation"}:
+                    raise invalid_param_error(
+                        "Preprocessor", path, entry, "mapping entries must contain exactly columns and representation"
+                    )
+                group = FeatureGroup(name=key, columns=entry["columns"], representation=entry["representation"])
+            elif isinstance(entry, FeatureGroup):
+                group = entry
+            elif isinstance(entry, Mapping) and set(entry) == {"name", "columns", "representation"}:
+                group = FeatureGroup(
+                    name=entry["name"], columns=entry["columns"], representation=entry["representation"]
+                )
+            else:
+                raise invalid_param_error(
+                    "Preprocessor",
+                    path,
+                    entry,
+                    "must be a FeatureGroup or a mapping with name, columns and representation",
+                )
+            if group.name in names:
+                raise invalid_param_error(path, "name", group.name, "must be unique among feature groups")
+            representation = _normalize_representation_config(
+                group.representation,
+                is_numerical=True,
+                is_group=True,
+                path=f"feature_groups[{group.name!r}].representation",
+            )
+            groups.append(replace(group, representation=representation))
+            names.add(group.name)
+        finally:
+            _FEATURE_GROUP_PATH.reset(token)
+    return tuple(groups)
 
 
 def _normalize_method(method, canonical, aliases) -> str:
@@ -359,6 +473,7 @@ class PreprocessorConfig:
     add_missing_indicator: bool
     missing_policy: str | None
     verbose: int
+    feature_groups: tuple[FeatureGroup, ...] = ()
 
     @classmethod
     def from_params(
@@ -384,6 +499,7 @@ class PreprocessorConfig:
         add_missing_indicator,
         missing_policy,
         verbose,
+        feature_groups=None,
     ) -> PreprocessorConfig:
         """Normalize and validate raw Preprocessor parameters into a config.
 
@@ -435,6 +551,7 @@ class PreprocessorConfig:
             add_missing_indicator=add_missing_indicator,
             missing_policy=missing_policy,
             verbose=verbose,
+            feature_groups=_normalize_feature_groups(feature_groups),
         )
 
     @staticmethod
@@ -481,7 +598,19 @@ class PreprocessorConfig:
             finally:
                 _REPRESENTATION_PATH.reset(token)
             is_numerical = self.resolve_categorical(method) not in CATEGORICAL_METHODS
-        requested = _normalize_representation_config(raw, is_numerical=is_numerical, path=path)
+        return self._resolve_representation(raw, is_numerical=is_numerical, path=path)
+
+    def group_representation_for(self, group: FeatureGroup) -> RepresentationConfig:
+        """Resolve a group's representation over applicable constructor controls."""
+        return self._resolve_representation(
+            group.representation,
+            is_numerical=True,
+            is_group=True,
+            path=f"feature_groups[{group.name!r}].representation",
+        )
+
+    def _resolve_representation(self, raw, *, is_numerical: bool, path: str, is_group: bool = False):
+        requested = _normalize_representation_config(raw, is_numerical=is_numerical, path=path, is_group=is_group)
         spec = TRANSFORMER_REGISTRY[requested.method]
         inherited = {}
         if "output_dim" in spec.allowed_args or spec.supports_adaptive_resolution:
@@ -503,7 +632,7 @@ class PreprocessorConfig:
         params.update(requested.params)
         settings = {key: value for key, value in inherited.items() if getattr(requested, key) is UNSET}
         resolved = replace(requested, **settings, params=params)
-        return _normalize_representation_config(resolved, is_numerical=is_numerical, path=path)
+        return _normalize_representation_config(resolved, is_numerical=is_numerical, path=path, is_group=is_group)
 
     @property
     def seed_kwargs(self) -> dict:

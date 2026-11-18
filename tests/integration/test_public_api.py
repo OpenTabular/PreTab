@@ -225,7 +225,15 @@ def test_representation_config_public_exports_are_identical():
     assert pretab.RepresentationConfig is RepresentationConfig
     assert pretab_compose.RepresentationConfig is RepresentationConfig
     assert "RepresentationConfig" in pretab.__all__
-    assert pretab_compose.__all__ == ["RepresentationConfig"]
+    assert pretab_compose.__all__ == ["FeatureGroup", "RepresentationConfig"]
+
+
+def test_feature_group_public_exports_are_identical():
+    from pretab.compose.config import FeatureGroup
+
+    assert pretab.FeatureGroup is FeatureGroup
+    assert pretab_compose.FeatureGroup is FeatureGroup
+    assert "FeatureGroup" in pretab.__all__
 
 
 def test_transformers_public_surface_is_resolvable():

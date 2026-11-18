@@ -12,11 +12,69 @@ import pytest
 from sklearn.base import clone
 
 from pretab import Preprocessor
-from pretab.compose.config import RepresentationConfig, _normalize_representation_config
+from pretab.compose.config import FeatureGroup, RepresentationConfig, _normalize_representation_config
 from pretab.compose.factory import get_categorical_transformer_steps, get_numerical_transformer_steps
 from pretab.compose.registry import TRANSFORMER_REGISTRY
 from pretab.core.parameters import UNSET
 from pretab.exceptions import InvalidParamError, OptionalDependencyError
+
+
+@pytest.mark.parametrize("form", ["string", "mapping", "value"])
+def test_feature_group_value_accepts_existing_representation_forms(form):
+    requested = {"string": "tprs", "mapping": {"method": "tprs"}, "value": RepresentationConfig("tprs")}[form]
+    group = FeatureGroup("location", [1, "latitude"], requested)
+
+    assert group.columns == (1, "latitude")
+    assert group.representation == RepresentationConfig("tprs")
+    with pytest.raises(FrozenInstanceError):
+        cast(Any, group).name = "replacement"
+
+
+def test_feature_group_value_detaches_columns_and_nested_settings():
+    columns = ["longitude", "latitude"]
+    settings = {"method": "tprs", "params": {"options": {"levels": [1, 2]}}}
+    group = FeatureGroup("location", columns, settings)
+    columns.reverse()
+    settings["params"]["options"]["levels"].append(3)
+
+    assert group.columns == ("longitude", "latitude")
+    assert isinstance(group.representation, RepresentationConfig)
+    assert group.representation.params["options"]["levels"] == (1, 2)
+    with pytest.raises(TypeError):
+        group.representation.params["options"]["levels"][0] = 9
+
+
+@pytest.mark.parametrize("name", ["", " ", "_location", "1location", "a-b", "a b", "a__b", "caf\u00e9", None, True, 1])
+def test_feature_group_value_rejects_invalid_identifiers(name):
+    with pytest.raises(InvalidParamError, match=r"FeatureGroup\.name"):
+        FeatureGroup(name, ["x", "y"], "tprs")
+
+
+@pytest.mark.parametrize(
+    "columns", [[], (), "xy", b"xy", {"x", "y"}, {"x": 1}, slice(0, 2), lambda: ["x"], None, [["x"]]]
+)
+def test_feature_group_value_rejects_unordered_or_invalid_columns(columns):
+    with pytest.raises(InvalidParamError, match=r"FeatureGroup\.columns"):
+        FeatureGroup("location", columns, "tprs")
+
+
+@pytest.mark.parametrize(
+    "restore",
+    [
+        copy.copy,
+        copy.deepcopy,
+        lambda value: pickle.loads(pickle.dumps(value)),  # noqa: S301
+        lambda value: clone(value, safe=False),
+    ],
+)
+def test_feature_group_value_preserves_immutable_settings_through_copy_and_pickle(restore):
+    group = FeatureGroup("location", [1, "y"], {"method": "tprs", "params": {"options": {"levels": [1, 2]}}})
+    restored = restore(group)
+
+    assert restored == group and restored is not group
+    assert restored.columns == (1, "y")
+    with pytest.raises(TypeError):
+        restored.representation.params["options"]["levels"][0] = 9
 
 
 @pytest.fixture

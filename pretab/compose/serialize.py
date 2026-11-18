@@ -383,5 +383,6 @@ def preprocessor_from_spec(data: dict):
 
     obj = Preprocessor.__new__(Preprocessor)
     obj.__dict__.update(_decode_mapping(data["state"]))
+    obj.__dict__.setdefault("feature_groups", None)
     _repair_legacy_sparse_feature_counts(obj)
     return obj

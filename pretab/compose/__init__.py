@@ -5,6 +5,6 @@ Includes the ``config``, ``registry``, ``factory``, ``feature_detection``,
 ``output`` and ``inspection`` modules.
 """
 
-from .config import RepresentationConfig
+from .config import FeatureGroup, RepresentationConfig
 
-__all__ = ["RepresentationConfig"]
+__all__ = ["FeatureGroup", "RepresentationConfig"]

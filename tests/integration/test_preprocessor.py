@@ -202,6 +202,7 @@ EXPECTED_PARAMS = {
     "dtype",
     "verbose",
     "preset",
+    "feature_groups",
 }
 
 

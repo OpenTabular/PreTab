@@ -14,6 +14,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.base import clone
 
 from pretab import Preprocessor, PretabSerializationError, RepresentationConfig, RepresentationPolicy
 from pretab.compose.registry import TransformerSpec
@@ -39,6 +40,29 @@ def frame():
 def target():
     rng = np.random.default_rng(1)
     return rng.random(60)
+
+
+@pytest.mark.parametrize("restore_format", ["pickle", "spec"])
+def test_legacy_state_without_groups_restores_the_constructor_default(frame, restore_format):
+    processor = Preprocessor(numerical_method="rbf", target_aware=False, placement_strategy="uniform").fit(frame)
+    expected = processor.transform(frame)
+    fingerprint = processor.fingerprint_
+    if restore_format == "pickle":
+        del processor.feature_groups
+        restored = pickle.loads(pickle.dumps(processor))  # noqa: S301
+    else:
+        spec = processor.to_spec()
+        del spec["state"]["feature_groups"]
+        del spec["params"]["feature_groups"]
+        restored = Preprocessor.from_spec(spec)
+
+    assert restored.get_params(deep=False)["feature_groups"] is None
+    assert restored.get_resolved_config()["feature_groups"] is None
+    assert restored.fingerprint_ == fingerprint
+    np.testing.assert_array_equal(restored.transform(frame), expected)
+    copied = clone(restored)
+    assert isinstance(copied, Preprocessor)
+    assert copied.feature_groups is None
 
 
 # Representation configs that round-trip; each is (params, id).

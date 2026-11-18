@@ -1,5 +1,5 @@
 from ._version import __version__
-from .compose import RepresentationConfig
+from .compose import FeatureGroup, RepresentationConfig
 from .compose.search import RepresentationSearchCV
 from .core.logging import configure_logging, set_verbosity
 from .core.policy import RepresentationPolicy
@@ -25,6 +25,7 @@ from .preprocessor import Preprocessor
 __all__ = [
     "BaseRepresentation",
     "CrossFittedTransformer",
+    "FeatureGroup",
     "FeatureLineage",
     "FrozenRepresentationError",
     "LeakageWarning",

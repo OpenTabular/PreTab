@@ -1,5 +1,6 @@
 """Unit tests for :class:`pretab.compose.config.PreprocessorConfig`."""
 
+import inspect
 import json
 from dataclasses import asdict, replace
 from typing import Any
@@ -10,6 +11,7 @@ import pytest
 from sklearn.base import clone
 
 from pretab import Preprocessor, RepresentationConfig
+from pretab.compose.config import FeatureGroup
 from pretab.compose.registry import TRANSFORMER_REGISTRY
 from pretab.core.parameters import UNSET
 from pretab.exceptions import InvalidParamError
@@ -59,6 +61,7 @@ def test_resolved_config_matches_inline_preset_contract(task, preset, overrides)
         "output_format": "dense",
         "dtype": None,
         "verbose": 0,
+        "feature_groups": None,
         **overrides,
     }
 
@@ -131,8 +134,151 @@ def test_normalized_config_retains_every_representation_setting(make_config):
         **parameters,
         "numerical_method": "cubicspline",
         "categorical_method": "one-hot",
+        "feature_groups": (),
     }
     assert config.feature_preprocessing is not parameters["feature_preprocessing"]
+
+
+@pytest.mark.parametrize("form", ["mapping", "sequence", "values"])
+def test_group_normalization_preserves_declaration_and_source_order(make_config, form):
+    declarations = [
+        {"name": "second", "columns": [1, "latitude"], "representation": {"method": "thinplate", "n_components": 4}},
+        {"name": "first", "columns": ["b", "a"], "representation": "tensor"},
+    ]
+    requested = {
+        "mapping": {
+            item["name"]: {key: value for key, value in item.items() if key != "name"} for item in declarations
+        },
+        "sequence": declarations,
+        "values": [FeatureGroup(**item) for item in declarations],
+    }[form]
+    config = make_config(feature_groups=requested)
+
+    assert isinstance(config.feature_groups, tuple)
+    assert [group.name for group in config.feature_groups] == ["second", "first"]
+    assert [group.columns for group in config.feature_groups] == [(1, "latitude"), ("b", "a")]
+    assert [group.representation for group in config.feature_groups] == [
+        RepresentationConfig("tprs", params={"n_components": 4}),
+        RepresentationConfig("tensorspline"),
+    ]
+    declarations[0]["columns"].append("changed")
+    assert config.feature_groups[0].columns == (1, "latitude")
+
+
+@pytest.mark.parametrize("requested", [None, {}, [], ()])
+def test_empty_groups_normalize_to_an_empty_tuple(make_config, requested):
+    assert make_config(feature_groups=requested).feature_groups == ()
+
+
+def test_group_representation_uses_existing_inheritance_and_local_priority(make_config):
+    config = make_config(
+        feature_groups={
+            "surface": {"columns": ["b", "a"], "representation": {"method": "tensor", "output_dim": 4, "degree": 2}},
+            "location": {"columns": ["x", "y"], "representation": {"method": "thinplate", "n_components": 6}},
+        },
+        output_dim=9,
+        degree=3,
+        random_state=17,
+    )
+
+    surface, location = [config.group_representation_for(group) for group in config.feature_groups]
+    assert surface == RepresentationConfig(
+        "tensorspline", output_dim=4, placement_strategy="uniform", params={"degree": 2}
+    )
+    assert location == RepresentationConfig("tprs", params={"n_components": 6, "random_state": 17})
+
+
+@pytest.mark.parametrize(
+    "requested",
+    [
+        "location",
+        {"x", "y"},
+        ["x", "y"],
+        {"location": {"columns": ["x", "y"]}},
+        {"location": {"columns": ["x", "y"], "representation": "tprs", "name": "location"}},
+        [{"columns": ["x", "y"], "representation": "tprs"}],
+        [{"name": "location", "columns": ["x", "y"], "representation": "tprs", "extra": True}],
+        {"location": {"columns": ["x", "y"], "representation": "rff"}},
+        {"location": {"columns": ["x", "y"], "representation": {"method": "tprs", "n_componnts": 4}}},
+        {"location": {"columns": ["x", "y"], "representation": {"method": "tprs", "name": "other"}}},
+        [FeatureGroup("location", ["x", "y"], "tprs"), FeatureGroup("location", ["a", "b"], "tensor")],
+    ],
+)
+def test_invalid_group_declarations_raise_contextual_errors(make_config, requested):
+    with pytest.raises(InvalidParamError, match="feature_groups"):
+        make_config(feature_groups=requested)
+
+
+def test_group_parameter_is_last_keyword_only_and_remains_raw_for_sklearn():
+    declarations = {
+        "location": {"columns": [1, "latitude"], "representation": {"method": "thinplate", "n_components": 4}}
+    }
+    processor = Preprocessor(feature_groups=declarations, random_state=17)
+    parameters = inspect.signature(Preprocessor).parameters
+
+    assert list(parameters)[-1] == "feature_groups"
+    assert parameters["feature_groups"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameters["feature_groups"].default is None
+    assert processor.get_params(deep=False)["feature_groups"] is declarations
+    resolved = processor.get_resolved_config()
+    assert resolved["feature_groups"] == [
+        {
+            "name": "location",
+            "columns": [1, "latitude"],
+            "representation": RepresentationConfig("tprs", params={"n_components": 4, "random_state": 17}).to_dict(),
+        }
+    ]
+    resolved["feature_groups"][0]["columns"].append("changed")
+    resolved["feature_groups"][0]["representation"]["params"]["n_components"] = 8
+    assert processor.get_resolved_config()["feature_groups"][0]["representation"]["params"]["n_components"] == 4
+    declarations["location"]["representation"]["n_components"] = 6
+    assert processor.get_resolved_config()["feature_groups"][0]["representation"]["params"]["n_components"] == 6
+    assert processor.feature_groups is declarations
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_group_requests_clone_and_set_params_without_normalizing_constructor_values(typed):
+    requested = (
+        [FeatureGroup("location", ["x", "y"], "thinplate")]
+        if typed
+        else {"location": {"columns": ["x", "y"], "representation": "thinplate"}}
+    )
+    processor = Preprocessor(feature_groups=requested)
+    copied = clone(processor)
+    assert isinstance(copied, Preprocessor)
+    assert copied.feature_groups == requested
+    assert copied.feature_groups is not requested
+    assert copied.get_resolved_config() == processor.get_resolved_config()
+    processor.set_params(feature_groups=None)
+    assert processor.feature_groups is None
+    assert processor.get_resolved_config()["feature_groups"] is None
+
+
+@pytest.mark.parametrize("requested", [None, {}, [], ()])
+def test_empty_groups_preserve_single_column_values_names_and_fingerprint(sample_frame, requested):
+    parameters = {"numerical_method": "rbf", "target_aware": False, "placement_strategy": "uniform"}
+    reference = Preprocessor(**parameters).fit(sample_frame)
+    processor = Preprocessor(feature_groups=requested, **parameters).fit(sample_frame)
+
+    np.testing.assert_array_equal(processor.transform(sample_frame), reference.transform(sample_frame))
+    np.testing.assert_array_equal(processor.get_feature_names_out(), reference.get_feature_names_out())
+    assert processor.output_dims_ == reference.output_dims_
+    assert processor.fingerprint_ == reference.fingerprint_
+    assert processor.feature_groups is requested
+    expected_config = reference.get_resolved_config()
+    expected_config["feature_groups"] = None if requested is None else []
+    assert processor.get_resolved_config() == expected_config
+
+
+def test_nonempty_groups_cannot_be_silently_ignored_by_single_column_fitting(monkeypatch):
+    def reject_conversion(_data):
+        raise AssertionError("Group refusal must precede data conversion and estimator fitting")
+
+    monkeypatch.setattr("pretab.preprocessor.to_dataframe", reject_conversion)
+    processor = Preprocessor(feature_groups={"location": {"columns": ["x", "y"], "representation": "tprs"}})
+    with pytest.raises(InvalidParamError, match="single-column composition route"):
+        processor.fit(object())
+    assert not hasattr(processor, "column_transformer_")
 
 
 def test_none_method_normalizes_to_none(make_config):
