@@ -812,7 +812,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         ------
         PretabDataError
             If input matched by position has a different number of columns than
-            ``n_features_in_``: it could never be routed correctly.
+            ``n_features_in_``, or named input is missing a fitted group source.
         """
 
         check_is_fitted(self)
@@ -1087,7 +1087,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         ------
         PretabDataError
             If array-like input matched by position has a different number of
-            columns than seen during ``fit``: it could never be routed correctly.
+            columns than seen during ``fit``, or named input omits a fitted group
+            source. Group errors identify the group and original missing labels.
         """
         # Synthetic labels mark an array fit only when no input feature names were recorded.
         fitted_labels = getattr(self.column_transformer_, "feature_names_in_", None)
@@ -1100,6 +1101,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         is_array = not has_column_labels(X)
         X = to_dataframe(X, copy=True)
         if not (is_array or (fitted_on_array and list(X.columns) != positional_labels)):
+            available = {str(column) for column in X.columns}
+            for block in _iter_fitted_blocks(self.column_transformer_):
+                if block.group_id is None:
+                    continue
+                missing = tuple(column for column in block.columns if str(column) not in available)
+                if missing:
+                    labels = self._input_labels()
+                    sources = tuple(labels.get(column, column) for column in missing)
+                    raise PretabDataError(
+                        f"Feature group {block.group_id!r} is missing sources {sources!r} "
+                        "required by the fitted representation."
+                    )
             return X
         if X.shape[1] != self.n_features_in_:
             raise PretabDataError(

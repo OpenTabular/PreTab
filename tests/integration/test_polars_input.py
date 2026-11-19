@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from pretab import Preprocessor, RepresentationConfig
-from pretab.exceptions import DataWarning
+from pretab.exceptions import DataWarning, PretabDataError
 
 pl = pytest.importorskip("polars")
 
@@ -135,6 +135,66 @@ def test_mixed_structured_inputs_preserve_polars_column_types(frames, typed, out
         assert list(blocks) == ["num_income", "num_visits", "cat_rooms", "cat_plan", "cat_city", "cat_flag"]
         assert [np.shape(block)[1] for block in blocks.values()] == list(dimensions.values())
     assert polars_frame.equals(original)
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse", "auto"])
+def test_grouped_polars_nullable_sources_match_pandas_with_categorical_neighbors(frames, method, output_format):
+    from scipy import sparse
+
+    pandas_frame, polars_frame, _ = frames
+    pandas_frame = pandas_frame.astype({"visits": float})
+    pandas_frame.loc[7, "visits"] = np.nan
+    visits = polars_frame["visits"].to_list()
+    visits[7] = None
+    polars_frame = polars_frame.with_columns(pl.Series("visits", visits, dtype=pl.Int64))
+    original = polars_frame.clone()
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    options = {
+        "numerical_method": "none",
+        "categorical_method": "one-hot",
+        "target_aware": False,
+        "placement_strategy": "uniform",
+        "missing_policy": "separate_state",
+        "output_format": output_format,
+        "dtype": np.float32,
+        "feature_groups": {"location": {"columns": ["visits", "income"], "representation": representation}},
+    }
+    from_pandas = Preprocessor(**options).fit(pandas_frame)
+    from_polars = Preprocessor(**options).fit(polars_frame)
+    reference = from_pandas.transform(pandas_frame)
+    assert not isinstance(reference, dict)
+    expected = reference.toarray() if sparse.issparse(reference) else np.asarray(reference)
+    assert from_polars.numerical_features_ == ["income", "visits"]
+    assert from_polars.categorical_features_ == ["rooms", "plan", "city", "flag"]
+    assert from_polars.output_dims_ == from_pandas.output_dims_
+    assert from_polars.get_feature_lineage() == from_pandas.get_feature_lineage()
+    np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
+    for preprocessor, incoming in (
+        (from_polars, polars_frame.select(polars_frame.columns[::-1])),
+        (from_polars, pandas_frame.iloc[:, ::-1]),
+        (from_pandas, polars_frame.select(polars_frame.columns[::-1])),
+    ):
+        actual = preprocessor.transform(incoming)
+        assert not isinstance(actual, dict)
+        assert sparse.issparse(actual) == (preprocessor.output_format_ == "sparse")
+        np.testing.assert_array_equal(actual.toarray() if sparse.issparse(actual) else np.asarray(actual), expected)
+        blocks = preprocessor.transform(incoming, return_array=False)
+        assert isinstance(blocks, dict)
+        assert list(blocks) == ["group_location", "cat_rooms", "cat_plan", "cat_city", "cat_flag"]
+        group = blocks["group_location"]
+        values = group.toarray() if sparse.issparse(group) else np.asarray(group)
+        np.testing.assert_array_equal(values[:, -2:], pandas_frame[["visits", "income"]].isna().astype(np.float32))
+    assert polars_frame.equals(original)
+    assert polars_frame.null_count()["visits"][0] == 1
+    with pytest.raises(PretabDataError) as failure:
+        from_polars.transform(polars_frame.drop("visits"))
+    assert "group 'group_location'" in str(failure.value)
+    assert "missing sources ('visits',)" in str(failure.value)
 
 
 def test_polars_input_with_polars_output(frames):

@@ -123,6 +123,162 @@ def test_mixed_structured_inputs_keep_feature_order(input_kind, typed, reverse_s
         np.testing.assert_array_equal(result.toarray() if sparse.issparse(result) else np.asarray(result), expected)
 
 
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("labels", ["string", "integer"])
+@pytest.mark.parametrize("missing_indices", [(0,), (1,), (0, 1)])
+@pytest.mark.parametrize("input_kind", ["pandas", "dict"])
+def test_missing_group_sources_name_fitted_group_and_original_labels(
+    int_labelled, method, labels, missing_indices, input_kind
+):
+    frame = int_labelled if labels == "integer" else int_labelled.set_axis(["north", "east"], axis=1)
+    sources = list(frame.columns[::-1])
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    preprocessor = Preprocessor(
+        numerical_method="none",
+        target_aware=False,
+        placement_strategy="uniform",
+        feature_groups={"location": {"columns": sources, "representation": representation}},
+    ).fit(frame)
+    preprocessor.set_params(feature_groups=None)
+    missing = tuple(sources[index] for index in missing_indices)
+    incoming = frame.drop(columns=list(missing))
+    original = incoming.copy(deep=True)
+    values = incoming.to_dict(orient="list") if input_kind == "dict" else incoming
+    with pytest.raises(PretabDataError) as failure:
+        preprocessor.transform(values)
+    assert "group 'group_location'" in str(failure.value)
+    assert f"missing sources {missing!r}" in str(failure.value)
+    pd.testing.assert_frame_equal(incoming, original)
+
+
+def _grouped_input_processor(method, columns, **kwargs):
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    return Preprocessor(
+        numerical_method="none",
+        target_aware=False,
+        placement_strategy="uniform",
+        missing_policy="separate_state",
+        feature_groups={"location": {"columns": columns, "representation": representation}},
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("input_kind", ["pandas", "numpy", "polars"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse", "auto"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_grouped_inputs_preserve_order_missing_state_and_values(method, input_kind, output_format, dtype):
+    from scipy import sparse
+
+    frame = pd.DataFrame(
+        np.random.default_rng(42).normal(size=(40, 3)), columns=pd.Index(["feature_0", "feature_1", "feature_2"])
+    )
+    frame.iloc[7, 0] = np.nan
+    sources = ["feature_1", "feature_0"]
+    expected_preprocessor = _grouped_input_processor(method, sources, dtype=dtype).fit(frame)
+    expected = expected_preprocessor.transform(frame)
+    if input_kind == "polars":
+        polars = pytest.importorskip("polars")
+        incoming = polars.DataFrame(frame.to_dict(orient="list")).fill_nan(None)
+    else:
+        incoming = frame.to_numpy() if input_kind == "numpy" else frame
+    original = deepcopy(incoming)
+    preprocessor = _grouped_input_processor(method, sources, output_format=output_format, dtype=dtype)
+    transformed = preprocessor.fit_transform(incoming)
+    assert not isinstance(transformed, dict)
+    assert sparse.issparse(transformed) == (preprocessor.output_format_ == "sparse")
+    assert transformed.dtype == dtype
+    values = transformed.toarray() if sparse.issparse(transformed) else np.asarray(transformed)
+    np.testing.assert_array_equal(values, expected)
+    np.testing.assert_array_equal(preprocessor.get_feature_names_out(), expected_preprocessor.get_feature_names_out())
+    assert preprocessor.get_feature_info(verbose=False) == expected_preprocessor.get_feature_info(verbose=False)
+    assert preprocessor.get_feature_lineage() == expected_preprocessor.get_feature_lineage()
+    assert list(preprocessor.output_dims_) == ["feature_2", "group_location"]
+    fingerprint = preprocessor.fingerprint_
+    blocks = preprocessor.transform(incoming, return_array=False)
+    assert isinstance(blocks, dict)
+    assert list(blocks) == ["num_feature_2", "group_location"]
+    assert all(sparse.issparse(block) == (preprocessor.output_format_ == "sparse") for block in blocks.values())
+    stacked = np.hstack([block.toarray() if sparse.issparse(block) else np.asarray(block) for block in blocks.values()])
+    np.testing.assert_array_equal(stacked, expected)
+    np.testing.assert_array_equal(values[:, -2:], frame[sources].isna().astype(dtype))
+    if input_kind == "numpy":
+        assert isinstance(incoming, np.ndarray)
+        for wrong in (incoming[:, :-1], np.column_stack((incoming, np.ones(len(incoming))))):
+            with pytest.raises(PretabDataError, match=r"X has [24] features, but Preprocessor is expecting 3"):
+                preprocessor.transform(wrong)
+        np.testing.assert_array_equal(incoming, original)
+    else:
+        assert not isinstance(incoming, np.ndarray)
+        reordered = (
+            incoming.iloc[:, ::-1] if isinstance(incoming, pd.DataFrame) else incoming.select(incoming.columns[::-1])
+        )
+        result = preprocessor.transform(reordered)
+        assert not isinstance(result, dict)
+        np.testing.assert_array_equal(result.toarray() if sparse.issparse(result) else np.asarray(result), expected)
+        if isinstance(incoming, pd.DataFrame):
+            assert isinstance(original, pd.DataFrame)
+            pd.testing.assert_frame_equal(incoming, original)
+        else:
+            assert incoming.equals(original)
+    assert preprocessor.fingerprint_ == fingerprint
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("input_kind", ["pandas", "dict", "numpy", "list"])
+def test_grouped_integer_labels_keep_named_and_positional_routes(int_labelled, method, input_kind):
+    preprocessor = _grouped_input_processor(method, [0, 1]).fit(int_labelled)
+    expected = preprocessor.transform(int_labelled)
+    reordered = int_labelled.iloc[:, ::-1]
+    incoming = {
+        "pandas": reordered,
+        "dict": reordered.to_dict(orient="list"),
+        "numpy": int_labelled.to_numpy(),
+        "list": int_labelled.to_numpy().tolist(),
+    }[input_kind]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        actual = preprocessor.transform(incoming)
+    assert not caught
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+def test_array_fitted_groups_accept_differently_named_frames_positionally(method):
+    frame = pd.DataFrame(np.random.default_rng(42).normal(size=(40, 3)), columns=pd.Index(["north", "east", "spare"]))
+    preprocessor = _grouped_input_processor(method, ["feature_1", "feature_0"]).fit(frame.to_numpy())
+    expected = preprocessor.transform(frame.to_numpy())
+    with pytest.warns(UserWarning, match="was fitted without feature names"):
+        actual = preprocessor.transform(frame)
+    np.testing.assert_array_equal(actual, expected)
+    with pytest.raises(PretabDataError, match="X has 2 features, but Preprocessor is expecting 3"):
+        preprocessor.transform(frame.iloc[:, :-1])
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("input_kind", ["numpy", "list"])
+def test_named_fitted_groups_accept_positional_inputs_with_existing_warning(method, input_kind):
+    frame = pd.DataFrame(np.random.default_rng(42).normal(size=(40, 3)), columns=pd.Index(["north", "east", "spare"]))
+    preprocessor = _grouped_input_processor(method, ["east", "north"]).fit(frame)
+    expected = preprocessor.transform(frame)
+    incoming = frame.to_numpy() if input_kind == "numpy" else frame.to_numpy().tolist()
+    with pytest.warns(UserWarning, match="does not have valid feature names") as caught:
+        actual = preprocessor.transform(incoming)
+    assert len(caught) == 1
+    np.testing.assert_array_equal(actual, expected)
+    wrong = frame.iloc[:, :-1].to_numpy()
+    with pytest.raises(PretabDataError, match="X has 2 features, but Preprocessor is expecting 3"):
+        preprocessor.transform(wrong if input_kind == "numpy" else wrong.tolist())
+
+
 @pytest.fixture(params=["string", "integer"])
 def input_route_frame(request):
     frame = pd.DataFrame(
