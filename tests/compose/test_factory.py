@@ -1,14 +1,17 @@
 """Unit tests for :mod:`pretab.compose.factory`."""
 
-from dataclasses import fields
+from dataclasses import fields, replace
 from unittest.mock import Mock, call, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 from scipy.sparse import issparse
+from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.pipeline import FeatureUnion, Pipeline
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from pretab import Preprocessor
 from pretab.compose.config import PreprocessorConfig, RepresentationConfig
@@ -20,7 +23,8 @@ from pretab.compose.factory import (
     get_categorical_transformer_steps,
     get_numerical_transformer_steps,
 )
-from pretab.compose.registry import TransformerSpec, get_spec
+from pretab.compose.feature_detection import with_string_labels
+from pretab.compose.registry import TRANSFORMER_REGISTRY, TransformerSpec, get_spec
 from pretab.core.parameters import UNSET
 from pretab.exceptions import ConfigWarning, InvalidParamError
 
@@ -197,6 +201,188 @@ def test_build_column_transformer_fits_and_transforms(make_config, sample_frame)
     out = ct.fit_transform(sample_frame, np.array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0]))
     assert isinstance(out, np.ndarray)
     assert out.shape[0] == len(sample_frame)
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+def test_grouped_factory_selects_sources_once_in_declared_order(make_config, method):
+    config = make_config(feature_groups={"location": {"columns": ["y", "x"], "representation": method}})
+    transformer = build_column_transformer(config, ["x", "untouched", "y"], ["city"])
+
+    assert [(name, columns) for name, _, columns in transformer.transformers] == [
+        ("num_untouched", ["untouched"]),
+        ("group_location", ["y", "x"]),
+        ("cat_city", ["city"]),
+    ]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_grouped_factory_preserves_declaration_order_between_singles(make_config, reverse):
+    groups = [
+        {"name": "first", "columns": ["y", "x"], "representation": "tensor"},
+        {"name": "second", "columns": ["w", "z"], "representation": "thinplate"},
+    ]
+    if reverse:
+        groups.reverse()
+    config = make_config(feature_groups=groups)
+    transformer = build_column_transformer(config, ["w", "x", "untouched", "y", "z"], ["city"])
+    assert [(name, columns) for name, _, columns in transformer.transformers] == [
+        ("num_untouched", ["untouched"]),
+        *[(f"group_{group['name']}", group["columns"]) for group in groups],
+        ("cat_city", ["city"]),
+    ]
+    assert [group.name for group in config.feature_groups] == [group["name"] for group in groups]
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("scaling", [None, "standardization", "minmax"])
+@pytest.mark.parametrize("missing_policy", ["impute", "impute_with_indicator", "separate_state"])
+def test_grouped_factory_matches_joint_reference_without_indicator_inputs(make_config, method, scaling, missing_policy):
+    frame = pd.DataFrame(np.random.default_rng(42).normal(size=(24, 2)), columns=pd.Index(["x", "y"]))
+    frame.loc[[1, 7], "x"] = np.nan
+    before = frame.copy(deep=True)
+    options = (
+        {"output_dim": 3, "degree": 2, "diff_order": 1, "placement_strategy": "quantile"}
+        if method == "tensorspline"
+        else {"n_components": 4, "landmark_strategy": "subsample", "rank_strategy": "nystroem", "random_state": 0}
+    )
+    config = make_config(
+        numerical_method="ple",
+        output_dim=13,
+        degree=5,
+        adaptive=True,
+        target_aware=True,
+        placement_strategy="cart",
+        scaling=scaling,
+        missing_policy=missing_policy,
+        random_state=17,
+        feature_groups={"location": {"columns": ["y", "x"], "representation": {"method": method, **options}}},
+    )
+    transformer = build_column_transformer(config, ["x", "y"], [], sparse_threshold=0.0)
+    result = transformer.fit_transform(frame)
+    assert isinstance(result, np.ndarray)
+    block = transformer.named_transformers_["group_location"]
+    pipeline = dict(block.transformer_list)["representation"] if isinstance(block, FeatureUnion) else block
+    assert isinstance(pipeline, Pipeline)
+    leaf = pipeline.named_steps[method]
+    assert leaf.n_features_in_ == 2
+    assert pipeline.named_steps["imputer"].statistics_.shape == (2,)
+    assert pipeline.named_steps["imputer"].add_indicator is False
+    for key, value in options.items():
+        assert getattr(leaf, key) == value
+
+    reference_steps: list[tuple[str, object]] = [
+        ("imputer", SimpleImputer(strategy="median", keep_empty_features=True))
+    ]
+    if scaling is not None:
+        scaler = StandardScaler() if scaling == "standardization" else MinMaxScaler(feature_range=(-1, 1))
+        reference_steps.append(("scaler", scaler))
+    reference_steps.append((method, get_spec(method).transformer_cls(**options)))
+    reference = Pipeline(reference_steps)
+    expected = reference.fit_transform(frame[["y", "x"]])
+    width = expected.shape[1]
+    assert width == (9 if method == "tensorspline" else 4)
+    np.testing.assert_allclose(result[:, :width], expected, rtol=1e-12, atol=1e-12)
+
+    missing_columns = ["x"] if missing_policy == "impute_with_indicator" else ["y", "x"]
+    indicator_width = 0 if missing_policy == "impute" else len(missing_columns)
+    assert result.shape == (len(frame), width + indicator_width)
+    assert isinstance(block, Pipeline if missing_policy == "impute" else FeatureUnion)
+    if indicator_width:
+        np.testing.assert_array_equal(result[:, width:], frame[missing_columns].isna().to_numpy(dtype=float))
+
+    heldout = frame.iloc[:4].copy()
+    heldout.loc[0, "y"] = np.nan
+    transformed = transformer.transform(heldout[["y", "x"]])
+    assert isinstance(transformed, np.ndarray)
+    np.testing.assert_allclose(transformed[:, :width], reference.transform(heldout[["y", "x"]]), rtol=1e-12, atol=1e-12)
+    if indicator_width:
+        np.testing.assert_array_equal(transformed[:, width:], heldout[missing_columns].isna().to_numpy(dtype=float))
+    assert transformed.shape[1] == result.shape[1]
+    pd.testing.assert_frame_equal(frame, before)
+
+
+def test_grouped_factory_maps_integer_labels_without_positional_selection(make_config):
+    frame = pd.DataFrame(np.random.default_rng(0).normal(size=(16, 3)), columns=pd.Index([7, 3, 9]))
+    config = make_config(
+        feature_groups={
+            "location": {
+                "columns": [3, 7],
+                "representation": {"method": "tprs", "n_components": 2, "landmark_strategy": "subsample"},
+            }
+        },
+        random_state=0,
+    )
+    transformer = build_column_transformer(config, [7, 3, 9], [])
+    assert [(name, columns) for name, _, columns in transformer.transformers] == [
+        ("num_9", ["9"]),
+        ("group_location", ["3", "7"]),
+    ]
+    normalized = with_string_labels(frame)
+    result = transformer.fit_transform(normalized)
+    np.testing.assert_array_equal(result, transformer.transform(normalized[["9", "3", "7"]]))
+    assert config.feature_groups[0].columns == (3, 7)
+    assert list(frame.columns) == [7, 3, 9]
+
+
+def test_grouped_factory_keeps_private_step_names_safe_and_unique(make_config):
+    frame = pd.DataFrame(np.random.default_rng(1).normal(size=(16, 4)), columns=pd.Index(["_unsafe", "col0", "x", "y"]))
+    frame["__city"] = ["a", "b"] * 8
+    config = make_config(
+        feature_groups={
+            "num_col0": {
+                "columns": ["x", "y"],
+                "representation": {"method": "tprs", "n_components": 2, "landmark_strategy": "subsample"},
+            }
+        },
+        random_state=0,
+    )
+    transformer = build_column_transformer(config, ["_unsafe", "col0", "x", "y"], ["__city"])
+    names = [name for name, _, _ in transformer.transformers]
+    assert names == ["num_col0_1", "num_col0", "group_num_col0", "cat_col3"]
+    assert len(set(names)) == len(names)
+    assert all("__" not in name for name in names)
+    cloned = clone(transformer)
+    assert isinstance(cloned, ColumnTransformer)
+    np.testing.assert_array_equal(transformer.fit_transform(frame), cloned.fit_transform(frame))
+
+
+@pytest.mark.parametrize("claimed_collision", [False, True])
+def test_group_public_key_collision_precedes_all_construction(make_config, monkeypatch, claimed_collision):
+    columns = ["group_location", "y"] if claimed_collision else ["x", "y"]
+    config = make_config(feature_groups={"location": {"columns": columns, "representation": "tprs"}})
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("A group public-key collision must be rejected before constructing any block")
+
+    monkeypatch.setattr("pretab.compose.factory._create_transformer", unexpected)
+    with pytest.raises(InvalidParamError, match=r"feature_groups\['location'\].name.*location") as failure:
+        build_column_transformer(config, ["untouched", "x", "y", "group_location"], [])
+    assert "public block key 'group_location'" in str(failure.value)
+
+
+@pytest.mark.parametrize("method", ["tensor", "thinplate"])
+def test_grouped_factory_capability_is_rechecked_before_construction(make_config, monkeypatch, method):
+    config = make_config(feature_groups={"location": {"columns": ["x", "y"], "representation": method}})
+    canonical = config.group_representation_for(config.feature_groups[0]).method
+    spec = get_spec(canonical)
+    monkeypatch.setitem(TRANSFORMER_REGISTRY, canonical, replace(spec, group_compatible=False))
+    with pytest.raises(InvalidParamError, match="does not support explicit feature groups"):
+        build_column_transformer(config, ["x", "y"], [])
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs", "rff", "nystroem"])
+def test_grouped_factory_does_not_unlock_single_column_step_selection(method):
+    with pytest.raises(InvalidParamError, match="unrecognized numerical preprocessing method"):
+        get_numerical_transformer_steps(method, is_group=True)
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+def test_grouped_representation_cannot_enter_public_single_column_builder(make_config, method):
+    with pytest.raises(InvalidParamError, match=r"create_transformer\.representation\.method") as failure:
+        create_transformer(
+            method, is_numerical=True, config=make_config(), representation=RepresentationConfig(method=method)
+        )
+    assert "unrecognized numerical preprocessing method" in str(failure.value)
 
 
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
