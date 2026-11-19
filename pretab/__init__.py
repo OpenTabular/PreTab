@@ -13,6 +13,7 @@ from .exceptions import (
     PretabWarning,
     RepresentationConformanceError,
 )
+from .expansion.spline import PenaltySpec
 from .extension import (
     BaseRepresentation,
     check_representation,
@@ -30,6 +31,7 @@ __all__ = [
     "FrozenRepresentationError",
     "LeakageWarning",
     "OutputBudgetError",
+    "PenaltySpec",
     "Preprocessor",
     "PretabSerializationError",
     "PretabWarning",
