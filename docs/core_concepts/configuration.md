@@ -1,15 +1,15 @@
 # Configuration
 
 The `Preprocessor` is configured through a small, predictable set of parameters. This page
-covers the four ways to express intent: global defaults, per-feature overrides, presets, and
+covers global defaults, per-feature overrides, feature groups, presets, and
 reading back the resolved configuration. The mechanics of width and placement live in
 [Resolution and placement](resolution_and_placement.md), and target usage in
 [Target awareness](target_awareness.md).
 
 ## Global defaults
 
-The simplest configuration sets one strategy for every numerical column and one for every
-categorical column.
+The simplest configuration sets one strategy for every ungrouped numerical column and one
+for every categorical column.
 
 ```python
 from pretab import Preprocessor
@@ -115,8 +115,8 @@ feature-type detection.
 
 ### Columns not listed in `feature_preprocessing`
 
-`feature_preprocessing` only overrides the columns it names. Any numerical column left out
-falls back to `numerical_method`, and any categorical column left out falls back to
+`feature_preprocessing` only overrides the columns it names. Any ungrouped numerical column
+left out falls back to `numerical_method`, and any categorical column left out falls back to
 `categorical_method`. This is real method resolution, not just a logging detail: the fallback
 column is fit with the global default's transformer, exactly as if you had listed it yourself.
 
@@ -143,6 +143,27 @@ Don't infer the resolved method per column from the constructor arguments alone.
 `verbose=2` (or higher) on the `Preprocessor` to log the same table at fit time. See
 [Fit-time logging](outputs_and_inspection.md#fit-time-logging).
 ```
+
+## Feature groups
+
+Use `feature_groups` when several numerical columns need one joint representation.
+It accepts an ordered sequence of {class}`~pretab.FeatureGroup` values or an ordered
+mapping from group names to `columns` and `representation`. The supported group
+methods are `tensorspline` and `tprs`; they are not per-column `numerical_method`
+choices. Group settings use the same {class}`~pretab.RepresentationConfig` values
+and representation mappings as per-feature settings.
+
+A group exclusively owns at least two detected numerical columns. Groups cannot
+overlap or claim columns with explicit `feature_preprocessing` entries. Boolean
+and categorical columns are not eligible. Use `treat_all_integers_as_numerical=True`
+when integer sources should bypass cardinality-based categorical detection.
+Group declaration order controls block order; ordered source labels control
+the group's input axes. Read joint widths from `output_dims_["group_<name>"]`
+after fit, including any raw missing-state columns.
+
+The [multivariate tutorial](../tutorials/multivariate_features.md#grouped-preprocessing-with-preprocessor)
+covers typed and mapping declarations, tensor versus thin-plate sizing, output
+budgets, block-based model inputs, and fitted-state replay.
 
 ## Structured per-feature configuration
 

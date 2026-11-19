@@ -73,7 +73,12 @@ def isolate_document_state(tmp_path, monkeypatch):
             ROOT / "docs" / "core_concepts" / "configuration.md",
             "Structured per-feature configuration",
             id="configuration",
-        )
+        ),
+        pytest.param(
+            TUTORIALS_DIR / "multivariate_features.md",
+            "Grouped preprocessing with Preprocessor",
+            id="feature-groups",
+        ),
     ],
 )
 @pytest.mark.filterwarnings("ignore::pretab.exceptions.LeakageWarning")

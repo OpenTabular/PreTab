@@ -43,7 +43,10 @@ source of truth, and these tables mirror it.
 
 ```{note}
 The multivariate splines (`tensorspline`, `tprs`) model several inputs jointly and are used
-standalone, not selected per column through `Preprocessor`. The alias `thinplate` resolves to
+through `Preprocessor(feature_groups=...)` or their standalone transformers, not
+per-column `numerical_method`. See the
+[grouped preprocessing tutorial](../tutorials/multivariate_features.md).
+The alias `thinplate` resolves to
 `tprs`. `ThinPlateSplineTransformer.get_penalty_matrix()` is experimental: it is not guaranteed
 positive semi-definite (the retained eigenvalues of the projected landmark kernel can be
 negative) and emits a `ConfigWarning` on every call. `transform()` is unaffected; only the

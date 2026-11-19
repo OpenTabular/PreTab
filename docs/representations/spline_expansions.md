@@ -216,8 +216,9 @@ penalty do the regularizing. Its penalty matrix plugs directly into penalized li
 
 ## Multivariate splines
 
-Two families model several inputs jointly. They are used standalone, not selected per column
-through `Preprocessor`.
+Two families model several inputs jointly. Use them through
+`Preprocessor(feature_groups=...)` for exclusive numerical groups, or fit their
+standalone transformers directly. Neither is a per-column `numerical_method`.
 
 ### Tensor-product spline
 
@@ -286,10 +287,11 @@ non-negative, so the returned penalty is not guaranteed positive semi-definite, 
 actual smoothing regularization until it is fully fixed.
 ```
 
-```{warning}
-The tensor-product and thin-plate splines are multivariate. They are standalone transformers
-and are not available as a per-column `numerical_method`. Fit them directly on the columns you
-want to model jointly.
+```{note}
+Use `feature_groups` to select the joint sources inside `Preprocessor`. A group
+has one fitted width and one output block, including its raw missing states.
+The [multivariate tutorial](../tutorials/multivariate_features.md) shows how to
+configure groups and inspect the actual width rather than assigning it to each source.
 ```
 
 ## Where to go next

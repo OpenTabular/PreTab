@@ -2,7 +2,7 @@ Preprocessor
 ============
 
 The high-level entry point. :class:`~pretab.Preprocessor` reads a ``DataFrame``,
-detects feature types, resolves a per-column representation from a single
+detects feature types, resolves per-column and grouped representations from a single
 configuration, and produces model-ready output with full lineage.
 
 .. currentmodule:: pretab
@@ -26,7 +26,6 @@ and mappings with a ``method`` key are accepted there as well.
    :toctree: _autosummary
    :nosignatures:
 
-    FeatureGroup
    RepresentationConfig
 
 Fields and conversion
@@ -89,6 +88,37 @@ even when the values agree.
     ``pre__feature_preprocessing`` when its pipeline step is named ``pre``.
     The replacement is used by the next fit; it does not refit automatically.
     Frozen preprocessors reject configuration replacement.
+
+Feature groups
+--------------
+
+:class:`~pretab.FeatureGroup` is an immutable request with three fields:
+``name``, ordered ``columns``, and ``representation``. The representation accepts
+a method string, mapping, or :class:`~pretab.RepresentationConfig`. Pass an ordered
+sequence of these values to ``Preprocessor(feature_groups=...)``, or use a mapping
+from group names to dictionaries containing ``columns`` and ``representation``.
+
+.. autosummary::
+    :toctree: _autosummary
+    :nosignatures:
+
+    FeatureGroup
+
+The supported group methods are ``tensorspline`` and ``tprs``, each with at least
+two detected numerical inputs. Sources are exclusive: they cannot overlap another
+group or an explicit per-feature override. Local representation settings take
+precedence over applicable constructor-wide controls. The value itself neither
+fits an estimator nor resolves method aliases.
+
+Fitted groups appear once as ``group_<name>`` in block output and ``output_dims_``.
+Output names and lineage retain group identity and source order. Joint basis width
+and raw missing-state columns count together for output budgets. Ungrouped numerical
+blocks precede groups in declaration order; categorical blocks follow them.
+
+See the :doc:`multivariate tutorial <../tutorials/multivariate_features>` for
+executable declarations, block widths and trusted-spec replay. Frozen preprocessors
+reject group replacement; otherwise ``set_params(feature_groups=...)`` changes
+the request without refitting the existing representation.
 
 Requested and resolved settings
 -------------------------------

@@ -104,8 +104,9 @@ surface that keeps the intent of your code clearest.
 
 ```{note}
 The tensor-product spline, thin-plate spline, random Fourier features, and Nyström map model
-several columns jointly. They are standalone-only and are not selectable per column through
-`Preprocessor(numerical_method=...)`. See
+several columns jointly. Use `Preprocessor(feature_groups=...)` for tensor-product or
+thin-plate splines, or fit their standalone transformers directly. Random Fourier features
+and Nyström remain standalone-only. None is a per-column `numerical_method`. See
 [Multivariate features](../tutorials/multivariate_features.md).
 ```
 
