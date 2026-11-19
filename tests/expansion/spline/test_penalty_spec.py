@@ -11,7 +11,7 @@ import pytest
 from pretab import PenaltySpec
 from pretab.exceptions import InvalidParamError, PretabNotFittedError
 from pretab.expansion.spline import PenaltySpec as SplinePenaltySpec
-from pretab.transformers import BSplineTransformer, ISplineTransformer, MSplineTransformer
+from pretab.transformers import BSplineTransformer, ISplineTransformer, MSplineTransformer, PSplineTransformer
 
 
 def _spec(matrix, **overrides):
@@ -248,3 +248,90 @@ def test_base_typed_accessor_does_not_infer_an_overridden_convention():
     with pytest.raises(InvalidParamError, match=r"not supported; use get_penalty_matrix\(\)"):
         spline.get_penalty_spec()
     np.testing.assert_array_equal(spline.get_penalty_matrix(), np.eye(6))
+
+
+@pytest.mark.parametrize("order", [1, 2])
+@pytest.mark.parametrize("include_bias", [False, True])
+@pytest.mark.parametrize("index", [0, 1])
+def test_pspline_typed_penalty_matches_fitted_matrix_and_output(order, include_bias, index):
+    source = np.linspace(0, 1, 21)
+    frame = pd.DataFrame({"left": source, "right": source**2})
+    spline = PSplineTransformer(output_dim=6, diff_order=order, include_bias=include_bias).fit(frame)
+    spec = spline.get_penalty_spec(index)
+    assert spec == spline.get_penalty_spec(np.int64(index), diff_order=np.int64(order))
+    width = 6 + int(include_bias)
+    span = slice(index * width, (index + 1) * width)
+    difference = np.diff(np.eye(6), n=order, axis=0)
+    if include_bias:
+        difference = np.pad(difference, ((0, 0), (1, 0)))
+    legacy = spline.get_penalty_matrix(index)
+    np.testing.assert_array_equal(spec.matrix, legacy)
+    np.testing.assert_array_equal(spec.matrix, difference.T @ difference)
+    assert not np.shares_memory(spec.matrix, legacy)
+    assert (spec.kind, spec.order, spec.axis) == ("coefficient_difference", order, (frame.columns[index],))
+    assert spec.coordinate_system == "output_coefficients"
+    assert spec.coefficient_indices == tuple(range(span.start, span.stop))
+    assert spec.coefficient_names == tuple(spline.get_feature_names_out()[span])
+    assert spline.transform(frame)[:, span].shape[1] == spec.matrix.shape[0]
+    assert (spec.rank, spec.nullity) == (6 - order, order + int(include_bias))
+    assert spec.provenance["include_bias"] is include_bias
+    coefficients = np.arange(width, dtype=float) ** 2
+    assert coefficients @ spec.matrix @ coefficients == pytest.approx(np.linalg.norm(difference @ coefficients) ** 2)
+
+
+def test_pspline_typed_penalty_uses_fit_order_until_refit():
+    source = np.linspace(0, 1, 21).reshape(-1, 1)
+    spline = PSplineTransformer(diff_order=1)
+    with pytest.raises(PretabNotFittedError):
+        spline.get_penalty_spec()
+    spline.fit(source)
+    original = spline.get_penalty_spec()
+    spline.set_params(diff_order=2)
+    assert original.axis == ("x0",)
+    assert spline.get_penalty_spec() == original
+    with pytest.raises(InvalidParamError, match=r"match the fitted order \(1\)"):
+        spline.get_penalty_spec(diff_order=2)
+    spline.fit(source)
+    assert spline.get_penalty_spec().order == 2
+
+
+@pytest.mark.parametrize("diff_order", [0, 2, True, np.bool_(True), 1.0, "1"])
+def test_pspline_typed_penalty_rejects_an_invalid_explicit_order(diff_order):
+    spline = PSplineTransformer(diff_order=1).fit(np.linspace(0, 1, 21).reshape(-1, 1))
+    with pytest.raises(InvalidParamError, match="must match the fitted order"):
+        spline.get_penalty_spec(diff_order=diff_order)
+
+
+@pytest.mark.parametrize("feature_index", [-1, 1, False, 0.0])
+def test_pspline_typed_penalty_rejects_invalid_indices(feature_index):
+    spline = PSplineTransformer().fit(np.linspace(0, 1, 21).reshape(-1, 1))
+    with pytest.raises(InvalidParamError, match="feature_index"):
+        spline.get_penalty_spec(feature_index)
+
+
+def test_pspline_typed_penalty_refuses_unqualified_higher_orders():
+    spline = PSplineTransformer(diff_order=3).fit(np.linspace(0, 1, 21).reshape(-1, 1))
+    with pytest.raises(InvalidParamError, match="support fitted orders 1 and 2"):
+        spline.get_penalty_spec()
+    assert np.linalg.matrix_rank(spline.get_penalty_matrix()) == 3
+
+
+def test_pspline_typed_penalty_replay_requires_fitted_metadata():
+    spline = PSplineTransformer(diff_order=1, include_bias=True).fit(np.linspace(0, 1, 21).reshape(-1, 1))
+    expected = spline.get_penalty_spec()
+    restored = pickle.loads(pickle.dumps(spline))  # noqa: S301
+    assert restored.get_penalty_spec() == expected
+    del restored._penalty_fit_
+    with pytest.raises(InvalidParamError, match="refit to record the fitted penalty order"):
+        restored.get_penalty_spec()
+    np.testing.assert_array_equal(restored.get_penalty_matrix(), expected.matrix)
+
+
+def test_pspline_typed_penalty_refuses_state_after_failed_refit():
+    source = np.linspace(0, 1, 21).reshape(-1, 1)
+    spline = PSplineTransformer(diff_order=1).fit(source)
+    spline.set_params(diff_order=20)
+    with pytest.raises(InvalidParamError, match="too large"):
+        spline.fit(source)
+    with pytest.raises(InvalidParamError, match="refit to record the fitted penalty order"):
+        spline.get_penalty_spec()
