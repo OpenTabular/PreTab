@@ -193,6 +193,96 @@ def test_fitted_block_layout_agrees_across_views(layout_data, output_format, par
                 np.testing.assert_array_equal(_dense(blocks[name])[:, -1], frame[feature].isna().astype(float))
 
 
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("missing", ["none", "observed", "all"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+def test_grouped_block_layout_agrees_across_views(layout_data, method, missing, output_format):
+    frame, target = layout_data
+    frame = frame.assign(spare=np.linspace(2.0, 7.0, len(frame)))
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    preprocessor = Preprocessor(
+        numerical_method="none",
+        categorical_method="one-hot",
+        target_aware=False,
+        placement_strategy="uniform",
+        add_missing_indicator=missing == "observed",
+        missing_policy="separate_state" if missing == "all" else None,
+        output_format=output_format,
+        output_structure="blocks",
+        feature_groups={"location": {"columns": ["other", "value"], "representation": representation}},
+    ).fit(frame, target)
+    matrix = preprocessor.transform(frame, return_array=True)
+    blocks = preprocessor.transform(frame)
+    assert isinstance(blocks, dict)
+    assert list(blocks) == ["num_spare", "group_location", "cat_city"]
+    names = preprocessor.get_feature_names_out()
+    lineage = preprocessor.get_feature_lineage()
+    numerical, categorical, embeddings = preprocessor.get_feature_info(verbose=False)
+    dimensions = preprocessor.output_dims_
+    assert list(dimensions) == ["spare", "group_location", "city"]
+    assert list(numerical) == ["spare", "group_location"]
+    assert list(categorical) == ["city"]
+    assert embeddings == {}
+    assert "location" not in numerical
+    assert numerical["group_location"]["source_features"] == ("other", "value")
+    assert [record.output_feature for record in lineage] == list(names)
+    assert [record.output_index for record in lineage] == list(range(len(names)))
+    offset = 0
+    for (name, start, width), key in zip(get_output_slices(preprocessor.column_transformer_), dimensions, strict=True):
+        assert start == offset
+        assert width == dimensions[key] == {**numerical, **categorical}[key]["dimension"]
+        assert width == len(names[start : start + width]) == np.shape(blocks[name])[1]
+        np.testing.assert_array_equal(_dense(blocks[name]), _dense(matrix)[:, start : start + width])
+        offset += width
+    assert offset == sum(dimensions.values()) == preprocessor.total_output_dim_ == len(names) == len(lineage)
+    assert offset == np.shape(matrix)[1]
+    np.testing.assert_array_equal(np.hstack([_dense(block) for block in blocks.values()]), _dense(matrix))
+    span = preprocessor.column_transformer_.output_indices_["group_location"]
+    records = lineage[span]
+    basis_width = 9 if method == "tensorspline" else 3
+    assert all(record.group_id == "group_location" for record in records)
+    assert all(record.source_features == ("other", "value") for record in records[:basis_width])
+    indicators = records[basis_width:]
+    expected_sources = {"none": [], "observed": [("value",)], "all": [("other",), ("value",)]}[missing]
+    assert [record.source_features for record in indicators] == expected_sources
+    for index, record in enumerate(indicators):
+        assert record.family == "missing_state" and record.component == "indicator"
+        assert not record.is_interaction and not record.uses_target
+        source = record.source_features[0]
+        np.testing.assert_array_equal(_dense(blocks["group_location"])[:, basis_width + index], frame[source].isna())
+    assert dimensions["group_location"] == basis_width + len(expected_sources)
+
+
+def test_group_metadata_preserves_original_integer_labels_and_renamed_display_names():
+    frame = pd.DataFrame(np.random.default_rng(42).normal(size=(24, 3)), columns=pd.Index([7, 3, 11]))
+    preprocessor = Preprocessor(
+        numerical_method="none",
+        target_aware=False,
+        placement_strategy="uniform",
+        feature_groups={
+            "location": {
+                "columns": [11, 7],
+                "representation": {"method": "tensorspline", "output_dim": 3, "degree": 2},
+            }
+        },
+    ).fit(frame)
+    assert preprocessor.output_dims_ == {3: 1, "group_location": 9}
+    numerical, categorical, embeddings = preprocessor.get_feature_info(verbose=False)
+    assert list(numerical) == [3, "group_location"]
+    assert numerical["group_location"]["source_features"] == (11, 7)
+    assert categorical == embeddings == {}
+    original = preprocessor.get_feature_names_out()
+    renamed = preprocessor.get_feature_names_out(["west%", "single", "east+"])
+    assert all(name.startswith("group_location__east%2B+west%25__") for name in renamed[1:])
+    assert len(renamed) == len(original) == preprocessor.total_output_dim_
+    np.testing.assert_array_equal(preprocessor.get_feature_names_out(), original)
+    assert all(record.source_features == ("11", "7") for record in preprocessor.get_feature_lineage()[1:])
+
+
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
 @pytest.mark.parametrize("output_format", ["dense", "sparse"])
 @pytest.mark.parametrize("missing_policy", [None, "separate_state"])

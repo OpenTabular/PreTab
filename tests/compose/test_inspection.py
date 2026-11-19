@@ -18,8 +18,10 @@ from pretab.compose.inspection import (
     _locate_block_representation,
     block_uses_target,
     build_feature_info,
+    build_feature_lineage,
     build_transformer_summary,
     clean_feature_names,
+    feature_names_out,
     get_output_slices,
 )
 from pretab.core.representation import RepresentationSpec
@@ -30,6 +32,86 @@ def fitted_ct(make_config, sample_frame):
     ct = build_column_transformer(make_config(numerical_method="standardization"), ["age"], ["city"])
     ct.fit(sample_frame, np.array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0]))
     return ct, sample_frame
+
+
+@pytest.fixture(params=["tensorspline", "tprs"])
+def grouped_ct(request, make_config):
+    values = np.random.default_rng(42).normal(size=(24, 3))
+    frame = pd.DataFrame(values, columns=pd.Index(["age", "x% west", "y+east"]))
+    frame["city"] = ["a", "b"] * 12
+    options = (
+        {"output_dim": 3, "degree": 2}
+        if request.param == "tensorspline"
+        else {"n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    config = make_config(
+        feature_groups={
+            "location": {"columns": ["y+east", "x% west"], "representation": {"method": request.param, **options}}
+        }
+    )
+    transformer = build_column_transformer(config, ["age", "x% west", "y+east"], ["city"])
+    transformer.fit(frame)
+    return transformer, frame
+
+
+def test_group_feature_info_counts_joint_width_once(grouped_ct):
+    transformer, _ = grouped_ct
+    info = build_feature_info(transformer, embeddings=False, embedding_dimensions={})
+    assert len(info) == 3
+    numerical, categorical, embeddings = info
+    assert list(numerical) == ["age", "group_location"]
+    assert list(categorical) == ["city"]
+    assert embeddings == {}
+    group = numerical["group_location"]
+    span = transformer.output_indices_["group_location"]
+    assert group["dimension"] == span.stop - span.start
+    assert group["group"] == "location"
+    assert group["source_features"] == ("y+east", "x% west")
+    assert group["categories"] is None
+    assert set(numerical["age"]) == {"preprocessing", "dimension", "categories"}
+
+
+def test_group_names_encode_ordered_sources_and_preserve_leaf_names(grouped_ct):
+    transformer, _ = grouped_ct
+    raw = transformer.get_feature_names_out()
+    names = feature_names_out(transformer)
+    span = transformer.output_indices_["group_location"]
+    expected = [f"group_location__y%2Beast+x%25%20west__{name.partition('__')[2]}" for name in raw[span]]
+    assert names[span] == expected
+    assert len(set(names)) == len(names)
+    assert names[0] == "num_age"
+
+
+def test_explicit_group_display_names_preserve_identity_without_mutating_fit(grouped_ct):
+    transformer, _ = grouped_ct
+    original = feature_names_out(transformer)
+    fitted = transformer.feature_names_in_.copy()
+    renamed = feature_names_out(transformer, ["years", "west%", "east+", "town"])
+    span = transformer.output_indices_["group_location"]
+    assert all(name.startswith("group_location__east%2B+west%25__") for name in renamed[span])
+    assert renamed[0] == "num_years"
+    assert len(renamed) == len(original)
+    assert feature_names_out(transformer) == original
+    np.testing.assert_array_equal(transformer.feature_names_in_, fitted)
+    with pytest.raises(ValueError):
+        feature_names_out(transformer, ["too", "short"])
+
+
+def test_group_lineage_covers_actual_span_with_one_identity(grouped_ct):
+    transformer, _ = grouped_ct
+    names = feature_names_out(transformer)
+    lineage = build_feature_lineage(transformer)
+    span = transformer.output_indices_["group_location"]
+    assert [record.output_feature for record in lineage] == names
+    assert [record.output_index for record in lineage] == list(range(len(names)))
+    for record in lineage[span]:
+        assert record.group_id == "group_location"
+        assert record.source_features == ("y+east", "x% west")
+        assert record.to_dict()["group_id"] == "group_location"
+    assert [record.component_index for record in lineage[span]] == list(range(span.stop - span.start))
+    for record in [*lineage[: span.start], *lineage[span.stop :]]:
+        assert record.group_id is None
+        assert "group_id" not in record.to_dict()
 
 
 @pytest.fixture

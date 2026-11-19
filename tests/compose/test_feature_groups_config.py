@@ -15,6 +15,14 @@ from pretab.exceptions import IncompatibleParamsError, InvalidParamError, Option
 
 
 @pytest.fixture
+def stop_after_group_preflight(monkeypatch):
+    def reached(*args, **kwargs):
+        raise RuntimeError("group preflight complete")
+
+    monkeypatch.setattr("pretab.preprocessor.build_column_transformer", reached)
+
+
+@pytest.fixture
 def group_frame():
     return pd.DataFrame(
         {
@@ -117,13 +125,13 @@ def test_categorical_sources_are_not_coerced_to_numerical(group_frame, values):
 
 
 @pytest.mark.parametrize("dtype", ["int64", "Int64"])
-def test_explicit_integer_routing_remains_available_to_groups(group_frame, dtype):
+def test_explicit_integer_routing_remains_available_to_groups(group_frame, dtype, stop_after_group_preflight):
     processor = Preprocessor(
         cat_cutoff=3,
         treat_all_integers_as_numerical=True,
         feature_groups={"location": {"columns": ["x", "code"], "representation": "tprs"}},
     )
-    with pytest.raises(InvalidParamError, match="single-column composition route"):
+    with pytest.raises(RuntimeError, match="group preflight complete"):
         processor.fit(group_frame.assign(code=pd.Series([1, 1, 2], dtype=dtype)))
 
 
@@ -138,17 +146,18 @@ def test_explicit_integer_routing_remains_available_to_groups(group_frame, dtype
         (False, ["feature_0", "absent"], 1),
     ],
 )
-def test_group_sources_follow_existing_label_route(named, columns, missing_index):
+def test_group_sources_follow_existing_label_route(named, columns, missing_index, stop_after_group_preflight):
     values = np.array([[0.0, 2.0], [1.0, 3.0], [2.0, 4.0]])
     data = pd.DataFrame(values, columns=pd.Index([7, 3])) if named else values
     before = data.copy()
     processor = Preprocessor(feature_groups={"location": {"columns": columns, "representation": "tprs"}})
     expected = (
-        "single-column composition route"
+        "group preflight complete"
         if missing_index is None
         else escape(f"feature_groups['location'].columns[{missing_index}]")
     )
-    with pytest.raises(InvalidParamError, match=expected):
+    error = RuntimeError if missing_index is None else InvalidParamError
+    with pytest.raises(error, match=expected):
         processor.fit(data)
     if named:
         pd.testing.assert_frame_equal(data, before)
@@ -178,7 +187,9 @@ def test_empty_groups_do_not_enter_group_preflight(group_frame, monkeypatch, gro
 
 @pytest.mark.parametrize("usage", ["required", "optional"])
 @pytest.mark.parametrize("has_target", [False, True])
-def test_group_target_requirements_keep_typed_errors(group_frame, monkeypatch, usage, has_target):
+def test_group_target_requirements_keep_typed_errors(
+    group_frame, monkeypatch, usage, has_target, stop_after_group_preflight
+):
     def unexpected(*args, **kwargs):
         pytest.fail("Group target validation must not construct a transformer")
 
@@ -198,7 +209,7 @@ def test_group_target_requirements_keep_typed_errors(group_frame, monkeypatch, u
     )
     target = np.array([0.0, 1.0, 2.0]) if has_target else None
     if has_target:
-        with pytest.raises(InvalidParamError, match="single-column composition route"):
+        with pytest.raises(RuntimeError, match="group preflight complete"):
             processor.fit(group_frame, target)
     else:
         with pytest.raises(IncompatibleParamsError, match=escape("feature_groups['location'].representation.method")):
@@ -207,7 +218,7 @@ def test_group_target_requirements_keep_typed_errors(group_frame, monkeypatch, u
 
 
 @pytest.mark.parametrize("local_off", [False, True])
-def test_group_target_check_uses_resolved_settings(group_frame, monkeypatch, local_off):
+def test_group_target_check_uses_resolved_settings(group_frame, monkeypatch, local_off, stop_after_group_preflight):
     spec = TRANSFORMER_REGISTRY["tprs"]
     monkeypatch.setitem(
         TRANSFORMER_REGISTRY,
@@ -220,14 +231,16 @@ def test_group_target_check_uses_resolved_settings(group_frame, monkeypatch, loc
         placement_strategy="cart",
         feature_groups={"location": {"columns": ["x", "y"], "representation": representation}},
     )
-    error = InvalidParamError if local_off else IncompatibleParamsError
-    expected = "single-column composition route" if local_off else "requires y at fit time"
+    error = RuntimeError if local_off else IncompatibleParamsError
+    expected = "group preflight complete" if local_off else "requires y at fit time"
     with pytest.raises(error, match=expected):
         processor.fit(group_frame)
 
 
 @pytest.mark.parametrize("available", [False, True])
-def test_group_dependency_check_is_contextual_without_import_or_construction(group_frame, monkeypatch, available):
+def test_group_dependency_check_is_contextual_without_import_or_construction(
+    group_frame, monkeypatch, available, stop_after_group_preflight
+):
     discovered = []
 
     def discover(module_name):
@@ -245,7 +258,7 @@ def test_group_dependency_check_is_contextual_without_import_or_construction(gro
     monkeypatch.setattr("pretab.core.dependencies.importlib.import_module", unexpected)
     processor = Preprocessor(feature_groups={"location": {"columns": ["x", "y"], "representation": "tprs"}})
     if available:
-        with pytest.raises(InvalidParamError, match="single-column composition route"):
+        with pytest.raises(RuntimeError, match="group preflight complete"):
             processor.fit(group_frame)
     else:
         with pytest.raises(OptionalDependencyError) as failure:
@@ -278,11 +291,13 @@ def test_group_placement_dependency_keeps_context_and_install_hint(group_frame, 
     assert "pip install pretab[lightgbm]" in str(failure.value)
 
 
-def test_builtin_group_preflight_does_not_discover_unselected_extras(group_frame, monkeypatch):
+def test_builtin_group_preflight_does_not_discover_unselected_extras(
+    group_frame, monkeypatch, stop_after_group_preflight
+):
     def unexpected(*args, **kwargs):
         pytest.fail("No optional dependency is selected")
 
     monkeypatch.setattr("pretab.core.dependencies.importlib.util.find_spec", unexpected)
     processor = Preprocessor(feature_groups={"location": {"columns": ["x", "y"], "representation": "tprs"}})
-    with pytest.raises(InvalidParamError, match="single-column composition route"):
+    with pytest.raises(RuntimeError, match="group preflight complete"):
         processor.fit(group_frame)

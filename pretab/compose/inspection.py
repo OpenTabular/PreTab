@@ -11,6 +11,7 @@ import copy
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, cast
+from urllib.parse import quote
 
 import numpy as np
 from sklearn.base import clone
@@ -68,6 +69,10 @@ class _FittedBlock:
     @property
     def public_name(self) -> str:
         return block_name(self.step_name, self.columns)
+
+    @property
+    def group_id(self) -> str | None:
+        return self.step_name if self.step_name.startswith("group_") else None
 
     @property
     def span(self) -> slice:
@@ -168,13 +173,20 @@ def clean_feature_names(column_transformer, names, *, rename=None):
     column labels to the input feature names ``names`` were built from (see
     :func:`feature_names_out`); a step of a renamed column is then reported under
     the new name, e.g. ``num_feature_0`` as ``num_age``.
+    Group names retain their public block key and prepend percent-escaped source
+    labels in declared order to the leaf output name.
     """
     rename = rename or {}
-    step_to_columns = {
-        block.step_name: [rename.get(str(column), column) for column in block.columns]
-        for block in _iter_fitted_blocks(column_transformer)
-        if block.step_name != "remainder" and len(block.columns) == 1
-    }
+    step_to_columns = {}
+    group_ids = set()
+    for block in _iter_fitted_blocks(column_transformer):
+        if block.step_name == "remainder":
+            continue
+        if block.group_id is not None:
+            group_ids.add(block.group_id)
+        elif len(block.columns) != 1:
+            continue
+        step_to_columns[block.step_name] = [rename.get(str(column), column) for column in block.columns]
     cleaned = []
     for raw in names:
         raw = str(raw)
@@ -182,6 +194,10 @@ def clean_feature_names(column_transformer, names, *, rename=None):
         columns = step_to_columns.get(step_name)
         if not sep or columns is None:
             cleaned.append(raw)
+            continue
+        if step_name in group_ids:
+            sources = "+".join(quote(str(column), safe="") for column in columns)
+            cleaned.append(f"{step_name}__{sources}__{inner_name}")
             continue
         block = _block(step_name, columns)
         if block is not None:
@@ -261,6 +277,16 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
             )
             preprocessing_type = " -> ".join(steps)
 
+        group_id = block.group_id
+        if group_id is not None:
+            numerical_feature_info[group_id] = {
+                "preprocessing": preprocessing_type,
+                "dimension": dimension,
+                "categories": None,
+                "group": group_id.removeprefix("group_"),
+                "source_features": tuple(columns),
+            }
+            continue
         for feature_name in columns:
             categories = None
             if "continuous_ordinal" in steps:
@@ -450,6 +476,7 @@ def build_feature_lineage(column_transformer):
         width = span.stop - span.start
         if width == 0:
             continue
+        group_id = block.group_id
         if transformer == "passthrough" or name == "remainder":
             for offset in range(width):
                 index = span.start + offset
@@ -492,20 +519,26 @@ def build_feature_lineage(column_transformer):
                         component_index=offset,
                         uses_target=uses_target,
                         is_interaction=is_interaction,
+                        group_id=group_id,
                     )
                 )
+            indicator = missing_indicator.steps[-1][1] if isinstance(missing_indicator, Pipeline) else missing_indicator
+            missing_sources = getattr(indicator, "features_", range(len(columns)))
             for offset in range(missing_width):
                 index = span.start + representation_width + offset
                 records.append(
                     FeatureLineage(
                         output_feature=output_names[index],
                         output_index=index,
-                        source_features=source_features,
+                        source_features=(str(columns[missing_sources[offset]]),)
+                        if group_id is not None
+                        else source_features,
                         family="missing_state",
                         component="indicator",
                         component_index=offset,
                         uses_target=False,
                         is_interaction=False,
+                        group_id=group_id,
                     )
                 )
             continue
@@ -523,6 +556,7 @@ def build_feature_lineage(column_transformer):
                     component_index=offset,
                     uses_target=uses_target,
                     is_interaction=is_interaction,
+                    group_id=group_id,
                 )
             )
     records.sort(key=lambda record: record.output_index)

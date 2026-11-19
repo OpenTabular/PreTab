@@ -355,8 +355,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Ordered named declarations of source columns and representation settings.
         Constructor inputs remain unchanged; :meth:`get_resolved_config` returns
         detached declarations with canonical methods and applicable settings.
-        ``None`` or an empty collection keeps single-column processing. Nonempty
-        declarations are rejected by ``fit``.
+        ``None`` or an empty collection keeps single-column processing. Each
+        nonempty declaration fits one joint block over its ordered sources.
 
     Attributes
     ----------
@@ -637,12 +637,6 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             )
             config.validate_feature_groups(group_frame.columns, group_numerical, y=y)
             with_string_labels(group_frame)
-            raise invalid_param_error(
-                type(self).__name__,
-                "feature_groups",
-                tuple(group.name for group in config.feature_groups),
-                "nonempty group declarations cannot be fitted through the single-column composition route",
-            )
 
         fitted_on_array = not has_column_labels(X)
         X = to_dataframe(X)
@@ -1045,11 +1039,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     @property
     def output_dims_(self) -> dict:
-        """Per-feature expanded output-column counts.
+        """Expanded output-column counts per single feature or group.
 
         Fitted attribute (available only after ``fit``). Maps each input feature
-        (by name) to the number of columns it contributes to the transformed
-        array, complementing the scalar :attr:`total_output_dim_`. The values sum
+        (by name), or each ``group_<name>`` block, to its actual transformed width,
+        complementing the scalar :attr:`total_output_dim_`. Group members do not
+        receive separate widths. The values sum
         to :attr:`total_output_dim_`. Useful when features get different
         ``output_dim`` values (via ``feature_preprocessing``) or expand to a
         non-uniform width (e.g. one-hot encoded categoricals).
@@ -1063,7 +1058,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             width = span.stop - span.start
             if width == 0:
                 continue
-            if block.step_name == "remainder":
+            if block.group_id is not None:
+                dims[block.group_id] = width
+            elif block.step_name == "remainder":
                 # Passthrough columns: one output column per untransformed feature.
                 for full in column_transformer.get_feature_names_out()[span]:
                     feature = full.split("__", 1)[-1] if "__" in full else full
@@ -1363,7 +1360,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         -------
         tuple of dicts
             numerical_feature_info : dict
-                Metadata for numerical features.
+                Metadata for numerical singles and groups. Each group appears
+                once under ``group_<name>`` with its actual joint dimension,
+                ``group`` name, and ordered original-label ``source_features``.
             categorical_feature_info : dict
                 Metadata for categorical features.
             embedding_feature_info : dict
@@ -1379,6 +1378,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         )
         input_labels = self._input_labels()
         numerical_feature_info = {input_labels.get(key, key): info for key, info in numerical_feature_info.items()}
+        for info in numerical_feature_info.values():
+            if "group" in info:
+                info["source_features"] = tuple(input_labels.get(column, column) for column in info["source_features"])
         categorical_feature_info = {input_labels.get(key, key): info for key, info in categorical_feature_info.items()}
 
         if verbose:

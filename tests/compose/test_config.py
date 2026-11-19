@@ -270,15 +270,19 @@ def test_empty_groups_preserve_single_column_values_names_and_fingerprint(sample
     assert processor.get_resolved_config() == expected_config
 
 
-def test_nonempty_groups_cannot_be_silently_ignored_by_single_column_fitting(sample_frame, monkeypatch):
-    def reject_construction(*args, **kwargs):
-        raise AssertionError("Group refusal must precede factory construction and estimator fitting")
-
-    monkeypatch.setattr("pretab.preprocessor.build_column_transformer", reject_construction)
-    processor = Preprocessor(feature_groups={"location": {"columns": ["age", "second"], "representation": "tprs"}})
-    with pytest.raises(InvalidParamError, match="single-column composition route"):
-        processor.fit(sample_frame.assign(second=sample_frame["age"] + 1))
-    assert not hasattr(processor, "column_transformer_")
+def test_nonempty_groups_cannot_be_silently_ignored_by_single_column_fitting(sample_frame):
+    processor = Preprocessor(
+        feature_groups={
+            "location": {
+                "columns": ["age", "second"],
+                "representation": {"method": "tprs", "n_components": 2, "landmark_strategy": "subsample"},
+            }
+        }
+    ).fit(sample_frame.assign(second=sample_frame["age"] + 1))
+    names = processor.column_transformer_.named_transformers_
+    assert "group_location" in names
+    assert "num_age" not in names and "num_second" not in names
+    assert processor.output_dims_["group_location"] == 2
 
 
 def test_none_method_normalizes_to_none(make_config):
