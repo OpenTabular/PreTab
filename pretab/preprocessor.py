@@ -1201,6 +1201,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         the fold. Column types, target-free blocks and their vocabularies, and
         preprocessing before the representation (imputers and scalers) are
         shared with this all-data fit. Missing-indicator branches are shared too.
+        A feature group is one block: its ordered source columns use the same
+        fitted prefix, and only its target-consuming joint representation is
+        refit for the fold.
         An out-of-fold row is encoded exactly like
         ``transform`` encodes it, except that no target-aware placement has seen
         that row's target. Refitting the whole preprocessor per fold would

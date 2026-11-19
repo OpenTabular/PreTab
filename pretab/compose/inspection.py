@@ -402,7 +402,7 @@ def _resolve_block_representation(pipeline, columns):
 
 
 def block_uses_target(transformer) -> bool:
-    """Whether a fitted per-column block's representation consumed the target ``y``.
+    """Whether a fitted single-feature or joint block's representation consumed ``y``.
 
     For a separate-state / missing-indicator union the representation branch decides; helper steps
     such as imputers and scalers never use the target. The spec is read without
@@ -414,7 +414,7 @@ def block_uses_target(transformer) -> bool:
 
 
 def refit_block_representation(transformer, X, y) -> TransformerLike:
-    """Return a copy of a fitted per-column block whose representation is refit on ``(X, y)``.
+    """Copy a fitted block and refit its representation on its ordered inputs and ``y``.
 
     Only the representation step and the steps after it are refit. The steps
     before it (the imputer with its missing indicator, scalers) never use the

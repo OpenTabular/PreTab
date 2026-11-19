@@ -165,7 +165,8 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         A supervised (target-aware) PreTab transformer to cross-fit, or an
         estimator such as a :class:`~pretab.Preprocessor` or ``Pipeline`` built
         from them. For a :class:`~pretab.Preprocessor`, only its target-aware
-        representations and subsequent steps are refit per fold. Column types,
+        representations and subsequent steps are refit per fold, including joint
+        representations selected by feature groups. Column types,
         target-free blocks and their vocabularies, imputers, scalers before the
         representation and missing-indicator branches come from the all-data fit.
         Target-free feature values match :meth:`transform`; target-aware values

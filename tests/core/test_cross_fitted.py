@@ -6,12 +6,13 @@ validation.
 """
 
 import warnings
+from dataclasses import replace
 from typing import cast
 
 import numpy as np
 import pytest
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold
 
 from pretab import CrossFittedTransformer, LeakageWarning
 from pretab.core._typing import TransformerLike
@@ -554,14 +555,16 @@ def test_wrapped_preprocessor_out_of_fold_codes_match_transform(array_with_rare_
     np.testing.assert_array_equal(np.unique(out[:, unsupervised[1]]), [1.0, 2.0, 3.0, 4.0])
 
 
-def _refit_representation_per_fold(pipeline, column, y):
+def _refit_representation_per_fold(pipeline, column, y, splitter=None):
     """Expected out-of-fold rows of a fitted block pipeline whose last step is its
     target-aware representation: the helper steps before it keep their all-data fit."""
     from sklearn.base import clone
 
     helpers, representation = pipeline[:-1], pipeline[-1]
     blocks = {}
-    for train_idx, test_idx in KFold(n_splits=5, shuffle=True, random_state=0).split(column):
+    if splitter is None:
+        splitter = KFold(n_splits=5, shuffle=True, random_state=0)
+    for train_idx, test_idx in splitter.split(column, y):
         fold = cast(TransformerLike, clone(representation))
         fold.fit(helpers.transform(column.iloc[train_idx]), y[train_idx])
         blocks[tuple(test_idx)] = fold.transform(helpers.transform(column.iloc[test_idx]))
@@ -575,6 +578,353 @@ def _fitted_block(cross_fitted, name):
     from pretab import Preprocessor
 
     return cast(Preprocessor, cross_fitted.estimator_).column_transformer_.named_transformers_[name]
+
+
+class _JointTargetProjection(TransformerMixin, BaseEstimator):
+    def __init__(self, target_aware=True):
+        self.target_aware = target_aware
+
+    def fit(self, X, y=None):
+        values = np.asarray(X, dtype=float)
+        target = np.asarray(y)
+        self.n_features_in_ = values.shape[1]
+        self.fit_values_ = values.copy()
+        self.fit_target_ = target.copy()
+        self.weights_ = values.T @ target / len(values) if self.target_aware else np.arange(1, values.shape[1] + 1)
+        self.target_mean_ = target.mean() if self.target_aware else 0.0
+        return self
+
+    def transform(self, X):
+        values = np.asarray(X, dtype=float)
+        return np.column_stack((values @ self.weights_, np.full(len(values), self.target_mean_)))
+
+    def get_feature_names_out(self, input_features=None):
+        return np.array(["joint_projection", "target_mean"], dtype=object)
+
+
+@pytest.fixture
+def grouped_cross_fit_data():
+    import pandas as pd
+
+    rng = np.random.default_rng(42)
+    frame = pd.DataFrame(
+        {
+            "north": rng.normal(size=100),
+            "east": rng.normal(size=100),
+            "spare": rng.normal(size=100),
+            "city": ["rare", *(["usual"] * 99)],
+        }
+    )
+    frame.loc[7, "north"] = np.nan
+    return frame, rng.normal(size=len(frame))
+
+
+@pytest.mark.parametrize(
+    ("target_usage", "target_aware"), [("optional", False), ("optional", True), ("required", True)]
+)
+@pytest.mark.parametrize("missing", ["none", "observed", "all"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("task", ["regression", "classification"])
+def test_grouped_target_aware_cross_fitting_preserves_frozen_prefix_and_missing_state(
+    grouped_cross_fit_data, monkeypatch, target_usage, target_aware, missing, output_format, dtype, task
+):
+    import pandas as pd
+    from scipy import sparse as sp
+
+    from pretab import Preprocessor
+    from pretab.compose.registry import TRANSFORMER_REGISTRY
+
+    monkeypatch.setitem(
+        TRANSFORMER_REGISTRY,
+        "tprs",
+        replace(
+            TRANSFORMER_REGISTRY["tprs"],
+            transformer_cls=_JointTargetProjection,
+            target_usage=target_usage,
+            allowed_args=(),
+            placement_strategies=frozenset(),
+        ),
+    )
+    fold_models = []
+    original_fold = Preprocessor._cross_fit_fold
+
+    def record_fold(self, X, y):
+        fold = original_fold(self, X, y)
+        fold_models.append(fold)
+        return fold
+
+    monkeypatch.setattr(Preprocessor, "_cross_fit_fold", record_fold)
+    frame, target = grouped_cross_fit_data
+    original_frame = frame.copy(deep=True)
+    if task == "classification":
+        target = (target > 0).astype(int)
+    wrapped = CrossFittedTransformer(
+        Preprocessor(
+            numerical_method="minmax",
+            categorical_method="one-hot",
+            add_missing_indicator=missing == "observed",
+            missing_policy="separate_state" if missing == "all" else None,
+            output_format=output_format,
+            dtype=dtype,
+            task=task,
+            feature_groups={
+                "location": {
+                    "columns": ["east", "north"],
+                    "representation": {"method": "tprs", "target_aware": target_aware},
+                }
+            },
+        ),
+        n_folds=5,
+        random_state=0,
+        task=task,
+    )
+    out = wrapped.fit_transform(frame, target)
+    full = wrapped.transform(frame)
+    assert sp.issparse(out) is (output_format == "sparse")
+    assert out.dtype == full.dtype == dtype
+    if output_format == "sparse":
+        assert out.format == full.format == "csr"
+    out = out.toarray() if sp.issparse(out) else out
+    full = full.toarray() if sp.issparse(full) else full
+    fitted = cast(Preprocessor, wrapped.estimator_)
+    span = fitted.column_transformer_.output_indices_["group_location"]
+    block = _fitted_block(wrapped, "group_location")
+    representation = block if missing == "none" else dict(block.transformer_list)["representation"]
+    splitter_cls = StratifiedKFold if task == "classification" else KFold
+    splitter = splitter_cls(n_splits=5, shuffle=True, random_state=0)
+    expected = _refit_representation_per_fold(representation, frame[["east", "north"]], target, splitter).astype(dtype)
+    np.testing.assert_array_equal(out[:, span.start : span.start + 2], expected)
+    np.testing.assert_array_equal(out[:, : span.start], full[:, : span.start])
+    np.testing.assert_array_equal(out[:, span.stop :], full[:, span.stop :])
+    sources = {"none": [], "observed": ["north"], "all": ["east", "north"]}[missing]
+    assert span.stop - span.start == 2 + len(sources)
+    np.testing.assert_array_equal(out[:, span.start + 2 : span.stop], frame[sources].isna().astype(float))
+    assert out.shape == full.shape == (len(frame), len(wrapped.get_feature_names_out()))
+    if target_aware:
+        assert not np.allclose(out[:, span.start : span.start + 2], full[:, span.start : span.start + 2])
+    else:
+        np.testing.assert_array_equal(out, full)
+    assert len(fold_models) == 5
+    for fold, (train_idx, _) in zip(fold_models, splitter.split(frame, target), strict=True):
+        fold_block = fold.column_transformer_.named_transformers_["group_location"]
+        fold_representation = fold_block if missing == "none" else dict(fold_block.transformer_list)["representation"]
+        assert (fold_block is block) is not target_aware
+        if target_aware:
+            assert fold_representation[-1] is not representation[-1]
+            for (_, helper), (_, fold_helper) in zip(
+                representation.steps[:-1], fold_representation.steps[:-1], strict=True
+            ):
+                assert fold_helper is helper
+            np.testing.assert_array_equal(
+                fold_representation[-1].fit_values_,
+                representation[:-1].transform(frame.iloc[train_idx][["east", "north"]]),
+            )
+            np.testing.assert_array_equal(fold_representation[-1].fit_target_, target[train_idx])
+        if missing != "none":
+            assert dict(fold_block.transformer_list)["missing"] is dict(block.transformer_list)["missing"]
+        for name in ("num_spare", "cat_city"):
+            assert (
+                fold.column_transformer_.named_transformers_[name]
+                is fitted.column_transformer_.named_transformers_[name]
+            )
+        assert fold.output_dims_ == fitted.output_dims_
+        np.testing.assert_array_equal(fold.get_feature_names_out(), fitted.get_feature_names_out())
+    records = fitted.get_feature_lineage()[span]
+    assert all(record.uses_target is target_aware for record in records[:2])
+    assert all(not record.uses_target for record in records[2:])
+    pd.testing.assert_frame_equal(frame, original_frame)
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("missing", ["none", "observed", "all"])
+def test_builtin_groups_keep_all_data_state_while_supervised_single_is_refit(grouped_cross_fit_data, method, missing):
+    from pretab import Preprocessor
+
+    frame, target = grouped_cross_fit_data
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    wrapped = CrossFittedTransformer(
+        Preprocessor(
+            numerical_method="ple",
+            output_dim=4,
+            categorical_method="one-hot",
+            add_missing_indicator=missing == "observed",
+            missing_policy="separate_state" if missing == "all" else None,
+            feature_groups={"location": {"columns": ["east", "north"], "representation": representation}},
+        ),
+        n_folds=5,
+        random_state=0,
+    )
+    out = wrapped.fit_transform(frame, target)
+    fitted = cast(Preprocessor, wrapped.estimator_)
+    full = wrapped.transform(frame)
+    span = fitted.column_transformer_.output_indices_["group_location"]
+    np.testing.assert_array_equal(out[:, span], full[:, span])
+    assert not np.allclose(out[:, :4], full[:, :4])
+    fingerprint = fitted.fingerprint_
+    for train_idx, _ in KFold(n_splits=5, shuffle=True, random_state=0).split(frame):
+        fold = fitted._cross_fit_fold(frame.iloc[train_idx], target[train_idx])
+        assert fold.column_transformer_.named_transformers_["group_location"] is _fitted_block(
+            wrapped, "group_location"
+        )
+        assert fold.column_transformer_.named_transformers_["num_spare"] is not _fitted_block(wrapped, "num_spare")
+    assert fitted.fingerprint_ == fingerprint
+
+
+def test_grouped_cross_fitting_retains_dictionary_error_and_matrix_remedy(grouped_cross_fit_data):
+    from pretab import Preprocessor
+
+    frame, target = grouped_cross_fit_data
+    wrapped = CrossFittedTransformer(
+        Preprocessor(
+            numerical_method="minmax",
+            output_structure="blocks",
+            output_format="dense",
+            feature_groups={
+                "location": {
+                    "columns": ["east", "north"],
+                    "representation": {"method": "tensorspline", "output_dim": 3, "degree": 2},
+                }
+            },
+        ),
+        n_folds=5,
+        random_state=0,
+    )
+    with pytest.raises(IncompatibleParamsError, match=r"dict of blocks.*output_structure='matrix'"):
+        wrapped.fit_transform(frame, target)
+    assert isinstance(wrapped.transform(frame), dict)
+
+
+@pytest.mark.parametrize("missing", ["none", "observed", "all"])
+def test_grouped_refit_preserves_prefix_and_refits_representation_suffix(grouped_cross_fit_data, monkeypatch, missing):
+    from copy import copy
+
+    from sklearn.base import clone
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    from pretab import Preprocessor
+    from pretab.compose.inspection import _separate_state_branches, refit_block_representation
+    from pretab.compose.registry import TRANSFORMER_REGISTRY
+
+    monkeypatch.setitem(
+        TRANSFORMER_REGISTRY,
+        "tprs",
+        replace(
+            TRANSFORMER_REGISTRY["tprs"],
+            transformer_cls=_JointTargetProjection,
+            target_usage="optional",
+            allowed_args=(),
+            placement_strategies=frozenset(),
+        ),
+    )
+    frame, target = grouped_cross_fit_data
+    sources = ["east", "north"]
+    fitted = Preprocessor(
+        numerical_method="minmax",
+        add_missing_indicator=missing == "observed",
+        missing_policy="separate_state" if missing == "all" else None,
+        feature_groups={"location": {"columns": sources, "representation": "tprs"}},
+    ).fit(frame, target)
+    original_block = fitted.column_transformer_.named_transformers_["group_location"]
+    representation = original_block if missing == "none" else dict(original_block.transformer_list)["representation"]
+    pipeline = copy(representation)
+    pipeline.steps = [
+        *representation.steps,
+        ("suffix", StandardScaler().fit(representation.transform(frame[sources]))),
+    ]
+    block = pipeline
+    if missing != "none":
+        block = copy(original_block)
+        block.transformer_list = [
+            (name, pipeline if name == "representation" else branch) for name, branch in original_block.transformer_list
+        ]
+    original_values = block.transform(frame[sources]).copy()
+    train, held_out = frame.iloc[20:][sources], frame.iloc[:20][sources]
+    refitted = refit_block_representation(block, train, target[20:])
+    branches = _separate_state_branches(refitted)
+    if missing == "none":
+        assert branches is None
+        refitted_pipeline = refitted
+    else:
+        assert branches is not None
+        refitted_pipeline, indicator = branches
+        assert indicator is dict(block.transformer_list)["missing"]
+    assert isinstance(refitted_pipeline, Pipeline)
+    expected = clone(pipeline[-2:])
+    assert isinstance(expected, Pipeline)
+    expected.fit(pipeline[:-2].transform(train), target[20:])
+    np.testing.assert_allclose(
+        refitted_pipeline.transform(held_out), expected.transform(pipeline[:-2].transform(held_out))
+    )
+    for (_, helper), (_, fold_helper) in zip(pipeline.steps[:-2], refitted_pipeline.steps[:-2], strict=True):
+        assert fold_helper is helper
+    assert refitted_pipeline[-2] is not pipeline[-2]
+    assert refitted_pipeline[-1] is not pipeline[-1]
+    np.testing.assert_array_equal(block.transform(frame[sources]), original_values)
+    np.testing.assert_array_equal(representation[-1].fit_target_, target)
+
+
+class _ChangingJointWidth(_JointTargetProjection):
+    def fit(self, X, y=None):
+        super().fit(X, y)
+        self.width_ = 2 if len(X) == 100 else (3 if np.asarray(X).mean() > 0 else 1)
+        return self
+
+    def transform(self, X):
+        values = np.asarray(X, dtype=float)
+        return np.repeat((values @ self.weights_ + self.target_mean_)[:, None], self.width_, axis=1)
+
+    def get_feature_names_out(self, input_features=None):
+        return np.array([f"joint_{index}" for index in range(self.width_)], dtype=object)
+
+
+@pytest.mark.parametrize("first_group", ["positive", "negative"])
+def test_grouped_cross_fitting_rejects_opposite_width_changes_with_constant_total(monkeypatch, first_group):
+    import pandas as pd
+
+    from pretab import Preprocessor
+    from pretab.compose.inspection import refit_block_representation
+    from pretab.compose.registry import TRANSFORMER_REGISTRY
+
+    monkeypatch.setitem(
+        TRANSFORMER_REGISTRY,
+        "tprs",
+        replace(
+            TRANSFORMER_REGISTRY["tprs"],
+            transformer_cls=_ChangingJointWidth,
+            target_usage="required",
+            allowed_args=(),
+            placement_strategies=frozenset(),
+        ),
+    )
+    values = np.linspace(1.0, 10.0, 100)
+    frame = pd.DataFrame(
+        {"positive": values, "positive_other": values + 1, "negative": -values, "negative_other": -values - 1}
+    )
+    target = np.random.default_rng(42).normal(size=len(frame))
+    other_group = "negative" if first_group == "positive" else "positive"
+    groups = {
+        name: {"columns": [name, f"{name}_other"], "representation": "tprs"} for name in (first_group, other_group)
+    }
+    preprocessor = Preprocessor(scaling="none", feature_groups=groups).fit(frame, target)
+    assert preprocessor.output_dims_ == {f"group_{first_group}": 2, f"group_{other_group}": 2}
+    fold_widths = []
+    for name in groups:
+        columns = [name, f"{name}_other"]
+        block = preprocessor.column_transformer_.named_transformers_[f"group_{name}"]
+        refitted = refit_block_representation(block, frame.iloc[20:][columns], target[20:])
+        fold_widths.append(len(refitted.get_feature_names_out(columns)))
+    assert sorted(fold_widths) == [1, 3]
+    assert sum(fold_widths) == preprocessor.total_output_dim_ == 4
+    with pytest.raises(IncompatibleParamsError, match="fixed output width") as failure:
+        CrossFittedTransformer(preprocessor, n_folds=5, shuffle=False).fit_transform(frame, target)
+    assert f"block 'group_{first_group}'" in str(failure.value)
+    assert f"expected 2, got {fold_widths[0]}" in str(failure.value)
 
 
 def test_wrapped_preprocessor_target_aware_blocks_stay_out_of_fold(array_with_rare_category):
