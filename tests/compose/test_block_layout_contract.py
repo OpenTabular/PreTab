@@ -1,6 +1,7 @@
 """Agreement between fitted block spans and the public output-layout APIs."""
 
 import json
+import warnings
 from contextlib import nullcontext
 from unittest.mock import Mock
 
@@ -196,7 +197,8 @@ def test_fitted_block_layout_agrees_across_views(layout_data, output_format, par
 @pytest.mark.parametrize("method", ["tensorspline", "tprs"])
 @pytest.mark.parametrize("missing", ["none", "observed", "all"])
 @pytest.mark.parametrize("output_format", ["dense", "sparse"])
-def test_grouped_block_layout_agrees_across_views(layout_data, method, missing, output_format):
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_grouped_block_layout_agrees_across_views(layout_data, method, missing, output_format, dtype):
     frame, target = layout_data
     frame = frame.assign(spare=np.linspace(2.0, 7.0, len(frame)))
     representation = (
@@ -213,6 +215,7 @@ def test_grouped_block_layout_agrees_across_views(layout_data, method, missing, 
         missing_policy="separate_state" if missing == "all" else None,
         output_format=output_format,
         output_structure="blocks",
+        dtype=dtype,
         feature_groups={"location": {"columns": ["other", "value"], "representation": representation}},
     ).fit(frame, target)
     matrix = preprocessor.transform(frame, return_array=True)
@@ -255,6 +258,85 @@ def test_grouped_block_layout_agrees_across_views(layout_data, method, missing, 
         source = record.source_features[0]
         np.testing.assert_array_equal(_dense(blocks["group_location"])[:, basis_width + index], frame[source].isna())
     assert dimensions["group_location"] == basis_width + len(expected_sources)
+    report = preprocessor.reproducibility_report()
+    assert report["fingerprint"] == preprocessor.fingerprint_
+    assert report["n_output_features"] == offset
+    assert list(report["representations"]) == ["group_location"]
+    assert report["feature_groups"] == {
+        "group_location": {
+            "source_features": ["other", "value"],
+            "dimension": dimensions["group_location"],
+            "output_slice": [span.start, span.stop],
+        }
+    }
+    (entry,) = preprocessor.to_spec()["representations"]
+    assert entry["group_id"] == "group_location"
+    assert entry["columns"] == ["other", "value"]
+    assert entry["dimension"] == dimensions["group_location"]
+    assert entry["output_dim"] == basis_width
+    assert entry["output_slice"] == [span.start, span.stop]
+    assert json.loads(json.dumps(report, allow_nan=False)) == report
+    assert preprocessor.estimate_output_shape(frame) == np.shape(matrix)
+    assert preprocessor.estimate_memory(frame) == _dense(matrix).nbytes
+    limits = {
+        "max_output_features": offset,
+        "max_features_per_input": dimensions["group_location"],
+        "max_dense_memory": _dense(matrix).nbytes,
+    }
+    bounded = clone(preprocessor)
+    assert isinstance(bounded, Preprocessor)
+    bounded.set_params(**limits).fit(frame, target)
+    assert bounded.output_dims_ == dimensions
+    np.testing.assert_array_equal(_dense(bounded.transform(frame, return_array=True)), _dense(matrix))
+    for budget, limit in limits.items():
+        rejected = clone(preprocessor)
+        assert isinstance(rejected, Preprocessor)
+        rejected.set_params(**{budget: limit - 1})
+        with pytest.raises(OutputBudgetError, match=budget) as failure:
+            rejected.fit(frame, target)
+        if budget == "max_features_per_input":
+            assert str(failure.value).count("group 'group_location'") == 1
+            assert "('other', 'value')" in str(failure.value)
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("overflow_policy", ["error", "warn", "ignore"])
+def test_group_budget_error_identifies_full_joint_width_and_sources(layout_data, method, overflow_policy):
+    frame, _ = layout_data
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    width = 9 if method == "tensorspline" else 3
+    preprocessor = Preprocessor(
+        numerical_method="none",
+        target_aware=False,
+        placement_strategy="uniform",
+        max_features_per_input=width - 1,
+        overflow_policy=overflow_policy,
+        feature_groups={"location": {"columns": ["other", "value"], "representation": representation}},
+    )
+    if overflow_policy == "error":
+        with pytest.raises(OutputBudgetError) as failure:
+            preprocessor.fit(frame)
+        message = str(failure.value)
+    elif overflow_policy == "warn":
+        with pytest.warns(ConfigWarning) as caught:
+            preprocessor.fit(frame)
+        assert len(caught) == 1
+        message = str(caught[0].message)
+    else:
+        with warnings.catch_warnings(record=True) as caught:
+            preprocessor.fit(frame)
+        assert not caught
+        assert preprocessor.output_dims_["group_location"] == width
+        return
+    assert "group 'group_location'" in message
+    assert "('other', 'value')" in message
+    assert f"expands to {width} columns" in message
+    assert f"max_features_per_input ({width - 1})" in message
+    assert preprocessor.output_dims_["group_location"] == width
 
 
 def test_group_metadata_preserves_original_integer_labels_and_renamed_display_names():
@@ -281,6 +363,14 @@ def test_group_metadata_preserves_original_integer_labels_and_renamed_display_na
     assert len(renamed) == len(original) == preprocessor.total_output_dim_
     np.testing.assert_array_equal(preprocessor.get_feature_names_out(), original)
     assert all(record.source_features == ("11", "7") for record in preprocessor.get_feature_lineage()[1:])
+    report = preprocessor.reproducibility_report()
+    assert report["feature_groups"]["group_location"]["source_features"] == ["11", "7"]
+    bounded = clone(preprocessor)
+    assert isinstance(bounded, Preprocessor)
+    bounded.set_params(max_features_per_input=8)
+    with pytest.raises(OutputBudgetError) as failure:
+        bounded.fit(frame)
+    assert "sources (11, 7)" in str(failure.value)
 
 
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])

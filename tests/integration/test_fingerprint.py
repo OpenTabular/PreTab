@@ -16,7 +16,8 @@ import pandas as pd
 import pytest
 from sklearn.base import clone
 
-from pretab import Preprocessor
+from pretab import FeatureGroup, Preprocessor
+from pretab.compose.inspection import representation_leaf
 from pretab.compose.registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
@@ -53,6 +54,82 @@ def test_fingerprint_is_hex_sha256(frame, target):
 
 def test_fingerprint_deterministic_same_fit(frame, target):
     assert _fit(frame, target).fingerprint_ == _fit(frame, target).fingerprint_
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("change", ["group_order", "source_order", "family", "width", "params", "seed", "state"])
+def test_group_fingerprint_tracks_order_settings_and_fitted_state(frame, typed, change):
+    frame = frame.assign(d=frame["a"] ** 2, e=np.sin(frame["b"]))
+
+    def make_groups():
+        return {
+            "location": {
+                "columns": ["b", "a"],
+                "representation": {
+                    "method": "tprs",
+                    "n_components": 4,
+                    "landmark_strategy": "subsample",
+                    "random_state": 17,
+                },
+            },
+            "shape": {
+                "columns": ["d", "e"],
+                "representation": {"method": "tensorspline", "output_dim": 3, "degree": 2},
+            },
+        }
+
+    def fit(groups):
+        declarations = (
+            [FeatureGroup(name, entry["columns"], entry["representation"]) for name, entry in groups.items()]
+            if typed
+            else groups
+        )
+        return Preprocessor(
+            numerical_method="none",
+            target_aware=False,
+            placement_strategy="uniform",
+            feature_groups=declarations,
+        ).fit(frame)
+
+    reference = fit(make_groups())
+    original = reference.fingerprint_
+    repeated = fit(make_groups())
+    assert repeated.fingerprint_ == original
+    report = reference.reproducibility_report()
+    assert list(report["representations"]) == ["group_location", "group_shape", "c"]
+    assert list(report["feature_groups"]) == ["group_location", "group_shape"]
+    assert [entry["dimension"] for entry in report["feature_groups"].values()] == [4, 9]
+    reference.transform(frame)
+    reference.mark_stale("metadata only").freeze()
+    assert reference.fingerprint_ == original
+
+    groups = make_groups()
+    if change == "group_order":
+        groups = dict(reversed(list(groups.items())))
+    elif change == "source_order":
+        groups["location"]["columns"] = ["a", "b"]
+    elif change == "family":
+        groups["location"]["representation"] = {
+            "method": "tensorspline",
+            "output_dim": 2,
+            "degree": 1,
+            "diff_order": 1,
+        }
+    elif change == "width":
+        groups["location"]["representation"]["n_components"] = 5
+    elif change == "params":
+        groups["shape"]["representation"]["degree"] = 1
+    elif change == "seed":
+        groups["location"]["representation"]["random_state"] = 18
+    candidate = fit(groups)
+    if change == "state":
+        leaf = representation_leaf(candidate.column_transformer_.named_transformers_["group_location"])
+        leaf.landmarks_[0, 0] += 0.125
+    assert candidate.fingerprint_ != original
+    if change == "width":
+        assert candidate.output_dims_["group_location"] == 5
+    else:
+        assert candidate.total_output_dim_ == reference.total_output_dim_
 
 
 @pytest.mark.parametrize("per_feature", [False, True], ids=["global", "override"])
@@ -200,3 +277,4 @@ def test_reproducibility_report_contents(frame, target):
     assert report["n_output_features"] == len(p.get_feature_names_out())
     assert report["output_format"] == "dense"
     assert "a" in report["representations"]
+    assert "feature_groups" not in report

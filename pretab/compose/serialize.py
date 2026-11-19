@@ -304,7 +304,9 @@ def _representation_summary(preprocessor) -> list:
     :func:`~pretab.compose.inspection.representation_leaf`), not the union itself.
     Blocks whose representation ends in a step without
     ``get_representation_spec`` (scikit-learn scalers and encoders, embeddings)
-    have no entry. The steps are fitted, so a spec that fails to build is a bug:
+    have no entry. Explicit groups also carry their public identity, actual full
+    block dimension and half-open fitted output slice, including raw indicators.
+    The steps are fitted, so a spec that fails to build is a bug:
     its error propagates instead of silently dropping the entry.
     """
     summary: list = []
@@ -325,6 +327,11 @@ def _representation_summary(preprocessor) -> list:
         fits_block = getattr(leaf, "n_features_in_", len(block_columns)) == len(block_columns)
         entry = spec_fn(input_features=block_columns if fits_block else None).to_dict()
         entry["columns"] = block_columns
+        if block.group_id is not None:
+            span = block.span
+            entry["group_id"] = block.group_id
+            entry["dimension"] = span.stop - span.start
+            entry["output_slice"] = [span.start, span.stop]
         summary.append(entry)
     return summary
 

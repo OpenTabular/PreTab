@@ -288,9 +288,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         features. ``None`` disables the check. A violation is handled per
         ``overflow_policy``.
     max_features_per_input : int or None, default=None
-        Upper bound on the number of output columns any single input feature may
-        expand to. ``None`` disables the check. A violation is handled per
-        ``overflow_policy``.
+        Upper bound on the actual output width of each single feature or joint
+        feature group, including raw missing indicators. A group counts as one
+        unit; its width is not divided among sources. ``None`` disables the check.
+        A violation is handled per ``overflow_policy``.
     max_dense_memory : int or None, default=None
         Upper bound, in bytes, on the estimated dense output footprint
         (``n_rows * total_output_dim_ * itemsize``) evaluated against the training
@@ -1314,10 +1315,21 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             violations.append(f"total output columns ({total}) exceed max_output_features ({self.max_output_features})")
 
         if self.max_features_per_input is not None:
+            input_labels = self._input_labels()
+            group_sources = {
+                block.group_id: tuple(input_labels.get(column, column) for column in block.columns)
+                for block in _iter_fitted_blocks(self.column_transformer_)
+                if block.group_id is not None
+            }
             for feature, width in self.output_dims_.items():
                 if width > self.max_features_per_input:
+                    unit = (
+                        f"group {feature!r} with sources {group_sources[feature]!r}"
+                        if feature in group_sources
+                        else f"feature {feature!r}"
+                    )
                     violations.append(
-                        f"feature {feature!r} expands to {width} columns, "
+                        f"{unit} expands to {width} columns, "
                         f"exceeding max_features_per_input ({self.max_features_per_input})"
                     )
 
@@ -1530,15 +1542,29 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         -------
         dict
             Fingerprint, schema / library versions, random seed, output dtype and
-            format, input/output widths, and the per-feature representation
-            families -- everything needed to audit or reproduce the fit.
+            format, input/output widths, and representation families keyed by
+            source or public group key. Active groups also have a ``feature_groups``
+            mapping with canonical string ``source_features``, actual full-block
+            ``dimension`` (including raw indicators), and half-open ``output_slice``.
+            Group metadata comes from the fitted graph, not current requests.
         """
         check_is_fitted(self)
         spec = preprocessor_to_spec(self)
         representations = {
-            entry["columns"][0]: entry.get("family") for entry in spec["representations"] if entry.get("columns")
+            entry.get("group_id", entry["columns"][0]): entry.get("family")
+            for entry in spec["representations"]
+            if entry.get("columns")
         }
-        return {
+        groups = {
+            entry["group_id"]: {
+                "source_features": entry["columns"],
+                "dimension": entry["dimension"],
+                "output_slice": entry["output_slice"],
+            }
+            for entry in spec["representations"]
+            if "group_id" in entry
+        }
+        report = {
             "fingerprint": self.fingerprint_,
             "schema_version": SCHEMA_VERSION,
             "pretab_version": spec["pretab_version"],
@@ -1550,6 +1576,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             "n_output_features": len(spec["feature_names_out"]),
             "representations": representations,
         }
+        if groups:
+            report["feature_groups"] = groups
+        return report
 
     # --- Immutable lifecycle ---
     @property
