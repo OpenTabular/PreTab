@@ -39,7 +39,7 @@ from ..core.representation import FeatureLineage, RepresentationSpec
 from ..exceptions import PretabSerializationError
 from ..placement.base import PlacementResult
 from ..preprocessing.floats import NoTransformer, ToFloatTransformer
-from .config import RepresentationConfig
+from .config import FeatureGroup, RepresentationConfig
 from .inspection import _iter_fitted_blocks, representation_leaf
 from .registry import TransformerSpec
 
@@ -60,7 +60,15 @@ _ALLOWED_TOP_LEVEL = frozenset({"pretab", "sklearn", "numpy", "scipy"})
 # let a spec construct an arbitrary sklearn/numpy/scipy dataclass with
 # attacker-controlled fields.
 _ALLOWED_DATACLASSES = frozenset(
-    {RepresentationPolicy, RepresentationSpec, FeatureLineage, PlacementResult, TransformerSpec, RepresentationConfig}
+    {
+        RepresentationPolicy,
+        RepresentationSpec,
+        FeatureLineage,
+        PlacementResult,
+        TransformerSpec,
+        RepresentationConfig,
+        FeatureGroup,
+    }
 )
 
 

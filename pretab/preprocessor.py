@@ -1261,40 +1261,56 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             )
 
     def _raise_for_empty_features(self, X, y, empty_features, config) -> None:
-        """Name the empty feature behind a failed ``fit``, if one is to blame.
+        """Name the empty sources behind a failed ``fit``, if they are to blame.
 
-        Called when fitting the ColumnTransformer failed. The block of each feature
-        without an observed value is refitted on its own, and the first that fails
-        raises a :class:`~pretab.exceptions.PretabDataError` naming that feature,
+        Called when fitting the ColumnTransformer failed. Each block containing
+        a source without an observed value is refitted on its own, and the first
+        that fails raises a :class:`~pretab.exceptions.PretabDataError` naming its
+        empty sources and, for a group, the declared group and representation,
         chained to the block's own error: methods that cannot be fitted on a
         constant column (e.g. the B/M/I and cubic splines, Box-Cox) otherwise only
         report "the feature at index 0". A block is only blamed when it fits a
-        stand-in column of distinct observed values with the same ``y``, so a
+        stand-in frame with distinct observed values for all empty sources and the same ``y``, so a
         failure with another cause (e.g. a ``y`` of the wrong length) is not
         attributed to the empty column. Returns without raising when no empty
         column is to blame, so the caller re-raises the original error.
         """
         empty = {str(feature): feature for feature in empty_features}
+        groups = {tuple(str(column) for column in group.columns): group for group in config.feature_groups}
         for _name, transformer, columns in self.column_transformer_.transformers:
-            if columns[0] not in empty:
+            empty_columns = tuple(column for column in columns if column in empty)
+            if not empty_columns:
                 continue
-            feature = empty[columns[0]]
-            is_numerical = feature in self.numerical_features_
             try:
                 cast(TransformerLike, clone(transformer)).fit(X[columns], y)
             except PretabConfigError:
                 continue  # a configuration problem, not one of the empty column
             except ValueError as exc:
                 stand_in = X[columns].copy()
-                stand_in[columns[0]] = (
-                    np.linspace(1.0, 2.0, len(X))
-                    if is_numerical
-                    else np.resize(np.array(["a", "b"], dtype=object), len(X))
-                )
+                for column in empty_columns:
+                    stand_in[column] = (
+                        np.linspace(1.0, 2.0, len(X))
+                        if empty[column] in self.numerical_features_
+                        else np.resize(np.array(["a", "b"], dtype=object), len(X))
+                    )
                 try:
                     cast(TransformerLike, clone(transformer)).fit(stand_in, y)
                 except ValueError:
                     continue  # the block fails with observed values too: not the emptiness
+                group = groups.get(tuple(columns))
+                if group is not None:
+                    labels = self._input_labels()
+                    sources = tuple(labels.get(column, column) for column in columns)
+                    missing = tuple(empty[column] for column in empty_columns)
+                    raise PretabDataError(
+                        f"Feature group {'group_' + group.name!r} with sources {sources!r} has no observed "
+                        f"(non-missing) value at fit for sources {missing!r}, and its {group.representation.method!r} "
+                        f"representation cannot be fitted on such data: {exc}\n"
+                        "Fix: fit on data where these sources are observed, or change the group's columns or "
+                        "representation via feature_groups."
+                    ) from exc
+                feature = empty[empty_columns[0]]
+                is_numerical = feature in self.numerical_features_
                 method = config.method_for(feature, is_numerical=is_numerical)
                 raise PretabDataError(
                     f"Column {feature!r} has no observed (non-missing) value at fit, and its {method!r} "
