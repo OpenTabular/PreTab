@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 from scipy.integrate import trapezoid
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -9,6 +11,7 @@ from ...core.supervised import warn_target_leakage
 from ...exceptions import InvalidParamError
 from ...placement.adapters import SplinePlacementAdapter
 from .mixins import SplineBasisMixin
+from .penalty import PenaltySpec
 
 
 class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
@@ -273,3 +276,22 @@ class NaturalCubicSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEsti
                 P[i, j] = trapezoid(integrand, x_grid)
 
         return P
+
+    def get_penalty_spec(
+        self, feature_index: int | np.integer[Any] = 0, *, diff_order: int | None = None
+    ) -> PenaltySpec:
+        """Return the legacy approximate curvature penalty in fitted output coordinates.
+
+        The penalty uses numerical second derivatives and trapezoidal integration
+        on a 200-point grid over the fitted feature range, in fitted input units.
+        Its derivative order is two; ``diff_order`` must be omitted or ``None``.
+        The linear column and optional leading bias are unpenalized.
+        """
+        return self._curvature_penalty_spec(
+            feature_index,
+            diff_order,
+            legacy_method=NaturalCubicSplineTransformer.get_penalty_matrix,
+            kind="approximate_integrated_squared_second_derivative",
+            base_width=1,
+            integration="finite_difference_trapezoid_200",
+        )

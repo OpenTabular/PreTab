@@ -11,7 +11,14 @@ import pytest
 from pretab import PenaltySpec
 from pretab.exceptions import InvalidParamError, PretabNotFittedError
 from pretab.expansion.spline import PenaltySpec as SplinePenaltySpec
-from pretab.transformers import BSplineTransformer, ISplineTransformer, MSplineTransformer, PSplineTransformer
+from pretab.transformers import (
+    BSplineTransformer,
+    CubicRegressionSplineTransformer,
+    ISplineTransformer,
+    MSplineTransformer,
+    NaturalCubicSplineTransformer,
+    PSplineTransformer,
+)
 
 
 def _spec(matrix, **overrides):
@@ -335,3 +342,101 @@ def test_pspline_typed_penalty_refuses_state_after_failed_refit():
         spline.fit(source)
     with pytest.raises(InvalidParamError, match="refit to record the fitted penalty order"):
         spline.get_penalty_spec()
+
+
+@pytest.mark.parametrize("include_bias", [False, True])
+def test_natural_cubic_typed_penalty_matches_approximate_curvature_in_output_coordinates(include_bias):
+    source = np.linspace(-1, 2, 101)
+    frame = pd.DataFrame({"left": source, "right": source * 2 + 3})
+    spline = NaturalCubicSplineTransformer(output_dim=5, include_bias=include_bias).fit(frame)
+    spec = spline.get_penalty_spec(1)
+    width = 5 + int(include_bias)
+    assert spec.kind == "approximate_integrated_squared_second_derivative"
+    assert spec.order == 2
+    assert spec.axis == ("right",)
+    assert spec.coordinate_system == "output_coefficients"
+    assert spec.coefficient_indices == tuple(range(width, 2 * width))
+    assert spec.coefficient_names == tuple(spline.get_feature_names_out()[width:])
+    assert spline.transform(frame).shape[1] == 2 * width
+    np.testing.assert_array_equal(spec.matrix, spline.get_penalty_matrix(1))
+    offset = 1 + int(include_bias)
+    np.testing.assert_array_equal(spec.matrix[:offset], 0)
+    assert (spec.rank, spec.nullity) == (4, offset)
+
+    knots = spline.knots_[1]
+    grid = np.linspace(knots[0], knots[-1], 4001)
+    tails = np.maximum(grid[:, None] - knots, 0)
+    left_weights = (knots[-1] - knots[1:-1]) / (knots[-1] - knots[0])
+    curvature = 6 * (tails[:, 1:-1] - left_weights * tails[:, :1])
+    exact_gram = (curvature[:-1].T @ curvature[:-1] + curvature[1:].T @ curvature[1:]) * (grid[1] - grid[0]) / 2
+    np.testing.assert_allclose(spec.matrix[offset:, offset:], exact_gram, rtol=0.02)
+    np.testing.assert_allclose(spec.matrix, 8 * spline.get_penalty_spec(0).matrix, atol=1e-8, rtol=1e-8)
+
+
+@pytest.mark.parametrize("include_bias", [False, True])
+def test_cubic_regression_typed_penalty_matches_integrated_curvature_in_output_coordinates(include_bias):
+    source = np.linspace(-1, 2, 101)
+    frame = pd.DataFrame({"left": source, "right": source * 2 + 3})
+    spline = CubicRegressionSplineTransformer(output_dim=5, include_bias=include_bias).fit(frame)
+    spec = spline.get_penalty_spec(np.int64(1))
+    width = 5 + int(include_bias)
+    offset = 1 + int(include_bias)
+    assert spec.kind == "integrated_squared_second_derivative"
+    assert spec.order == 2
+    assert spec.axis == ("right",)
+    assert spec.coordinate_system == "output_coefficients"
+    assert spec.coefficient_indices == tuple(range(width, 2 * width))
+    assert spec.coefficient_names == tuple(spline.get_feature_names_out()[width:])
+    assert spline.transform(frame).shape[1] == 2 * width
+    np.testing.assert_array_equal(spec.matrix, spline.get_penalty_matrix(1))
+    np.testing.assert_array_equal(spec.matrix[:offset], 0)
+    assert (spec.rank, spec.nullity) == (4, offset)
+
+    knots = spline.knots_[1]
+    bounds = np.r_[frame["right"].min(), knots, frame["right"].max()]
+    half_widths = np.diff(bounds) / 2
+    midpoints = (bounds[1:] + bounds[:-1]) / 2
+    nodes, weights = np.polynomial.legendre.leggauss(2)
+    grid = (midpoints[:, None] + half_widths[:, None] * nodes).ravel()
+    weights = (half_widths[:, None] * weights).ravel()
+    curvature = np.column_stack((np.full_like(grid, 2), 6 * grid, 6 * np.maximum(grid[:, None] - knots, 0)))
+    np.testing.assert_allclose(spec.matrix[offset:, offset:], curvature.T @ (weights[:, None] * curvature), rtol=1e-12)
+    assert spec.matrix[offset, offset] == pytest.approx(2 * spline.get_penalty_spec(0).matrix[offset, offset])
+
+
+@pytest.mark.parametrize("transformer_cls", [NaturalCubicSplineTransformer, CubicRegressionSplineTransformer])
+def test_curvature_typed_penalty_validation_and_legacy_access(transformer_cls):
+    spline = transformer_cls(output_dim=5)
+    with pytest.raises(PretabNotFittedError, match="must be fitted"):
+        spline.get_penalty_spec()
+    spline.fit(np.linspace(0, 1, 21).reshape(-1, 1))
+    spec = spline.get_penalty_spec()
+    assert spec.axis == ("x0",)
+    with pytest.raises(ValueError):
+        spec.matrix.setflags(write=True)
+    legacy = spline.get_penalty_matrix(-1)
+    np.testing.assert_array_equal(spec.matrix, legacy)
+    with pytest.raises(InvalidParamError, match="feature_index"):
+        spline.get_penalty_spec(-1)
+    with pytest.raises(InvalidParamError, match="feature_index"):
+        spline.get_penalty_spec(True)
+    with pytest.raises(InvalidParamError, match="not a difference penalty"):
+        spline.get_penalty_spec(diff_order=2)
+    spline.set_params(include_bias=True)
+    with pytest.raises(InvalidParamError, match="refit"):
+        spline.get_penalty_spec()
+
+
+@pytest.mark.parametrize("order", [1, 2])
+@pytest.mark.parametrize("include_bias", [False, True])
+def test_bspline_typed_difference_penalty_invariant_to_input_rescaling(order, include_bias):
+    source = np.linspace(-1, 2, 101).reshape(-1, 1)
+    spline = BSplineTransformer(output_dim=6, include_bias=include_bias).fit(source)
+    penalty = spline.get_penalty_spec(diff_order=order)
+    spline.fit(2 * source + 3)
+    assert spline.get_penalty_spec(diff_order=order) == penalty
+    assert penalty.kind == "coefficient_difference"
+    assert (penalty.rank, penalty.nullity) == (6 - order, order + int(include_bias))
+    coefficients = np.arange(6 + int(include_bias), dtype=float) ** 2
+    energy = np.sum(np.diff(coefficients[int(include_bias) :], n=order) ** 2)
+    assert coefficients @ penalty.matrix @ coefficients == energy

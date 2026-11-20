@@ -10,11 +10,16 @@ sizes and the legacy ``_validate_allow_nan`` entry point) so each concrete
 transformer only has to implement its own basis math.
 """
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 
 from ...core.base import BasePreTabTransformer
 from ...core.knots import generate_internal_knots, select_knots, spanning_knots, supplement_interior_knots
-from ...exceptions import IncompatibleParamsError, PretabDataError
+from ...core.validation import resolve_input_features
+from ...exceptions import IncompatibleParamsError, PretabDataError, PretabNotFittedError, invalid_param_error
+from .penalty import PenaltySpec
 
 
 class SplineBasisMixin(BasePreTabTransformer):
@@ -48,6 +53,62 @@ class SplineBasisMixin(BasePreTabTransformer):
     def _output_sizes(self) -> list[int]:
         """Number of output columns contributed by each input feature."""
         return [int(n) for n in self.n_basis_]
+
+    def _curvature_penalty_spec(
+        self,
+        feature_index: int | np.integer[Any],
+        diff_order: int | None,
+        *,
+        legacy_method: Callable[..., object],
+        kind: str,
+        base_width: int,
+        integration: str,
+    ) -> PenaltySpec:
+        estimator = type(self).__name__
+        knot_counts: list[int] | None = getattr(self, "n_knots_", None)
+        if knot_counts is None or len(self.n_basis_) != self.n_features_in_ or len(knot_counts) != len(self.n_basis_):
+            raise PretabNotFittedError(f"{estimator} must be fitted before calling get_penalty_spec().")
+        legacy_accessor = getattr(self, "get_penalty_matrix", None)
+        if not callable(legacy_accessor) or getattr(legacy_accessor, "__func__", None) is not legacy_method:
+            raise invalid_param_error(
+                estimator, "get_penalty_spec", None, "the matrix convention is overridden; use get_penalty_matrix()"
+            )
+        if diff_order is not None:
+            raise invalid_param_error(
+                estimator,
+                "diff_order",
+                diff_order,
+                "omit for a fixed second-derivative penalty, not a difference penalty",
+            )
+        sizes = self._output_sizes()
+        if (
+            isinstance(feature_index, (bool, np.bool_))
+            or not isinstance(feature_index, (int, np.integer))
+            or not 0 <= feature_index < len(sizes)
+        ):
+            raise invalid_param_error(estimator, "feature_index", feature_index, f"must be in [0, {len(sizes)})")
+        include_bias = bool(getattr(self, "include_bias", False))
+        if any(
+            width != knot_count + base_width + include_bias
+            for width, knot_count in zip(sizes, knot_counts, strict=True)
+        ):
+            raise invalid_param_error(
+                estimator, "include_bias", include_bias, "refit after changing the fitted basis width"
+            )
+
+        index = int(feature_index)
+        start = sum(sizes[:index])
+        stop = start + sizes[index]
+        return PenaltySpec(
+            matrix=legacy_accessor(index),
+            kind=kind,
+            order=2,
+            axis=(str(resolve_input_features(self, None)[index]),),
+            coordinate_system="output_coefficients",
+            coefficient_names=tuple(self.get_feature_names_out()[start:stop]),
+            coefficient_indices=range(start, stop),
+            provenance={"transformer": estimator, "include_bias": include_bias, "integration": integration},
+        )
 
     def _finite_column(self, x, y):
         """Drop NaN samples from one feature (aligning ``y``) before knot placement.
