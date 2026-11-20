@@ -254,7 +254,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "sklearn.preprocessing._data.PowerTransformer"
+      "transformer_cls": "sklearn.preprocessing._data.PowerTransformer",
+      "typed_penalty": false
     },
     "bspline": {
       "allowed_args": [
@@ -287,7 +288,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.spline.b_spline.BSplineTransformer"
+      "transformer_cls": "pretab.expansion.spline.b_spline.BSplineTransformer",
+      "typed_penalty": true
     },
     "cubicspline": {
       "allowed_args": [
@@ -322,7 +324,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.spline.cubic_regression.CubicRegressionSplineTransformer"
+      "transformer_cls": "pretab.expansion.spline.cubic_regression.CubicRegressionSplineTransformer",
+      "typed_penalty": true
     },
     "custombin": {
       "allowed_args": ["output_dim", "encode"],
@@ -348,7 +351,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.encoding.numerical.binning.NumericBinningTransformer"
+      "transformer_cls": "pretab.encoding.numerical.binning.NumericBinningTransformer",
+      "typed_penalty": false
     },
     "fourier": {
       "allowed_args": [
@@ -379,7 +383,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.expansion.functional.fourier.FourierFeatureTransformer"
+      "transformer_cls": "pretab.expansion.functional.fourier.FourierFeatureTransformer",
+      "typed_penalty": false
     },
     "int": {
       "allowed_args": [],
@@ -405,7 +410,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.encoding.categorical.ordinal.ContinuousOrdinalTransformer"
+      "transformer_cls": "pretab.encoding.categorical.ordinal.ContinuousOrdinalTransformer",
+      "typed_penalty": false
     },
     "ispline": {
       "allowed_args": [
@@ -438,7 +444,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.spline.i_spline.ISplineTransformer"
+      "transformer_cls": "pretab.expansion.spline.i_spline.ISplineTransformer",
+      "typed_penalty": true
     },
     "minmax": {
       "allowed_args": [],
@@ -464,7 +471,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "sklearn.preprocessing._data.MinMaxScaler"
+      "transformer_cls": "sklearn.preprocessing._data.MinMaxScaler",
+      "typed_penalty": false
     },
     "mspline": {
       "allowed_args": [
@@ -497,7 +505,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.spline.m_spline.MSplineTransformer"
+      "transformer_cls": "pretab.expansion.spline.m_spline.MSplineTransformer",
+      "typed_penalty": true
     },
     "naturalspline": {
       "allowed_args": [
@@ -531,7 +540,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.spline.natural_cubic.NaturalCubicSplineTransformer"
+      "transformer_cls": "pretab.expansion.spline.natural_cubic.NaturalCubicSplineTransformer",
+      "typed_penalty": true
     },
     "none": {
       "allowed_args": [],
@@ -557,7 +567,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.preprocessing.floats.NoTransformer"
+      "transformer_cls": "pretab.preprocessing.floats.NoTransformer",
+      "typed_penalty": false
     },
     "nystroem": {
       "allowed_args": [
@@ -590,7 +601,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.kernel_approximation.nystroem.NystroemFeaturesTransformer"
+      "transformer_cls": "pretab.kernel_approximation.nystroem.NystroemFeaturesTransformer",
+      "typed_penalty": false
     },
     "one-hot": {
       "allowed_args": [
@@ -625,7 +637,8 @@
       "sparse_output": true,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "sklearn.preprocessing._encoders.OneHotEncoder"
+      "transformer_cls": "sklearn.preprocessing._encoders.OneHotEncoder",
+      "typed_penalty": false
     },
     "onehot_from_ordinal": {
       "allowed_args": [],
@@ -651,7 +664,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.encoding.categorical.one_hot.OneHotFromOrdinalTransformer"
+      "transformer_cls": "pretab.encoding.categorical.one_hot.OneHotFromOrdinalTransformer",
+      "typed_penalty": false
     },
     "ple": {
       "allowed_args": [
@@ -684,7 +698,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "required",
-      "transformer_cls": "pretab.encoding.numerical.ple.PLETransformer"
+      "transformer_cls": "pretab.encoding.numerical.ple.PLETransformer",
+      "typed_penalty": false
     },
     "polynomial": {
       "allowed_args": ["degree", "interaction_only", "include_bias"],
@@ -710,7 +725,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "sklearn.preprocessing._polynomial.PolynomialFeatures"
+      "transformer_cls": "sklearn.preprocessing._polynomial.PolynomialFeatures",
+      "typed_penalty": false
     },
     "pretrained": {
       "allowed_args": [],
@@ -736,7 +752,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.embedding.language.LanguageEmbeddingTransformer"
+      "transformer_cls": "pretab.embedding.language.LanguageEmbeddingTransformer",
+      "typed_penalty": false
     },
     "pspline": {
       "allowed_args": ["output_dim", "degree", "diff_order"],
@@ -762,7 +779,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.expansion.spline.p_spline.PSplineTransformer"
+      "transformer_cls": "pretab.expansion.spline.p_spline.PSplineTransformer",
+      "typed_penalty": true
     },
     "quantile": {
       "allowed_args": ["n_quantiles", "output_distribution", "random_state"],
@@ -788,7 +806,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "sklearn.preprocessing._data.QuantileTransformer"
+      "transformer_cls": "sklearn.preprocessing._data.QuantileTransformer",
+      "typed_penalty": false
     },
     "rbf": {
       "allowed_args": [
@@ -822,7 +841,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.functional.rbf.RBFExpansionTransformer"
+      "transformer_cls": "pretab.expansion.functional.rbf.RBFExpansionTransformer",
+      "typed_penalty": false
     },
     "relu": {
       "allowed_args": [
@@ -855,7 +875,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.functional.relu.ReLUExpansionTransformer"
+      "transformer_cls": "pretab.expansion.functional.relu.ReLUExpansionTransformer",
+      "typed_penalty": false
     },
     "rff": {
       "allowed_args": ["n_components", "gamma", "random_state"],
@@ -881,7 +902,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.kernel_approximation.random_fourier.RandomFourierFeaturesTransformer"
+      "transformer_cls": "pretab.kernel_approximation.random_fourier.RandomFourierFeaturesTransformer",
+      "typed_penalty": false
     },
     "robust": {
       "allowed_args": [],
@@ -907,7 +929,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "sklearn.preprocessing._data.RobustScaler"
+      "transformer_cls": "sklearn.preprocessing._data.RobustScaler",
+      "typed_penalty": false
     },
     "sigmoid": {
       "allowed_args": [
@@ -940,7 +963,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.functional.sigmoid.SigmoidExpansionTransformer"
+      "transformer_cls": "pretab.expansion.functional.sigmoid.SigmoidExpansionTransformer",
+      "typed_penalty": false
     },
     "standardization": {
       "allowed_args": [],
@@ -966,7 +990,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "sklearn.preprocessing._data.StandardScaler"
+      "transformer_cls": "sklearn.preprocessing._data.StandardScaler",
+      "typed_penalty": false
     },
     "tanh": {
       "allowed_args": [
@@ -1000,7 +1025,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": true,
       "target_usage": "optional",
-      "transformer_cls": "pretab.expansion.functional.tanh.TanhExpansionTransformer"
+      "transformer_cls": "pretab.expansion.functional.tanh.TanhExpansionTransformer",
+      "typed_penalty": false
     },
     "tensorspline": {
       "allowed_args": ["output_dim", "degree", "diff_order"],
@@ -1026,7 +1052,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.expansion.spline.multivariate.tensor_product.TensorProductSplineTransformer"
+      "transformer_cls": "pretab.expansion.spline.multivariate.tensor_product.TensorProductSplineTransformer",
+      "typed_penalty": true
     },
     "tprs": {
       "allowed_args": [
@@ -1057,7 +1084,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "pretab.expansion.spline.multivariate.thin_plate.ThinPlateSplineTransformer"
+      "transformer_cls": "pretab.expansion.spline.multivariate.thin_plate.ThinPlateSplineTransformer",
+      "typed_penalty": false
     },
     "yeo-johnson": {
       "allowed_args": [],
@@ -1083,7 +1111,8 @@
       "sparse_output": false,
       "supports_adaptive_resolution": false,
       "target_usage": "forbidden",
-      "transformer_cls": "sklearn.preprocessing._data.PowerTransformer"
+      "transformer_cls": "sklearn.preprocessing._data.PowerTransformer",
+      "typed_penalty": false
     }
   },
   "selectable_methods": {
@@ -1133,7 +1162,7 @@
     "pretab.configure_logging": "(level: int = 1, handler: 'logging.Handler | None' = None) -> None",
     "pretab.list_representations": "(*, feature_kind=None, scope=None, supervised=None, periodic=None, sparse_output=None, adaptive=None, include_optional=True)",
     "pretab.load_entry_point_representations": "(group='pretab.representations', *, override=False)",
-    "pretab.register_representation": "(name, cls, *, feature_kind=None, scope=None, supervision=None, allowed_args=(), placement_strategies=(), supports_adaptive_resolution=False, preprocessor_compatible=True, optional_dependency=None, periodic=False, sparse_output=False, override=False)",
+    "pretab.register_representation": "(name, cls, *, feature_kind=None, scope=None, supervision=None, allowed_args=(), placement_strategies=(), supports_adaptive_resolution=False, preprocessor_compatible=True, optional_dependency=None, periodic=False, sparse_output=False, override=False, typed_penalty=False)",
     "pretab.set_verbosity": "(level: int = 1) -> None",
     "pretab.transformers.BSplineTransformer": "(output_dim=UNSET, degree: int = 3, include_bias: bool = False, knot_locations: numpy.ndarray | None = None, target_aware: bool = False, placement_strategy: str = 'quantile', task: Optional[Literal['regression', 'classification']] = None, adaptive: bool = False, min_output_dim=UNSET, max_output_dim=UNSET, random_state: int | None = None, policy: pretab.core.policy.RepresentationPolicy | dict | None = None)",
     "pretab.transformers.ContinuousOrdinalTransformer": "()",

@@ -135,6 +135,8 @@ class TransformerSpec:
     max_arity : int or None
         Maximum declared group size, or ``None`` for no declared upper bound.
         Relevant only when ``group_compatible`` is true.
+    typed_penalty : bool
+        Whether the method exposes validated penalty metadata aligned to its output.
     """
 
     name: str
@@ -152,6 +154,7 @@ class TransformerSpec:
     group_compatible: bool = False
     min_arity: int = 1
     max_arity: int | None = 1
+    typed_penalty: bool = False
 
     @property
     def is_numerical(self) -> bool:
@@ -276,12 +279,14 @@ _SPECS: tuple[TransformerSpec, ...] = (
             "max_output_dim",
             "random_state",
         ),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     _spec(
         "naturalspline",
         NaturalCubicSplineTransformer,
         ("output_dim", "include_bias", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     # --- numerical: penalized splines (equally-spaced knots, unsupervised only) ---
@@ -290,6 +295,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
         PSplineTransformer,
         ("output_dim", "degree", "diff_order"),
         placement_strategies=_UNIFORM_ONLY,
+        typed_penalty=True,
     ),
     _spec(
         "tensorspline",
@@ -301,6 +307,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
         group_compatible=True,
         min_arity=2,
         max_arity=None,
+        typed_penalty=True,
     ),
     # --- numerical: kernel-based thin-plate spline (knot-free, multivariate) ---
     _spec(
@@ -333,18 +340,21 @@ _SPECS: tuple[TransformerSpec, ...] = (
         "bspline",
         BSplineTransformer,
         ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     _spec(
         "mspline",
         MSplineTransformer,
         ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     _spec(
         "ispline",
         ISplineTransformer,
         ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     # --- numerical / categorical: passthrough ---

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import inspect
 import warnings
+from collections.abc import Iterable
 
 import numpy as np
 from sklearn.base import clone
@@ -35,7 +36,9 @@ from .compose.registry import (
 )
 from .core.base import BasePreTabTransformer
 from .core.representation import RepresentationSpec
-from .exceptions import ConfigWarning, RepresentationConformanceError
+from .core.validation import resolve_input_features
+from .exceptions import ConfigWarning, PretabNotFittedError, RepresentationConformanceError
+from .expansion.spline.penalty import PenaltySpec
 
 __all__ = [
     "BaseRepresentation",
@@ -136,6 +139,7 @@ def register_representation(
     periodic=False,
     sparse_output=False,
     override=False,
+    typed_penalty=False,
 ):
     """Register a representation class under ``name`` so it is selectable by name.
 
@@ -186,6 +190,8 @@ def register_representation(
         Whether the method can emit a sparse matrix.
     override : bool, default=False
         Whether replacing an already-registered ``name`` is allowed.
+    typed_penalty : bool, default=False
+        Opt in to the typed penalty contract checked by :func:`check_representation`.
 
     Returns
     -------
@@ -228,6 +234,7 @@ def register_representation(
         optional_dependency=optional_dependency,
         periodic=bool(periodic),
         sparse_output=bool(sparse_output),
+        typed_penalty=bool(typed_penalty),
     )
     return register_spec(spec, override=override)
 
@@ -333,6 +340,71 @@ def _densify(array):
     return np.asarray(array)
 
 
+def _check_typed_penalty(fitted, unfitted, *, joint, names):
+    typed_name, legacy_name = (
+        ("get_penalty_specs", "get_penalty_matrices") if joint else ("get_penalty_spec", "get_penalty_matrix")
+    )
+    label = f"{type(fitted).__name__}.{typed_name}"
+    typed_accessor = getattr(fitted, typed_name, None)
+    legacy_accessor = getattr(fitted, legacy_name, None)
+    if not callable(typed_accessor) or not callable(legacy_accessor):
+        raise RepresentationConformanceError(f"{label} and {legacy_name} are required by typed_penalty")
+    try:
+        getattr(unfitted, typed_name)()
+    except PretabNotFittedError:
+        pass
+    except Exception as exc:
+        raise RepresentationConformanceError(f"{label} before fit must raise PretabNotFittedError") from exc
+    else:
+        raise RepresentationConformanceError(f"{label} before fit must raise PretabNotFittedError")
+
+    axes = tuple(str(axis) for axis in resolve_input_features(fitted, None))
+    try:
+        if joint:
+            penalties = typed_accessor()
+            matrices = legacy_accessor()
+            if not isinstance(matrices, Iterable):
+                raise TypeError(f"{legacy_name} must return an iterable of matrices")
+            legacy = tuple(matrices)
+        else:
+            penalties = tuple(typed_accessor(feature_index=index) for index in range(len(axes)))
+            legacy = tuple(legacy_accessor(feature_index=index) for index in range(len(axes)))
+    except Exception as exc:
+        raise RepresentationConformanceError(f"{label} failed on fitted data: {exc}") from exc
+    if not isinstance(penalties, tuple) or len(penalties) != len(axes) or len(legacy) != len(axes):
+        raise RepresentationConformanceError(f"{label} must provide one PenaltySpec and legacy matrix per fitted axis")
+
+    output_indices = tuple(range(len(names)))
+    covered_indices = []
+    for axis, penalty, reference in zip(axes, penalties, legacy, strict=True):
+        if not isinstance(penalty, PenaltySpec):
+            raise RepresentationConformanceError(f"{label} must return PenaltySpec values")
+        if penalty.axis != (axis,) or penalty.coordinate_system != "output_coefficients":
+            raise RepresentationConformanceError(f"{label} must identify fitted axis {axis!r} in output coefficients")
+        indices = penalty.coefficient_indices
+        if (
+            (joint and indices != output_indices)
+            or any(index >= len(names) for index in indices)
+            or penalty.coefficient_names != tuple(names[index] for index in indices)
+        ):
+            raise RepresentationConformanceError(f"{label} coefficient names and indices must match fitted output")
+        matrix = penalty.matrix
+        if not np.array_equal(matrix, reference):
+            raise RepresentationConformanceError(f"{label} matrix must match {legacy_name}")
+        if matrix.flags.writeable or np.shares_memory(matrix, reference):
+            raise RepresentationConformanceError(f"{label} matrix must be read-only and detached from {legacy_name}")
+        try:
+            matrix.setflags(write=True)
+        except ValueError:
+            pass
+        else:
+            matrix.setflags(write=False)
+            raise RepresentationConformanceError(f"{label} matrix must not allow writes to be re-enabled")
+        covered_indices.extend(indices)
+    if not joint and tuple(covered_indices) != output_indices:
+        raise RepresentationConformanceError(f"{label} must cover consecutive feature blocks in fitted output order")
+
+
 def check_representation(cls, *, X=None, y=None):
     """Run the representation conformance suite on a class.
 
@@ -343,6 +415,9 @@ def check_representation(cls, *, X=None, y=None):
     width and is unique; the result is deterministic across ``clone`` + refit; the
     typed :class:`~pretab.RepresentationSpec` agrees with the declared ``scope``
     and output width; and a ``"supervised"`` class refuses to fit without ``y``.
+    A registered ``typed_penalty`` claim additionally checks penalty access
+    before fit and validates fitted axes, output coordinates, and legacy matrix
+    parity.
 
     Parameters
     ----------
@@ -365,8 +440,14 @@ def check_representation(cls, *, X=None, y=None):
         On the first failed check, with a message identifying the violation.
     """
     rng = np.random.RandomState(0)
+    penalty_scopes = {
+        spec.arity for spec in TRANSFORMER_REGISTRY.values() if spec.transformer_cls is cls and spec.typed_penalty
+    }
+    if len(penalty_scopes) > 1:
+        raise RepresentationConformanceError(f"{cls.__name__} has conflicting typed_penalty scopes")
+    penalty_scope = next(iter(penalty_scopes), None)
     if X is None:
-        X = rng.uniform(-2.0, 2.0, size=(40, 1)).astype(float)
+        X = rng.uniform(-2.0, 2.0, size=(40, 2 if penalty_scope == "multivariate" else 1)).astype(float)
     X = np.asarray(X)
     n_samples = X.shape[0]
 
@@ -442,7 +523,7 @@ def check_representation(cls, *, X=None, y=None):
     spec = fitted.get_representation_spec()
     if not isinstance(spec, RepresentationSpec):
         raise RepresentationConformanceError(f"{cls.__name__}.get_representation_spec must return a RepresentationSpec")
-    declared_scope = getattr(cls, "scope", "univariate")
+    declared_scope = getattr(cls, "scope", penalty_scope or "univariate")
     if spec.scope != declared_scope:
         raise RepresentationConformanceError(
             f"{cls.__name__} spec.scope {spec.scope!r} != declared scope {declared_scope!r}"
@@ -452,6 +533,12 @@ def check_representation(cls, *, X=None, y=None):
             f"{cls.__name__} spec.output_dim {spec.output_dim} != output width {width}"
         )
     passed.append("spec_consistent")
+
+    if penalty_scope is not None:
+        if spec.scope != penalty_scope:
+            raise RepresentationConformanceError(f"{cls.__name__} spec.scope must match its typed_penalty scope")
+        _check_typed_penalty(fitted, _make(), joint=penalty_scope == "multivariate", names=names)
+        passed.append("typed_penalty_consistent")
 
     # 7. a supervised class must refuse to fit without y.
     if needs_y:
