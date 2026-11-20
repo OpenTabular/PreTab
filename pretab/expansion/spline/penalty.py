@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from hashlib import sha256
 from math import isfinite
 from numbers import Integral, Real
+from struct import pack
 from types import MappingProxyType
 from typing import Any
 
@@ -187,6 +189,37 @@ class PenaltySpec:
         """Read-only matrix with independent array metadata on each access."""
         width = len(self.coefficient_indices)
         return np.frombuffer(self._matrix_bytes, dtype=np.float64).reshape(width, width)
+
+    def to_summary(self) -> dict[str, Any]:
+        """Return detached JSON metadata without the dense matrix.
+
+        ``matrix_sha256`` is the hexadecimal SHA-256 digest of the row and
+        column counts (two unsigned 64-bit little-endian integers), followed
+        by C-order little-endian float64 matrix bytes. The checksum treats
+        negative zero as positive zero and does not round any other values.
+        It identifies exact matrix content, not tolerance-based equivalence.
+        The summary cannot reconstruct the matrix.
+        """
+        matrix = np.array(self.matrix, dtype="<f8", order="C", copy=True)
+        matrix[matrix == 0] = 0.0
+        digest = sha256(pack("<QQ", *matrix.shape))
+        digest.update(memoryview(matrix).cast("B"))
+        return {
+            "shape": list(matrix.shape),
+            "dtype": "float64",
+            "kind": self.kind,
+            "order": self.order,
+            "axis": list(self.axis),
+            "coordinate_system": self.coordinate_system,
+            "coefficient_names": list(self.coefficient_names),
+            "coefficient_indices": list(self.coefficient_indices),
+            "rank": self.rank,
+            "nullity": self.nullity,
+            "atol": self.atol,
+            "rtol": self.rtol,
+            "provenance": _copy_provenance(self.provenance),
+            "matrix_sha256": digest.hexdigest(),
+        }
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PenaltySpec):

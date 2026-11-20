@@ -1,8 +1,11 @@
 """Value and validation contracts for coefficient-coordinate penalties."""
 
+import json
 import pickle
 from copy import copy, deepcopy
 from dataclasses import FrozenInstanceError
+from hashlib import sha256
+from struct import pack
 
 import numpy as np
 import pandas as pd
@@ -32,6 +35,74 @@ def _spec(matrix, **overrides):
         "coefficient_indices": [2, 3],
     }
     return PenaltySpec(matrix, **(settings | overrides))
+
+
+def test_penalty_summary_has_complete_strict_json_metadata_and_canonical_digest():
+    spec = _spec([[2.0, 0.0], [0.0, 0.0]], provenance={"options": [{"bias": False}], "note": None})
+    canonical = bytes.fromhex(
+        "0200000000000000 0200000000000000 0000000000000040 0000000000000000 0000000000000000 0000000000000000"
+    )
+    summary = spec.to_summary()
+    assert (
+        summary
+        == json.loads(json.dumps(summary, allow_nan=False))
+        == {
+            "shape": [2, 2],
+            "dtype": "float64",
+            "kind": "coefficient_difference",
+            "order": 1,
+            "axis": ["age"],
+            "coordinate_system": "output_coefficients",
+            "coefficient_names": ["age_0", "age_1"],
+            "coefficient_indices": [2, 3],
+            "rank": 1,
+            "nullity": 1,
+            "atol": 1e-10,
+            "rtol": 1e-10,
+            "provenance": {"options": [{"bias": False}], "note": None},
+            "matrix_sha256": sha256(canonical).hexdigest(),
+        }
+    )
+
+
+@pytest.mark.parametrize("dtype", ["<f8", ">f8"])
+@pytest.mark.parametrize("layout", ["C", "F", "strided"])
+def test_penalty_summary_checksum_is_independent_of_input_byte_order_and_layout(dtype, layout):
+    values = [[2.0, -0.5], [np.nextafter(-0.5, 0), 1.0]]
+    if layout == "strided":
+        matrix = np.zeros((4, 4), dtype=dtype)[::2, ::2]
+        matrix[:] = values
+    else:
+        matrix = np.array(values, dtype=dtype, order=layout)
+    canonical = pack("<QQ4d", 2, 2, *values[0], *values[1])
+    spec = _spec(matrix)
+    assert spec.to_summary()["matrix_sha256"] == sha256(canonical).hexdigest()
+    assert spec.to_summary()["matrix_sha256"] != _spec(matrix.T).to_summary()["matrix_sha256"]
+
+
+def test_penalty_summary_normalizes_only_signed_zero_without_changing_storage():
+    signed = _spec([[1.0, -0.0], [-0.0, 0.0]])
+    unsigned = _spec([[1.0, 0.0], [0.0, 0.0]])
+    near = _spec([[np.nextafter(1.0, 2.0), 0.0], [0.0, 0.0]])
+    assert signed.to_summary() == unsigned.to_summary()
+    assert np.signbit(signed.matrix[0, 1])
+    assert (near.rank, near.nullity) == (signed.rank, signed.nullity)
+    assert near.to_summary()["matrix_sha256"] != signed.to_summary()["matrix_sha256"]
+
+
+def test_penalty_summary_is_detached_and_checksum_only_identifies_the_matrix():
+    spec = _spec(np.eye(2), kind="quadratic_form", order=None, provenance={"options": [{"bias": False}]})
+    expected = spec.to_summary()
+    summary = spec.to_summary()
+    summary["shape"].clear()
+    summary["axis"].append("other")
+    summary["coefficient_names"][0] = "other"
+    summary["coefficient_indices"].reverse()
+    summary["provenance"]["options"][0]["bias"] = True
+
+    assert spec.to_summary() == expected
+    assert expected["order"] is None
+    assert expected["matrix_sha256"] == _spec(np.eye(2), atol=0, rtol=0).to_summary()["matrix_sha256"]
 
 
 def test_penalty_is_detached_immutable_and_has_derived_rank():
@@ -65,6 +136,7 @@ def test_restored_values_retain_immutable_storage(restore):
     spec = _spec(np.eye(2), provenance={"axes": ["age"], "options": {"bias": False}})
     restored = restore(spec)
     assert restored == spec
+    assert restored.to_summary() == spec.to_summary()
     assert restored != _spec(np.eye(2))
     with pytest.raises(ValueError):
         restored.matrix.setflags(write=True)
