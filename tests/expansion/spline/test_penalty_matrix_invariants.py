@@ -82,6 +82,8 @@ def test_tensor_product_penalty_is_symmetric_psd(X_multi):
 def test_thinplate_penalty_is_symmetric_but_not_guaranteed_psd():
     X = np.linspace(0, 1, 40).reshape(-1, 1)
     transformer = ThinPlateSplineTransformer(n_components=6, random_state=0).fit(X)
+    assert not hasattr(transformer, "get_penalty_spec")
+    assert not hasattr(transformer, "get_penalty_specs")
     with pytest.warns(ConfigWarning, match="experimental"):
         P = transformer.get_penalty_matrix()
     # PSD is explicitly not guaranteed here (see the class docstring); only symmetry is.

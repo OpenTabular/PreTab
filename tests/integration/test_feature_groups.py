@@ -12,7 +12,9 @@ from sklearn.base import clone
 from sklearn.pipeline import Pipeline
 
 from pretab import FeatureGroup, FrozenRepresentationError, OutputBudgetError, Preprocessor, RepresentationConfig
+from pretab.compose.inspection import representation_leaf
 from pretab.exceptions import DataWarning, PretabDataError
+from pretab.transformers import TensorProductSplineTransformer
 
 
 @pytest.fixture
@@ -56,6 +58,33 @@ def _groups(typed, reverse=False):
 def _dense(output):
     assert not isinstance(output, dict)
     return output.toarray() if sparse.issparse(output) else np.asarray(output)
+
+
+@pytest.mark.parametrize("columns", [("north", "east"), ("east", "north"), (20, 10)])
+def test_grouped_tensor_typed_penalties_follow_fitted_sources_and_exclude_indicators(frame, columns):
+    data = frame[["east", "north", "single"]].copy()
+    data.loc[0, "east"] = np.nan
+    data.loc[1, "north"] = np.nan
+    if isinstance(columns[0], int):
+        data = data.rename(columns={"north": 20, "east": 10})
+    groups = {"location": {"columns": list(columns), "representation": _representation("tensorspline")}}
+    processor = _processor(groups).fit(data)
+    restored = Preprocessor.from_spec(json.loads(json.dumps(processor.to_spec(), allow_nan=False)))
+    expected = None
+    for fitted in (processor, restored):
+        leaf = representation_leaf(fitted.column_transformer_.named_transformers_["group_location"])
+        assert isinstance(leaf, TensorProductSplineTransformer)
+        specs = leaf.get_penalty_specs()
+        assert [spec.axis for spec in specs] == [(str(column),) for column in columns]
+        assert all(spec.coefficient_names == tuple(leaf.get_feature_names_out()) for spec in specs)
+        assert all(spec.coefficient_indices == tuple(range(9)) and spec.matrix.shape == (9, 9) for spec in specs)
+        blocks = fitted.transform(data, return_array=False)
+        assert isinstance(blocks, dict)
+        assert blocks["group_location"].shape[1] == 11
+        assert blocks["num_single"].shape[1] == 2
+        if expected is not None:
+            assert specs == expected
+        expected = specs
 
 
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])

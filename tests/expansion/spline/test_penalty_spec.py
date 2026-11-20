@@ -18,6 +18,7 @@ from pretab.transformers import (
     MSplineTransformer,
     NaturalCubicSplineTransformer,
     PSplineTransformer,
+    TensorProductSplineTransformer,
 )
 
 
@@ -440,3 +441,66 @@ def test_bspline_typed_difference_penalty_invariant_to_input_rescaling(order, in
     coefficients = np.arange(6 + int(include_bias), dtype=float) ** 2
     energy = np.sum(np.diff(coefficients[int(include_bias) :], n=order) ** 2)
     assert coefficients @ penalty.matrix @ coefficients == energy
+
+
+@pytest.mark.parametrize("axes", [("north", "east"), ("depth", "north", "east")])
+@pytest.mark.parametrize("include_bias", [False, True])
+@pytest.mark.parametrize("order", [1, 2])
+def test_tensor_typed_penalties_match_joint_directions(axes, include_bias, order):
+    source = np.linspace(0, 1, 31)
+    frame = pd.DataFrame({axis: source**power for power, axis in enumerate(axes, 1)})
+    spline = TensorProductSplineTransformer(output_dim=3, degree=2, include_bias=include_bias, diff_order=order).fit(
+        frame
+    )
+    specs = spline.get_penalty_specs()
+    legacy = spline.get_penalty_matrices()
+    bias = int(include_bias)
+    width = 3 + bias
+    sizes = (width,) * len(axes)
+    coefficients = np.random.default_rng(42).normal(size=sizes)
+    vector = coefficients.ravel()
+    names = tuple(
+        "tp_" + "_".join(f"{axis}{index}" for axis, index in zip(axes, indices, strict=True))
+        for indices in np.ndindex(*sizes)
+    )
+    assert tuple(spline.get_feature_names_out()) == names
+    assert spline.transform(frame).shape[1] == len(names)
+    assert isinstance(specs, tuple)
+    assert [spec.axis for spec in specs] == [(axis,) for axis in axes]
+    for direction, (spec, matrix) in enumerate(zip(specs, legacy, strict=True)):
+        np.testing.assert_array_equal(spec.matrix, matrix)
+        assert not spec.matrix.flags.writeable
+        assert (spec.kind, spec.order, spec.coordinate_system) == (
+            "coefficient_difference",
+            order,
+            "output_coefficients",
+        )
+        assert spec.coefficient_indices == tuple(range(len(names)))
+        assert spec.coefficient_names == names
+        assert spec.provenance["marginal_sizes"] == sizes
+        assert spec.provenance["include_bias"] is include_bias
+        assert spline.get_penalty_matrix(direction).shape == (width, width)
+        direction_coefficients = np.moveaxis(coefficients, direction, 0)[bias:]
+        energy = np.sum(np.diff(direction_coefficients, n=order, axis=0) ** 2)
+        assert vector @ spec.matrix @ vector == pytest.approx(energy)
+        repeats = width ** (len(axes) - 1)
+        assert (spec.rank, spec.nullity) == ((3 - order) * repeats, (order + bias) * repeats)
+
+
+def test_tensor_typed_penalties_use_fit_settings_and_refuse_missing_metadata():
+    spline = TensorProductSplineTransformer(diff_order=1)
+    with pytest.raises(PretabNotFittedError, match="must be fitted"):
+        spline.get_penalty_specs()
+    spline.fit(np.arange(32).reshape(-1, 2))
+    expected = spline.get_penalty_specs()
+    assert [spec.axis for spec in expected] == [("x0",), ("x1",)]
+    spline.set_params(diff_order=2)
+    assert spline.get_penalty_specs() == expected
+    spline.set_params(include_bias=True)
+    with pytest.raises(InvalidParamError, match="refit after changing"):
+        spline.get_penalty_specs()
+    spline.set_params(include_bias=False)
+    del spline._penalty_fit_
+    with pytest.raises(InvalidParamError, match="refit to record"):
+        spline.get_penalty_specs()
+    np.testing.assert_array_equal(spline.get_penalty_matrices()[0], expected[0].matrix)

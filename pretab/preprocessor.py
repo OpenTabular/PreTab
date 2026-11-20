@@ -63,6 +63,7 @@ from .exceptions import (
     PretabSerializationError,
     invalid_param_error,
 )
+from .expansion.spline.multivariate.tensor_product import TensorProductSplineTransformer
 
 logger = get_logger(__name__)
 
@@ -747,6 +748,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             del self.feature_names_in_
 
         self._enforce_output_budget(X.shape[0])
+
+        if config.feature_groups:
+            for block in _iter_fitted_blocks(self.column_transformer_):
+                if block.group_id is not None:
+                    leaf = representation_leaf(block.transformer)
+                    if isinstance(leaf, TensorProductSplineTransformer):
+                        leaf._penalty_source_axes_ = tuple(block.columns)
 
         if verbose >= 1:
             numerical_summary = _method_summary(numerical_features, is_numerical=True, config=config)
