@@ -79,6 +79,11 @@ def isolate_document_state(tmp_path, monkeypatch):
             "Grouped preprocessing with Preprocessor",
             id="feature-groups",
         ),
+        pytest.param(
+            ROOT / "docs" / "representations" / "spline_expansions.md",
+            "Typed spline penalties",
+            id="spline-penalties",
+        ),
     ],
 )
 @pytest.mark.filterwarnings("ignore::pretab.exceptions.LeakageWarning")

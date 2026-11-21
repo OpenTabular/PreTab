@@ -79,6 +79,30 @@ def test_tensor_product_penalty_is_symmetric_psd(X_multi):
         assert_valid_penalty(P)
 
 
+@pytest.mark.parametrize("include_bias", [False, True])
+@pytest.mark.parametrize("first_weight", [0.0, 3.0])
+def test_weighted_typed_tensor_penalties_match_small_joint_reference(X_multi, include_bias, first_weight):
+    transformer = TensorProductSplineTransformer(output_dim=3, degree=2, diff_order=2, include_bias=include_bias).fit(
+        X_multi
+    )
+    first, second = transformer.get_penalty_specs()
+    combined = first_weight * first.matrix + 2.0 * second.matrix
+
+    difference = np.array([1.0, -2.0, 1.0])
+    if include_bias:
+        difference = np.pad(difference, (1, 0))
+    marginal = np.outer(difference, difference)
+    width = difference.size
+    identity = np.eye(width)
+    expected = first_weight * np.kron(marginal, identity) + 2.0 * np.kron(identity, marginal)
+    np.testing.assert_array_equal(combined, expected)
+    assert_valid_penalty(combined)
+
+    marginal_nullity = width - 1
+    first_nullity = marginal_nullity if first_weight > 0 else width
+    assert np.linalg.matrix_rank(combined) == width**2 - first_nullity * marginal_nullity
+
+
 def test_thinplate_penalty_is_symmetric_but_not_guaranteed_psd():
     X = np.linspace(0, 1, 40).reshape(-1, 1)
     transformer = ThinPlateSplineTransformer(n_components=6, random_state=0).fit(X)
