@@ -384,17 +384,36 @@ def test_search_converts_a_polars_frame_once(frames_with_one_null_integer):
     """Rows of a fold without the null would convert to an int column and be
     detected as categorical, unlike the refit on the whole frame."""
     from sklearn.linear_model import Ridge
-    from sklearn.model_selection import KFold
+    from sklearn.model_selection import GroupKFold
 
     from pretab import RepresentationSearchCV
 
     pandas_frame, polars_frame, y = frames_with_one_null_integer
+    groups = np.arange(len(y)) // 10
+    weights = np.linspace(0.25, 2.0, len(y))
+    cv = GroupKFold(n_splits=5)
 
     def search(X):
-        params = {"cv": KFold(5, shuffle=True, random_state=0), "random_state": 0}
-        return RepresentationSearchCV(Ridge(), ["minmax"], **params).fit(X, y)
+        searcher = RepresentationSearchCV(Ridge(), ["minmax"], random_state=0)
+        searcher.set_params(cv=cv)
+        return searcher.fit(X, y, groups=groups, sample_weight=weights)
 
-    assert search(polars_frame).cv_results_ == pytest.approx(search(pandas_frame).cv_results_)
+    from_pandas, from_polars = search(pandas_frame), search(polars_frame)
+    scores = []
+    for train, held_out in cv.split(pandas_frame, y, groups):
+        pre = Preprocessor(numerical_method="minmax", random_state=0)
+        training = pre.fit_transform(pandas_frame.iloc[train], y[train], return_array=True)
+        validation = pre.transform(pandas_frame.iloc[held_out], return_array=True)
+        model = Ridge().fit(training, y[train], sample_weight=weights[train])
+        scores.append(model.score(validation, y[held_out]))
+    expected_scores = {"minmax": float(np.mean(scores))}
+    assert from_polars.cv_results_ == pytest.approx(expected_scores)
+    assert from_pandas.cv_results_ == pytest.approx(expected_scores)
+    np.testing.assert_array_equal(from_polars.feature_names_in_, ["x", "kids"])
+    full = from_pandas.best_preprocessor_.transform(pandas_frame, return_array=True)
+    expected = Ridge().fit(full, y, sample_weight=weights).predict(full)
+    reordered = polars_frame.reverse().select(polars_frame.columns[::-1])
+    np.testing.assert_allclose(from_polars.predict(reordered), expected[::-1])
 
 
 @pytest.mark.parametrize("method", ["minmax", "ple", "bspline"])
@@ -436,14 +455,18 @@ def test_cross_fitting_converts_a_polars_frame_once(frames_with_one_null_integer
     from_pandas, expected = cross_fit(pandas_frame)
     from_polars, actual = cross_fit(polars_frame)
     np.testing.assert_allclose(actual, expected)
-    np.testing.assert_allclose(from_polars.transform(polars_frame), from_pandas.transform(pandas_frame))
+    reordered = polars_frame.reverse().select(polars_frame.columns[::-1])
+    np.testing.assert_allclose(from_polars.transform(reordered), np.asarray(from_pandas.transform(pandas_frame))[::-1])
     np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
     assert from_polars.get_representation_spec().input_features == ("x", "kids")
 
 
 @pytest.mark.parametrize("method", ["ple", "bspline", "rbf"])
 @pytest.mark.parametrize("policy", ["impute_with_indicator", "separate_state"])
-def test_cross_fitting_keeps_single_missing_value_indicators_for_polars(method, policy):
+@pytest.mark.parametrize("container", ["dense", "sparse", "auto", "pandas", "polars"])
+def test_cross_fitting_keeps_single_missing_value_indicators_for_polars(method, policy, container):
+    from scipy import sparse
+
     from pretab import CrossFittedTransformer
 
     rng = np.random.default_rng(0)
@@ -454,17 +477,44 @@ def test_cross_fitting_keeps_single_missing_value_indicators_for_polars(method, 
     y = rng.normal(size=len(X))
 
     def cross_fit(frame):
-        wrapped = CrossFittedTransformer(
-            Preprocessor(numerical_method=method, missing_policy=policy, output_format="dense", random_state=0),
-            n_folds=5,
+        pre = Preprocessor(
+            numerical_method=method,
+            missing_policy=policy,
+            output_format=container if container in ("sparse", "auto") else "dense",
             random_state=0,
         )
+        if container in ("pandas", "polars"):
+            pre.set_output(transform=container)
+        wrapped = CrossFittedTransformer(pre, n_folds=5, random_state=0)
         return wrapped, wrapped.fit_transform(frame, y)
 
-    reference, expected = cross_fit(pandas_frame)
-    wrapped, actual = cross_fit(polars_frame)
-    assert actual.shape == wrapped.transform(polars_frame).shape == (len(X), 8)
-    np.testing.assert_allclose(actual, expected)
-    np.testing.assert_array_equal(actual[:, -1], np.isnan(X).astype(float))
-    np.testing.assert_array_equal(wrapped.get_feature_names_out(), reference.get_feature_names_out())
+    reference, expected_oof = cross_fit(pandas_frame)
+    wrapped, oof = cross_fit(polars_frame)
+    expected_full = reference.transform(pandas_frame)
+    full = wrapped.transform(polars_frame.reverse())
+    assert type(oof) is type(full) is type(expected_oof) is type(expected_full)
+    names = list(wrapped.get_feature_names_out())
+    np.testing.assert_array_equal(names, reference.get_feature_names_out())
+
+    def values(result):
+        if container in ("pandas", "polars"):
+            assert isinstance(result, pd.DataFrame if container == "pandas" else pl.DataFrame)
+            assert isinstance(result, _NamedFrame)
+            assert list(result.columns) == names
+            if isinstance(result, pd.DataFrame):
+                pd.testing.assert_index_equal(result.index, pd.RangeIndex(len(X)))
+        elif container == "sparse" or sparse.issparse(result):
+            assert container in ("sparse", "auto")
+            assert isinstance(result, sparse.csr_matrix)
+            return result.toarray()
+        else:
+            assert isinstance(result, np.ndarray)
+        return np.asarray(result)
+
+    actual_oof, actual_full = values(oof), values(full)
+    assert actual_oof.shape == actual_full.shape == (len(X), 8)
+    np.testing.assert_allclose(actual_oof, values(expected_oof))
+    np.testing.assert_allclose(actual_full, values(expected_full)[::-1])
+    np.testing.assert_array_equal(actual_oof[:, -1], np.isnan(X))
+    np.testing.assert_array_equal(actual_full[:, -1], np.isnan(X)[::-1])
     assert polars_frame.null_count()["x"][0] == 1
