@@ -34,7 +34,7 @@ from ..exceptions import (
 from ._typing import TransformerLike
 from .parameters import validate_task
 from .representation import RepresentationSpecMixin
-from .validation import is_polars_frame, polars_to_pandas
+from .validation import _validate_task_validation, is_polars_frame, polars_to_pandas
 
 __all__ = ["CrossFittedTransformer", "in_controlled_context", "warn_target_leakage"]
 
@@ -194,12 +194,19 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
 
     _representation_supervision = "supervised"
 
-    def __init__(self, transformer, n_folds=5, task="regression", shuffle=True, random_state=None):
+    def __init__(
+        self, transformer, n_folds=5, task="regression", shuffle=True, random_state=None, *, task_validation="off"
+    ):
         self.transformer = transformer
         self.n_folds = n_folds
         self.task = task
         self.shuffle = shuffle
         self.random_state = random_state
+        self.task_validation = task_validation
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        self.__dict__.setdefault("task_validation", "off")
 
     def _make_splitter(self):
         """Return the cross-fitting splitter for the configured task."""
@@ -215,6 +222,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         if not isinstance(self.n_folds, (int, np.integer)) or self.n_folds < 2:
             raise InvalidParamError(f"n_folds must be an integer >= 2; got {self.n_folds!r}.")
         validate_task(self.task, type(self).__name__)
+        _validate_task_validation(self.task_validation, type(self).__name__)
         X_arr = _as_2d(X)
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):

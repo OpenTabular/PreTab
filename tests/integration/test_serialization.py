@@ -43,26 +43,43 @@ def target():
 
 
 @pytest.mark.parametrize("restore_format", ["pickle", "spec"])
-def test_legacy_state_without_groups_restores_the_constructor_default(frame, restore_format):
+def test_legacy_state_restores_constructor_defaults(frame, restore_format):
     processor = Preprocessor(numerical_method="rbf", target_aware=False, placement_strategy="uniform").fit(frame)
     expected = processor.transform(frame)
     fingerprint = processor.fingerprint_
     if restore_format == "pickle":
         del processor.feature_groups
+        del processor.task_validation
         restored = pickle.loads(pickle.dumps(processor))  # noqa: S301
     else:
         spec = processor.to_spec()
         del spec["state"]["feature_groups"]
         del spec["params"]["feature_groups"]
+        del spec["state"]["task_validation"]
+        del spec["params"]["task_validation"]
         restored = Preprocessor.from_spec(spec)
 
     assert restored.get_params(deep=False)["feature_groups"] is None
+    assert restored.get_params(deep=False)["task_validation"] == "off"
     assert restored.get_resolved_config()["feature_groups"] is None
+    assert restored.get_resolved_config()["task_validation"] == "off"
     assert restored.fingerprint_ == fingerprint
     np.testing.assert_array_equal(restored.transform(frame), expected)
     copied = clone(restored)
     assert isinstance(copied, Preprocessor)
     assert copied.feature_groups is None
+    assert copied.task_validation == "off"
+
+
+def test_spec_preserves_nondefault_task_validation(frame):
+    processor = Preprocessor(numerical_method="minmax", task_validation="raise").fit(frame)
+    expected = processor.transform(frame)
+    spec = processor.to_spec()
+    assert spec["params"]["task_validation"] == "raise"
+    restored = Preprocessor.from_spec(spec)
+    assert restored.get_resolved_config()["task_validation"] == "raise"
+    assert restored.fingerprint_ == processor.fingerprint_
+    np.testing.assert_array_equal(restored.transform(frame), expected)
 
 
 # Representation configs that round-trip; each is (params, id).

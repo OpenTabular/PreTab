@@ -129,11 +129,24 @@ def test_predict_before_fit_raises(nonlinear_data):
 def test_get_params_and_clone_preserve_config():
     from sklearn.base import clone
 
-    search = RepresentationSearchCV(LinearRegression(), methods=["bspline", "standardization"], cv=3)
+    search = RepresentationSearchCV(
+        LinearRegression(), methods=["bspline", "standardization"], cv=3, task_validation="warn"
+    )
     assert search.get_params()["methods"] == ["bspline", "standardization"]
     cloned = clone(search)
     assert isinstance(cloned, RepresentationSearchCV)
     assert cloned.get_params()["cv"] == 3
+    assert cloned.get_params()["task_validation"] == "warn"
+    cloned.set_params(task_validation="raise")
+    assert cloned.get_params()["task_validation"] == "raise"
+
+
+def test_invalid_search_task_validation_rejected(nonlinear_data):
+    X, y = nonlinear_data
+    search = RepresentationSearchCV(LinearRegression(), methods=["bspline"], task_validation="WARN")
+    assert search.get_params()["task_validation"] == "WARN"
+    with pytest.raises(InvalidParamError, match=r"RepresentationSearchCV\.task_validation"):
+        search.fit(X, y)
 
 
 class _RowRecorder(RegressorMixin, BaseEstimator):
@@ -378,9 +391,15 @@ def test_classifier_search_places_against_class_labels(class_data):
 def test_classifier_search_keeps_an_explicit_task(class_data):
     X, y = class_data
     search = RepresentationSearchCV(
-        LogisticRegression(), methods=["minmax"], cv=3, preprocessor_params={"task": "regression"}
+        LogisticRegression(),
+        methods=["minmax"],
+        cv=3,
+        preprocessor_params={"task": "regression", "task_validation": "warn"},
+        task_validation="raise",
     ).fit(X, (y == "pos").astype(int))
     assert search.best_preprocessor_.task == "regression"
+    assert search.best_preprocessor_.task_validation == "warn"
+    assert search.task_validation == "raise"
 
 
 def test_regressor_search_keeps_the_regression_task(nonlinear_data):

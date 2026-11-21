@@ -62,6 +62,7 @@ def test_resolved_config_matches_inline_preset_contract(task, preset, overrides)
         "dtype": None,
         "verbose": 0,
         "feature_groups": None,
+        "task_validation": "off",
         **overrides,
     }
 
@@ -209,14 +210,13 @@ def test_invalid_group_declarations_raise_contextual_errors(make_config, request
         make_config(feature_groups=requested)
 
 
-def test_group_parameter_is_last_keyword_only_and_remains_raw_for_sklearn():
+def test_group_parameter_is_keyword_only_and_remains_raw_for_sklearn():
     declarations = {
         "location": {"columns": [1, "latitude"], "representation": {"method": "thinplate", "n_components": 4}}
     }
     processor = Preprocessor(feature_groups=declarations, random_state=17)
     parameters = inspect.signature(Preprocessor).parameters
 
-    assert list(parameters)[-1] == "feature_groups"
     assert parameters["feature_groups"].kind is inspect.Parameter.KEYWORD_ONLY
     assert parameters["feature_groups"].default is None
     assert processor.get_params(deep=False)["feature_groups"] is declarations

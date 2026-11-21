@@ -81,6 +81,12 @@ def single_target(y, estimator: str, *, fix: str | None = None) -> np.ndarray:
     return y.ravel()
 
 
+def _validate_task_validation(mode: object, estimator: str) -> None:
+    """Validate the requested consistency policy without normalizing it."""
+    if not isinstance(mode, str) or mode not in ("off", "warn", "raise"):
+        raise invalid_param_error(estimator, "task_validation", mode, "must be 'off', 'warn', or 'raise'")
+
+
 def _validate_task_target(
     y: object,
     *,

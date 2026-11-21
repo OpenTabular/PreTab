@@ -52,6 +52,7 @@ from .core._typing import TransformerLike
 from .core.logging import configure_logging, get_logger
 from .core.parameters import UNSET, validate_task
 from .core.policy import RepresentationPolicy, apply_constant_policy
+from .core.validation import _validate_task_validation
 from .exceptions import (
     ConfigWarning,
     DataWarning,
@@ -511,6 +512,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         preset=None,
         *,
         feature_groups=None,
+        task_validation="off",
     ):
         """
         Initialize the Preprocessor with various transformation options for tabular data.
@@ -549,11 +551,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.verbose = verbose
         self.preset = preset
         self.feature_groups = feature_groups
+        self.task_validation = task_validation
 
     def __setstate__(self, state):
         super().__setstate__(state)
         if not hasattr(self, "feature_groups"):
             self.feature_groups = None
+        self.__dict__.setdefault("task_validation", "off")
         _repair_legacy_sparse_feature_counts(self)
 
     def fit(self, X, y=None, embeddings=None):
@@ -907,6 +911,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
         params = self.get_params(deep=False)
         preset = params.pop("preset", None)
+        _validate_task_validation(params["task_validation"], type(self).__name__)
         resolved = {key: (_PRESET_PARAM_DEFAULTS[key] if value is UNSET else value) for key, value in params.items()}
         validate_task(resolved["task"], type(self).__name__)
         if preset is None:
@@ -950,7 +955,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Raises
         ------
         InvalidParamError
-            If ``task``, ``preset``, or a declared representation is invalid.
+            If ``task``, ``task_validation``, ``preset``, or a declared representation is invalid.
         """
         resolved = self._resolved_params()
         if resolved["feature_preprocessing"] or resolved["feature_groups"] is not None:
@@ -1548,6 +1553,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         }
         if not getattr(self, "feature_groups", None):
             state.pop("feature_groups", None)
+        if state.get("task_validation") == "off":
+            state.pop("task_validation")
         return {
             "schema_version": spec["schema_version"],
             "pretab_version": spec["pretab_version"],

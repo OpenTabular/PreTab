@@ -21,7 +21,7 @@ from sklearn.utils.metaestimators import available_if
 from sklearn.utils.validation import _check_method_params, check_is_fitted
 
 from ..core._typing import PredictorLike
-from ..core.validation import is_polars_frame, polars_to_pandas
+from ..core.validation import _validate_task_validation, is_polars_frame, polars_to_pandas
 from ..exceptions import InvalidParamError
 from ..preprocessor import Preprocessor
 
@@ -101,13 +101,28 @@ class RepresentationSearchCV(BaseEstimator):
         string column names.
     """
 
-    def __init__(self, estimator, methods, *, cv=5, scoring=None, preprocessor_params=None, random_state=None):
+    def __init__(
+        self,
+        estimator,
+        methods,
+        *,
+        cv=5,
+        scoring=None,
+        preprocessor_params=None,
+        random_state=None,
+        task_validation="off",
+    ):
         self.estimator = estimator
         self.methods = methods
         self.cv = cv
         self.scoring = scoring
         self.preprocessor_params = preprocessor_params
         self.random_state = random_state
+        self.task_validation = task_validation
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        self.__dict__.setdefault("task_validation", "off")
 
     def _make_preprocessor(self, method):
         """Build a Preprocessor for ``method`` with the shared parameters.
@@ -157,6 +172,7 @@ class RepresentationSearchCV(BaseEstimator):
             raise InvalidParamError("methods must be a non-empty sequence of numerical methods.")
         if y is None:
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
+        _validate_task_validation(self.task_validation, type(self).__name__)
         y_arr = np.asarray(y).ravel()
         if is_polars_frame(X):
             # Converted once, so every fold's rows carry the dtypes of the whole frame,

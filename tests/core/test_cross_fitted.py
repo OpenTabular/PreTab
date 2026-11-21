@@ -11,7 +11,7 @@ from typing import cast
 
 import numpy as np
 import pytest
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.model_selection import KFold, StratifiedKFold
 
 from pretab import CrossFittedTransformer, LeakageWarning
@@ -108,6 +108,26 @@ def test_invalid_task_rejected(data):
     X, y = data
     with pytest.raises(InvalidParamError, match="task"):
         CrossFittedTransformer(PLETransformer(), task="classificaton").fit_transform(X, y)
+
+
+@pytest.mark.parametrize("operation", ["fit", "fit_transform"])
+def test_invalid_task_validation_rejected(data, operation):
+    X, y = data
+    transformer = CrossFittedTransformer(PLETransformer(), task_validation="WARN")
+    assert transformer.get_params()["task_validation"] == "WARN"
+    with pytest.raises(InvalidParamError, match=r"CrossFittedTransformer\.task_validation"):
+        getattr(transformer, operation)(X, y)
+
+
+def test_cross_fit_task_validation_survives_clone_and_fit(data):
+    X, y = data
+    transformer = CrossFittedTransformer(PLETransformer(), 3, "regression", False, 0)
+    assert transformer.get_params(deep=False)["task_validation"] == "off"
+    transformer.set_params(task_validation="raise")
+    copied = clone(transformer)
+    assert isinstance(copied, CrossFittedTransformer)
+    copied.fit(X, y)
+    assert copied.get_params(deep=False) == transformer.get_params(deep=False) | {"transformer": copied.transformer}
 
 
 # --- fit_transform returns the kind of output transform returns (issue #90) ---------

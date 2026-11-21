@@ -8,6 +8,17 @@ from pretab.core import validation
 from pretab.exceptions import ConfigWarning, InvalidParamError
 
 
+@pytest.mark.parametrize("mode", ["off", "warn", "raise"])
+def test_task_validation_accepts_exact_modes(mode):
+    validation._validate_task_validation(mode, "Example")
+
+
+@pytest.mark.parametrize("mode", ["WARN", " off", "", None, True, False, 1, ["warn"], np.array(["warn"])])
+def test_task_validation_rejects_invalid_modes(mode):
+    with pytest.raises(InvalidParamError, match=r"(?s)Example\.task_validation.*'off', 'warn', or 'raise'"):
+        validation._validate_task_validation(mode, "Example")
+
+
 @pytest.mark.parametrize(
     ("target", "task", "observed", "suggested"),
     [

@@ -12,6 +12,7 @@ from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.utils.validation import check_is_fitted
 
 from pretab import RepresentationConfig
+from pretab.core.parameters import UNSET
 from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
 from pretab.expansion.functional.rbf import RBFExpansionTransformer
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
@@ -203,6 +204,7 @@ EXPECTED_PARAMS = {
     "verbose",
     "preset",
     "feature_groups",
+    "task_validation",
 }
 
 
@@ -225,10 +227,32 @@ def test_clone_preserves_every_param():
         adaptive=True,
         feature_preprocessing={"a": "pspline"},
         verbose=1,
+        task_validation="warn",
     )
     cloned = clone(pre)
     assert isinstance(cloned, Preprocessor)
     assert cloned.get_params() == pre.get_params()
+
+
+@pytest.mark.parametrize("mode", ["off", "warn", "raise"])
+def test_task_validation_resolves_after_set_params(mode):
+    processor = Preprocessor(task="classification")
+    assert processor.get_params(deep=False)["task_validation"] == "off"
+    processor.set_params(task_validation=mode)
+    resolved = processor.get_resolved_config()
+    assert resolved["task_validation"] == mode
+    assert resolved["task"] == "classification"
+
+
+@pytest.mark.parametrize("mode", [None, "WARN", UNSET])
+def test_invalid_facade_task_validation_rejected(sample_data, mode):
+    frame, target = sample_data
+    processor = Preprocessor(task_validation=mode)
+    assert processor.get_params(deep=False)["task_validation"] is mode
+    with pytest.raises(InvalidParamError, match=r"Preprocessor\.task_validation"):
+        processor.get_resolved_config()
+    with pytest.raises(InvalidParamError, match=r"Preprocessor\.task_validation"):
+        processor.fit(frame, target)
 
 
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
