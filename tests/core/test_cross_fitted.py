@@ -12,6 +12,7 @@ from typing import cast
 import numpy as np
 import pytest
 from sklearn.base import BaseEstimator, TransformerMixin, clone
+from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -184,6 +185,23 @@ def test_pipeline_placement_diagnostic_is_reused_by_cross_fit_folds(monkeypatch)
 
     assert result.shape == (len(target), 3)
     assert sum(item.category is ConfigWarning for item in recorded) == 1
+
+
+def test_pipeline_placement_strict_policy_rejects_before_representation_fit_or_folds(data, monkeypatch):
+    X, target = data
+    pipeline = make_pipeline(
+        StandardScaler(),
+        Preprocessor(numerical_method="rbf", task="classification", task_validation="raise"),
+    )
+    cross_fit = CrossFittedTransformer(pipeline, n_folds=3)
+
+    def reject_fit_or_split(*args, **kwargs):
+        pytest.fail("started representation fitting or fold splitting before validating the target")
+
+    monkeypatch.setattr(ColumnTransformer, "fit_transform", reject_fit_or_split)
+    monkeypatch.setattr(cross_fit, "_make_splitter", reject_fit_or_split)
+    with pytest.raises(InvalidParamError, match=r"(?s)Preprocessor\.task.*target-aware placement.*continuous"):
+        cross_fit.fit_transform(X, target)
 
 
 # --- fit_transform returns the kind of output transform returns (issue #90) ---------
