@@ -41,6 +41,7 @@ from ..placement.base import PlacementResult
 from ..preprocessing.floats import NoTransformer, ToFloatTransformer
 from .config import FeatureGroup, RepresentationConfig
 from .inspection import _iter_fitted_blocks, representation_leaf
+from .output import _require_polars
 from .registry import TransformerSpec
 
 SCHEMA_VERSION = 1
@@ -400,5 +401,8 @@ def preprocessor_from_spec(data: dict):
     obj.__dict__.update(_decode_mapping(data["state"]))
     obj.__dict__.setdefault("feature_groups", None)
     obj.__dict__.setdefault("task_validation", "off")
+    output_config = getattr(obj, "_sklearn_output_config", None)
+    if isinstance(output_config, dict) and output_config.get("transform") == "polars":
+        _require_polars()
     _repair_legacy_sparse_feature_counts(obj)
     return obj

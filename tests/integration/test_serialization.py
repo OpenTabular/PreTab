@@ -9,18 +9,20 @@ policy preservation, and the security allow-list that keeps loading a spec safe
 import json
 import math
 import pickle
+import sys
 from typing import cast
 
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn import config_context
 from sklearn.base import clone
 
 from pretab import Preprocessor, PretabSerializationError, RepresentationConfig, RepresentationPolicy
 from pretab.compose.registry import TransformerSpec
 from pretab.compose.serialize import SCHEMA_VERSION, _decode, _encode, _encode_mapping
 from pretab.core.parameters import UNSET
-from pretab.exceptions import InvalidParamError
+from pretab.exceptions import InvalidParamError, OptionalDependencyError
 from pretab.preprocessing.floats import NoTransformer, ToFloatTransformer
 
 
@@ -303,6 +305,51 @@ def test_round_trip_preserves_dtype_and_output_format(frame, target):
     assert out.dtype == np.float32
     assert restored.dtype == "float32"
     assert restored.output_format == "dense"
+
+
+@pytest.mark.parametrize("transform", [None, "default", "pandas"], ids=["unset", "default", "pandas"])
+def test_portable_spec_restores_without_polars(frame, monkeypatch, transform):
+    fitted = Preprocessor(numerical_method="minmax").fit(frame).set_output(transform=transform)
+    expected = fitted.transform(frame)
+    spec = fitted.to_spec()
+    with monkeypatch.context() as missing:
+        missing.setitem(sys.modules, "polars", None)
+        with config_context(transform_output="polars"):
+            restored = Preprocessor.from_spec(spec)
+
+    actual = restored.transform(frame)
+    assert type(actual) is type(expected)
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(restored.get_feature_names_out(), fitted.get_feature_names_out())
+
+
+@pytest.mark.parametrize("as_file", [False, True], ids=["dict", "file"])
+def test_spec_with_polars_output_requires_polars_at_restore(frame, monkeypatch, tmp_path, as_file):
+    fitted = Preprocessor(numerical_method="minmax").fit(frame).set_output(transform="polars")
+    path = tmp_path / "preprocessor.json"
+    spec = fitted.to_spec(path if as_file else None)
+    monkeypatch.setitem(sys.modules, "polars", None)
+
+    with pytest.raises(OptionalDependencyError, match=r"set_output.*requires.*polars.*pip install polars"):
+        Preprocessor.from_spec(path if as_file else spec)
+
+
+@pytest.mark.parametrize("transform", ["default", "polars"])
+def test_spec_round_trip_after_fit_on_polars(frame, monkeypatch, transform):
+    polars = pytest.importorskip("polars")
+    polars_frame = polars.DataFrame(frame.to_dict(orient="list"))
+    fitted = Preprocessor(numerical_method="minmax").fit(polars_frame).set_output(transform=transform)
+    expected = fitted.transform(frame)
+    spec = fitted.to_spec()
+    with monkeypatch.context() as missing:
+        if transform == "default":
+            missing.setitem(sys.modules, "polars", None)
+        restored = Preprocessor.from_spec(spec)
+
+    actual = restored.transform(frame)
+    assert isinstance(actual, polars.DataFrame if transform == "polars" else np.ndarray)
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(restored.get_feature_names_out(), fitted.get_feature_names_out())
 
 
 def test_round_trip_preserves_policy(frame, target):

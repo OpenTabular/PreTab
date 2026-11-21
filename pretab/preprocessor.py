@@ -1558,6 +1558,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Preprocessor
             A fitted preprocessor equivalent to the one that produced the spec;
             ``transform`` reproduces the original output bit-for-bit.
+
+        Raises
+        ------
+        OptionalDependencyError
+            If the spec explicitly requests Polars output and Polars is unavailable.
         """
         if isinstance(source, dict):
             data = source
