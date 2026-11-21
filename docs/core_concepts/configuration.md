@@ -23,6 +23,19 @@ pre = Preprocessor(
 The defaults are `numerical_method="ple"` and `categorical_method="int"`. The full list of
 strategy strings is in the [representation comparison](../representations/comparison_table.md).
 
+## Supported inputs
+
+| Input                              | Column matching                                             | Extra for input                                                             |
+| ---------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `pandas.DataFrame`                 | By column label                                             | None                                                                        |
+| `dict` of columns                  | By dictionary key                                           | None                                                                        |
+| 2D `numpy.ndarray` or list of rows | By position; names such as `feature_0` are generated at fit | None                                                                        |
+| Eager `polars.DataFrame`           | By column name                                              | [Polars extra](../getting_started/installation.md); PyArrow is not required |
+| `polars.LazyFrame`                 | Not supported; call `collect()` to get an eager frame       | Not applicable                                                              |
+
+Named inputs match by label after fitting on named data. When either training
+or inference uses a positional input, keep column order and width consistent.
+
 ## NumPy array input
 
 `Preprocessor` also accepts a plain `numpy.ndarray`, not just a `DataFrame`. Columns are
@@ -76,17 +89,53 @@ float, as in pandas), and `String` (`Utf8` on older Polars), `Categorical`, `Enu
 categorical. Polars nulls become missing values, so imputation and `missing_policy` treat them
 like `NaN` in a pandas frame. The conversion does not need `pyarrow`.
 
+### Check parity with pandas
+
+Build the equivalent Polars frame from a dictionary of lists rather than using
+`pl.from_pandas`, so the example works without PyArrow. The same configuration
+produces identical features for this data, even if you reorder named columns at transform time.
+
+```python
+import numpy as np
+import pandas as pd
+import polars as pl
+from pretab import Preprocessor
+
+X = pd.DataFrame({
+    "age": [25.0, None, 47.0, 33.0],
+    "city": ["Paris", "Rome", "Paris", "Rome"],
+    "active": [True, False, True, False],
+})
+X_polars = pl.DataFrame(X.to_dict(orient="list"))
+options = {
+    "numerical_method": "minmax",
+    "categorical_method": "one-hot",
+    "missing_policy": "impute_with_indicator",
+}
+from_pandas = Preprocessor(**options).fit(X)
+from_polars = Preprocessor(**options).fit(X_polars)
+
+np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
+np.testing.assert_array_equal(
+    from_polars.transform(X_polars.select("active", "city", "age")),
+    from_pandas.transform(X),
+)
+```
+
+### Pass Polars through a scikit-learn pipeline
+
 ```python
 import polars as pl
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from pretab import Preprocessor
 
 X = pl.DataFrame({"age": [25.0, None, 47.0, 33.0], "income": [3.1e4, 5.2e4, None, 4.4e4]})
 y = [0.0, 1.0, 1.0, 0.0]
 
 pipe = Pipeline([("impute", SimpleImputer()), ("pretab", Preprocessor(numerical_method="minmax"))])
 pipe.set_output(transform="polars")
-pipe.fit_transform(X, y)   # a polars.DataFrame with columns num_age, num_income
+assert isinstance(pipe.fit_transform(X, y), pl.DataFrame)
 ```
 
 ## Per-feature overrides

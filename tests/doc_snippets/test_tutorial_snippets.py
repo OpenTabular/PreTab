@@ -9,6 +9,7 @@ executed tutorial section without notebook-rendering dependencies in CI.
 
 import json
 import re
+from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,12 @@ def isolate_document_state(tmp_path, monkeypatch):
             ROOT / "docs" / "core_concepts" / "configuration.md",
             "Structured per-feature configuration",
             id="configuration",
+        ),
+        pytest.param(
+            ROOT / "docs" / "core_concepts" / "configuration.md",
+            "Polars DataFrame input",
+            id="polars-input",
+            marks=pytest.mark.skipif(find_spec("polars") is None, reason="polars is not installed"),
         ),
         pytest.param(
             ROOT / "docs" / "core_concepts" / "resolution_and_placement.md",
