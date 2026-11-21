@@ -12,9 +12,10 @@ from typing import Literal, cast
 
 import numpy as np
 import pandas as pd
+from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import _check_feature_names, _check_feature_names_in, check_array
 
-from ..exceptions import DataWarning, IncompatibleParamsError, PretabDataError, invalid_param_error
+from ..exceptions import ConfigWarning, DataWarning, IncompatibleParamsError, PretabDataError, invalid_param_error
 
 __all__ = ["is_polars_frame", "polars_to_pandas", "resolve_input_features", "single_target", "validate_2d_allow_nan"]
 
@@ -78,6 +79,70 @@ def single_target(y, estimator: str, *, fix: str | None = None) -> np.ndarray:
             f"{estimator} places locations against a single target, but y has shape {y.shape}.\nFix: {fix}"
         )
     return y.ravel()
+
+
+def _validate_task_target(
+    y: object,
+    *,
+    task: str,
+    mode: Literal["off", "warn", "raise"],
+    estimator: str,
+    role: str,
+) -> None:
+    """Diagnose clear mismatches for a validated task, mode and target-consuming role.
+
+    Inspect only supported single-output targets. The caller retains ownership
+    of target validation and passes the original target on to fitting.
+    """
+    if mode == "off" or not isinstance(y, (np.ndarray, pd.Series, pd.DataFrame, pd.Index, list, tuple)):
+        return
+    try:
+        values = np.asarray(y, dtype=object) if isinstance(y, (list, tuple)) else np.asarray(y)
+    except (TypeError, ValueError, OverflowError):
+        return
+    if (
+        values.size == 0
+        or values.ndim not in (1, 2)
+        or (values.ndim == 2 and values.shape[-1] != 1)
+        or values.dtype.kind not in "biufOU"
+        or pd.isna(values).any()
+    ):
+        return
+
+    text_labels = values.dtype.kind == "U" or (
+        values.dtype.kind == "O" and all(isinstance(value, str) for value in values.flat)
+    )
+    if values.dtype.kind == "O" and not text_labels:
+        if not all(isinstance(value, (bool, int, float, np.bool_, np.integer, np.floating)) for value in values.flat):
+            return
+        values = np.asarray(values.tolist())
+        if values.dtype.kind not in "biuf":
+            return
+    integer_limit = -int(np.iinfo(np.int64).min)
+    if values.dtype.kind == "f" and not (-integer_limit <= float(values.min()) and float(values.max()) < integer_limit):
+        return
+
+    try:
+        observed = type_of_target(y)
+    except (TypeError, ValueError, OverflowError):
+        return
+    if task == "classification" and observed == "continuous":
+        suggested = "regression"
+    elif task == "regression" and observed in ("binary", "multiclass") and text_labels:
+        try:
+            np.asarray(values, dtype=np.float64)
+        except ValueError:
+            suggested = "classification"
+        else:
+            return
+    else:
+        return
+
+    detail = f"{role} uses task={task!r}, but y has target type {observed!r}"
+    fix = f"use task={suggested!r} or set task_validation='off' if this is intentional"
+    if mode == "raise":
+        raise invalid_param_error(estimator, "task", task, f"{detail}; {fix}.")
+    warnings.warn(f"{estimator}: {detail}; {fix}.", ConfigWarning, stacklevel=2)
 
 
 def is_polars_frame(X) -> bool:
