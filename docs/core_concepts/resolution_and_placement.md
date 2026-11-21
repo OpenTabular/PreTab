@@ -116,6 +116,13 @@ switching to `target_aware=False` also means passing `placement_strategy="unifor
 Target-aware placement is a supervised decision and carries leakage considerations. See
 [Target awareness](target_awareness.md).
 
+```{note}
+Few distinct integer values do not make a target categorical. For example, daily order
+counts of `0`, `1`, and `2` can be regression outcomes, while the same values can label
+three classes. The task diagnostic leaves both interpretations open and never changes
+the configured task.
+```
+
 ## Resolution and placement are independent
 
 Keeping the two axes separate is what makes the system predictable. You choose a width

@@ -255,15 +255,46 @@ def test_invalid_facade_task_validation_rejected(sample_data, mode):
         processor.fit(frame, target)
 
 
-def test_task_diagnostic_requires_active_placement():
+@pytest.mark.parametrize(
+    ("task", "target", "target_type"),
+    [
+        ("classification", np.linspace(0, 1, 24), "continuous"),
+        ("regression", np.resize(["first", "second", "third"], 24), "multiclass"),
+    ],
+)
+def test_task_diagnostic_requires_active_placement(task, target, target_type):
     frame = pd.DataFrame({"value": np.linspace(0, 1, 24)})
-    target = frame["value"]
-    processor = Preprocessor(numerical_method="rbf", task="classification", task_validation="raise")
-    with pytest.raises(InvalidParamError, match=r"target-aware placement.*continuous"):
+    target = pd.Series(target)
+    processor = Preprocessor(numerical_method="rbf", task=task, task_validation="raise")
+    with pytest.raises(InvalidParamError, match=rf"target-aware placement.*task='{task}'.*'{target_type}'"):
         processor.fit(frame, target)
 
     processor.set_params(feature_preprocessing={"value": "minmax"})
     processor.fit(frame, target)
+
+
+@pytest.mark.parametrize(
+    ("task", "pattern"),
+    [
+        pytest.param("regression", [0, 1], id="binary-counts"),
+        pytest.param("regression", [0, 1, 2], id="multiclass-counts"),
+        pytest.param("regression", np.linspace(0.25, 1, 24), id="continuous"),
+        pytest.param("classification", ["first", "second"], id="binary-labels"),
+        pytest.param("classification", ["first", "second", "third"], id="multiclass-labels"),
+    ],
+)
+def test_task_diagnostic_preserves_valid_placement_outputs(task, pattern):
+    frame = pd.DataFrame({"value": np.linspace(0, 1, 24)})
+    target = pd.Series(np.resize(pattern, len(frame)))
+    strict = Preprocessor(numerical_method="rbf", task=task, task_validation="raise", output_dim=3, random_state=0)
+    baseline = clone(strict)
+    assert isinstance(baseline, Preprocessor)
+    baseline.set_params(task_validation="off")
+
+    np.testing.assert_array_equal(
+        strict.fit_transform(frame, target, return_array=True),
+        baseline.fit_transform(frame, target, return_array=True),
+    )
 
 
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
@@ -769,15 +800,25 @@ def test_transform_accepts_positional_input_of_the_fitted_width(as_list):
 
 
 @pytest.mark.parametrize("method", ["bspline", "mspline", "ispline", "pspline", "naturalspline", "rbf"])
-def test_unsupervised_numerical_method_accepts_a_multi_output_target(method):
+@pytest.mark.parametrize("task", ["regression", "classification"])
+def test_unsupervised_numerical_method_accepts_a_multi_output_target(method, task):
     """The B/M/I splines flattened y even when target_aware=False, so a 2-D target
     raised an IndexError in fit while the other methods ignored it."""
     rng = np.random.default_rng(0)
     frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
-    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
-    options = {"numerical_method": method, "target_aware": False, "placement_strategy": "uniform"}
+    if task == "classification":
+        targets = np.column_stack([frame["a"] > 0, frame["b"] > 0])
+    else:
+        targets = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+    options = {
+        "numerical_method": method,
+        "target_aware": False,
+        "placement_strategy": "uniform",
+        "task": task,
+    }
     reference = Preprocessor(**options).fit(frame).transform(frame)
-    np.testing.assert_array_equal(Preprocessor(**options).fit(frame, Y).transform(frame), reference)
+    strict = Preprocessor(**options).set_params(task_validation="raise")
+    np.testing.assert_array_equal(strict.fit(frame, targets).transform(frame), reference)
 
 
 @pytest.mark.parametrize("method", ["bspline", "mspline", "ispline"])
@@ -801,18 +842,20 @@ def test_multi_output_pipeline_imputes_before_unsupervised_spline(method):
 
 
 @pytest.mark.parametrize("method", ["bspline", "naturalspline", "rbf", "ple"])
-def test_target_aware_numerical_method_rejects_a_multi_output_target(method):
+@pytest.mark.parametrize("mode", ["off", "raise"])
+def test_target_aware_numerical_method_rejects_a_multi_output_target(method, mode):
     """Target-aware placement fits one model on one target. A 2-D target was
     flattened into twice as many values and failed with an unrelated IndexError /
     broadcasting error; it now raises a clear error pointing to target_aware=False."""
     rng = np.random.default_rng(0)
     frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
     Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+    processor = Preprocessor(numerical_method=method, task_validation=mode)
 
     with pytest.raises(IncompatibleParamsError, match=r"single target, but y has shape \(200, 2\)"):
-        Preprocessor(numerical_method=method).fit(frame, Y)
+        processor.fit(frame, Y)
     # A column vector is a single target.
-    Preprocessor(numerical_method=method).fit(frame, Y[:, :1])
+    processor.fit(frame, Y[:, :1])
 
 
 @pytest.mark.parametrize(
