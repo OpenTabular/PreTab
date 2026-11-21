@@ -75,6 +75,11 @@ def isolate_document_state(tmp_path, monkeypatch):
             id="configuration",
         ),
         pytest.param(
+            ROOT / "docs" / "core_concepts" / "resolution_and_placement.md",
+            "Choose a task and validate the target",
+            id="task-validation",
+        ),
+        pytest.param(
             TUTORIALS_DIR / "multivariate_features.md",
             "Grouped preprocessing with Preprocessor",
             id="feature-groups",

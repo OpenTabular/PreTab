@@ -13,6 +13,20 @@ configuration, and produces model-ready output with full lineage.
 
    Preprocessor
 
+Task and target validation
+--------------------------
+
+``task`` is ``"regression"`` by default. Set it to ``"classification"`` for class
+labels. ``task_validation`` is keyword-only: ``"off"`` (default) skips the
+consistency check, ``"warn"`` emits ``ConfigWarning``, and ``"raise"`` raises
+``InvalidParamError`` before fitting the representations.
+
+The check applies to supported single-output targets when a fitted representation
+uses ``y`` for placement. It does not infer the task, change the target, or extend
+the supported target shapes. Turning it off does not disable task-string validation
+or leakage warnings. See :doc:`../core_concepts/resolution_and_placement` for
+examples and the limits of the diagnostic.
+
 Representation values
 ---------------------
 

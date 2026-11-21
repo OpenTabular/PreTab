@@ -116,12 +116,83 @@ switching to `target_aware=False` also means passing `placement_strategy="unifor
 Target-aware placement is a supervised decision and carries leakage considerations. See
 [Target awareness](target_awareness.md).
 
-```{note}
-Few distinct integer values do not make a target categorical. For example, daily order
-counts of `0`, `1`, and `2` can be regression outcomes, while the same values can label
-three classes. The task diagnostic leaves both interpretations open and never changes
-the configured task.
+## Choose a task and validate the target
+
+Set `task="classification"` when `y` contains class labels, such as whether a home sold.
+Use `task="regression"` for numeric outcomes such as sale prices. `Preprocessor` defaults
+to regression and never infers the task from `y`.
+
+Use `task_validation` to catch a clear mismatch before fitting the target-aware representation:
+
+- `"off"` (default) skips the consistency check. Use it to preserve existing behavior or
+  silence this diagnostic for an intentional configuration.
+- `"warn"` emits a `ConfigWarning` and lets fitting proceed. The estimator may still reject
+  the target, and a Python warnings-as-errors filter can stop the fit at the warning.
+- `"raise"` stops the fit with `InvalidParamError`. Use it when a clear mismatch should
+  fail the pipeline.
+
+For example, a classifier for sale status should receive class labels, not sale prices:
+
+```python
+import numpy as np
+import pandas as pd
+
+from pretab import Preprocessor
+from pretab.exceptions import InvalidParamError
+
+homes = pd.DataFrame({"listing_views": np.arange(32)})
+sale_status = np.where(homes["listing_views"] >= 16, "sold", "not sold")
+sale_price = np.linspace(120_000.25, 450_000.75, len(homes))
+
+pre = Preprocessor(
+    numerical_method="rbf", output_dim=3, task="classification", task_validation="raise"
+)
+try:
+    pre.fit(homes, sale_price)
+except InvalidParamError as error:
+    assert "target type 'continuous'" in str(error)
+else:
+    raise AssertionError("Expected the classifier's continuous target to be rejected")
+
+pre.fit(homes, sale_status)
 ```
+
+The check also catches nonnumeric class labels used for target-aware regression. It does not
+apply to representations that ignore `y`. Missing, multilabel, and other multi-output targets
+are left to the usual input checks. Silence does not mean a target shape is supported.
+
+```{note}
+Few distinct integer values do not tell you which task to use. Daily order counts of `0`,
+`1`, and `2` can be regression outcomes, while the same values can label three classes.
+The diagnostic leaves both interpretations open. Numeric-looking strings can also be
+ambiguous. It does not rewrite `y` or the configured task.
+```
+
+`RepresentationSearchCV` defaults its preprocessing task to classification when the
+downstream estimator is a classifier and no `task` was passed in `preprocessor_params`.
+An explicitly supplied preprocessing task takes precedence. Set `task_validation` on
+the search and in `preprocessor_params` independently:
+
+```python
+from sklearn.linear_model import LogisticRegression
+
+from pretab import RepresentationSearchCV
+
+search = RepresentationSearchCV(
+    LogisticRegression(),
+    methods=["rbf"],
+    cv=3,
+    preprocessor_params={"output_dim": 3, "task_validation": "raise"},
+    task_validation="raise",
+).fit(homes, sale_status)
+assert search.best_preprocessor_.task == "classification"
+```
+
+`CrossFittedTransformer` also accepts `task_validation` for its own task, which determines
+the splitter. Turning the check off on a wrapper does not turn off its inner estimator's
+policy. It also does not disable task-string validation or leakage warnings. A consistency
+check answers whether the target fits the task; it does not prevent leakage. Use a pipeline
+or cross-fitting to keep target-aware preprocessing within the training data for each split.
 
 ## Resolution and placement are independent
 
