@@ -163,20 +163,26 @@ def test_search_preserves_inner_mode_validation(nonlinear_data):
         search.fit(X, y)
 
 
-def test_search_checks_later_candidate_before_cloning(nonlinear_data, monkeypatch):
+@pytest.mark.parametrize(
+    ("mode", "exception", "owner"),
+    [("raise", InvalidParamError, r"Preprocessor\.task"), ("warn", ConfigWarning, "Preprocessor:")],
+)
+def test_search_checks_later_candidate_before_cloning(nonlinear_data, monkeypatch, mode, exception, owner):
     X, y = nonlinear_data
     search = RepresentationSearchCV(
         LinearRegression(),
         methods=["minmax", "rbf"],
-        preprocessor_params={"task": "classification", "task_validation": "raise"},
+        preprocessor_params={"task": "classification", "task_validation": mode},
     )
 
     def reject_clone(*args, **kwargs):
         pytest.fail("cloned before checking the later candidate")
 
     monkeypatch.setattr("pretab.compose.search.clone", reject_clone)
-    with pytest.raises(InvalidParamError, match=r"(?s)Preprocessor\.task.*target-aware placement.*continuous"):
-        search.fit(X, pd.Series(y))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ConfigWarning)
+        with pytest.raises(exception, match=rf"(?s){owner}.*target-aware placement.*continuous"):
+            search.fit(X, pd.Series(y))
 
 
 def test_search_checks_outer_classification_before_splitting(nonlinear_data):
@@ -481,11 +487,19 @@ def test_refit_replaces_named_input_metadata(nonlinear_data, class_data, frame_t
         np.testing.assert_allclose(search.predict(renamed), fresh.predict(renamed))
 
 
-def test_classifier_search_places_against_class_labels(class_data):
+@pytest.mark.parametrize("mode", ["off", "warn", "raise"])
+def test_classifier_search_places_against_class_labels(class_data, mode):
     """A classifier made the search keep task="regression": string labels crashed the
     target-aware placement and integer labels were treated as a regression target."""
     X, y = class_data
-    search = RepresentationSearchCV(LogisticRegression(), methods=["minmax", "ple"], cv=3, random_state=0).fit(X, y)
+    search = RepresentationSearchCV(
+        LogisticRegression(),
+        methods=["minmax", "ple"],
+        cv=3,
+        random_state=0,
+        preprocessor_params={"task_validation": mode},
+        task_validation=mode,
+    ).fit(X, y)
     assert search.best_preprocessor_.task == "classification"
     assert set(search.predict(X)) <= {"pos", "neg"}
 

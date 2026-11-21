@@ -1,5 +1,7 @@
 """Contracts for shared target inspection, independent of estimator wiring."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -20,21 +22,55 @@ def test_task_validation_rejects_invalid_modes(mode):
 
 
 @pytest.mark.parametrize(
-    ("target", "task", "observed", "suggested"),
+    ("values", "inconsistent_task", "observed"),
     [
-        (np.array([0.1, 1.25, 3.5]), "classification", "continuous", "regression"),
-        (pd.DataFrame({"response": [0.1, 1.25, 3.5]}), "classification", "continuous", "regression"),
-        (pd.Series(["private-a", "private-b", "private-a"]), "regression", "binary", "classification"),
+        pytest.param([0.1, 1.25, 3.5], "classification", "continuous", id="continuous"),
+        pytest.param([[0.1], [1.25], [3.5]], "classification", "continuous", id="column-vector"),
+        pytest.param(["private-a", "private-b", "private-a"], "regression", "binary", id="binary-text"),
+        pytest.param(["private-a", "private-b", "private-c"], "regression", "multiclass", id="multiclass-text"),
+        pytest.param([0, 1, 0], None, None, id="binary-integer"),
+        pytest.param([0, 1, 2], None, None, id="multiclass-integer"),
+        pytest.param([True, False, True], None, None, id="boolean"),
+        pytest.param([0.0, 1.0, 0.0], None, None, id="binary-integral-float"),
+        pytest.param([0.0, 1.0, 2.0], None, None, id="multiclass-integral-float"),
+        pytest.param(["0.5", "1e3", "-2"], None, None, id="numeric-text"),
+        pytest.param([[0, 1], [1, 0], [1, 1]], None, None, id="multilabel"),
+        pytest.param([[0.1, 1.1], [1.2, 2.3], [4.5, 0.3]], None, None, id="continuous-multioutput"),
+        pytest.param([0.1, np.nan, 3.5], None, None, id="missing"),
+        pytest.param(np.array([0, "private-a", 2], dtype=object), None, None, id="mixed-object"),
     ],
 )
-@pytest.mark.parametrize(("mode", "exception"), [("warn", ConfigWarning), ("raise", InvalidParamError)])
-def test_task_target_diagnoses_only_clear_mismatches(target, task, observed, suggested, mode, exception):
-    check = pytest.warns if mode == "warn" else pytest.raises
-    with check(exception, match=rf"(?s)Example.*placement.*task='{task}'.*'{observed}'.*task='{suggested}'") as caught:
+@pytest.mark.parametrize("container", ["numpy", "pandas"])
+@pytest.mark.parametrize("task", ["classification", "regression"])
+@pytest.mark.parametrize("mode", ["off", "warn", "raise"])
+def test_task_target_policy_matrix(values, inconsistent_task, observed, container, task, mode):
+    array = np.asarray(values)
+    target = (pd.Series(array) if array.ndim == 1 else pd.DataFrame(array)) if container == "pandas" else array
+    original = np.asarray(target).copy()
+
+    def inspect_target():
         validation._validate_task_target(target, task=task, mode=mode, estimator="Example", role="placement")
-    message = str(caught.value if isinstance(caught, pytest.ExceptionInfo) else caught[0].message)
-    assert "task_validation='off'" in message
-    assert "private-" not in message
+
+    if mode == "off" or task != inconsistent_task:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            inspect_target()
+    else:
+        suggested = "regression" if task == "classification" else "classification"
+        match = rf"(?s)Example.*placement.*task='{task}'.*'{observed}'.*task='{suggested}'"
+        if mode == "warn":
+            with pytest.warns(ConfigWarning, match=match) as recorded:
+                inspect_target()
+            assert len(recorded) == 1
+            message = str(recorded[0].message)
+        else:
+            with pytest.raises(InvalidParamError, match=match) as caught:
+                inspect_target()
+            message = str(caught.value)
+        assert "task_validation='off'" in message
+        assert "private-" not in message
+
+    np.testing.assert_array_equal(np.asarray(target), original)
 
 
 @pytest.mark.parametrize("target", [[0, 1, 2], [True, False], [0.0, 1.0, 2.0], ["0.5", "1e3", "-2"]])
