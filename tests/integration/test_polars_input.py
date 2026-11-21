@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pretab import Preprocessor, RepresentationConfig
+from pretab import FeatureGroup, Preprocessor, RepresentationConfig
 from pretab.exceptions import DataWarning, PretabDataError
 
 pl = pytest.importorskip("polars")
@@ -139,21 +139,34 @@ def test_mixed_structured_inputs_preserve_polars_column_types(frames, typed, out
 
 @pytest.mark.parametrize("method", ["tensorspline", "tprs"])
 @pytest.mark.parametrize("output_format", ["dense", "sparse", "auto"])
-def test_grouped_polars_nullable_sources_match_pandas_with_categorical_neighbors(frames, method, output_format):
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+def test_structured_and_grouped_polars_inputs_match_pandas(frames, method, output_format, typed):
     from scipy import sparse
 
     pandas_frame, polars_frame, _ = frames
-    pandas_frame = pandas_frame.astype({"visits": float})
-    pandas_frame.loc[7, "visits"] = np.nan
-    visits = polars_frame["visits"].to_list()
-    visits[7] = None
-    polars_frame = polars_frame.with_columns(pl.Series("visits", visits, dtype=pl.Int64))
+    pandas_frame = pandas_frame.astype({"visits": float, "flag": object})
+    missing_rows = {"visits": 7, "plan": 13, "city": 19, "flag": 23}
+    nullable_columns = []
+    for feature, row in missing_rows.items():
+        values = polars_frame[feature].to_list()
+        values[row] = None
+        dtype = pl.Enum(["premium", "basic", "unused"]) if feature == "plan" else polars_frame[feature].dtype
+        nullable_columns.append(pl.Series(feature, values, dtype=dtype))
+        pandas_frame.loc[row, feature] = np.nan
+    polars_frame = polars_frame.with_columns(nullable_columns)
     original = polars_frame.clone()
     representation = (
         {"method": method, "output_dim": 3, "degree": 2}
         if method == "tensorspline"
         else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
     )
+    group_sources = ["visits", "income"]
+    groups = (
+        [FeatureGroup("location", group_sources, RepresentationConfig.from_dict(representation))]
+        if typed
+        else {"location": {"columns": group_sources, "representation": representation}}
+    )
+    overrides = {"method": "one-hot", "params": {"drop": "first"}}
     options = {
         "numerical_method": "none",
         "categorical_method": "one-hot",
@@ -162,7 +175,11 @@ def test_grouped_polars_nullable_sources_match_pandas_with_categorical_neighbors
         "missing_policy": "separate_state",
         "output_format": output_format,
         "dtype": np.float32,
-        "feature_groups": {"location": {"columns": ["visits", "income"], "representation": representation}},
+        "feature_groups": groups,
+        "feature_preprocessing": {
+            feature: RepresentationConfig.from_dict(overrides) if typed else overrides
+            for feature in ("flag", "city", "plan")
+        },
     }
     from_pandas = Preprocessor(**options).fit(pandas_frame)
     from_polars = Preprocessor(**options).fit(polars_frame)
@@ -171,9 +188,21 @@ def test_grouped_polars_nullable_sources_match_pandas_with_categorical_neighbors
     expected = reference.toarray() if sparse.issparse(reference) else np.asarray(reference)
     assert from_polars.numerical_features_ == ["income", "visits"]
     assert from_polars.categorical_features_ == ["rooms", "plan", "city", "flag"]
+    assert list(from_polars.feature_names_in_) == polars_frame.columns
     assert from_polars.output_dims_ == from_pandas.output_dims_
     assert from_polars.get_feature_lineage() == from_pandas.get_feature_lineage()
-    np.testing.assert_array_equal(from_polars.get_feature_names_out(), from_pandas.get_feature_names_out())
+    names = list(from_polars.get_feature_names_out())
+    np.testing.assert_array_equal(names, from_pandas.get_feature_names_out())
+    indicators = {}
+    for feature, width in {"plan": 2, "city": 3, "flag": 2}.items():
+        assert from_polars.output_dims_[feature] == width
+        matches = [
+            index
+            for index, name in enumerate(names)
+            if name.startswith(f"cat_{feature}__") and name.endswith("__missing")
+        ]
+        assert len(matches) == 1
+        indicators[feature] = matches[0]
     for preprocessor, incoming in (
         (from_polars, polars_frame.select(polars_frame.columns[::-1])),
         (from_polars, pandas_frame.iloc[:, ::-1]),
@@ -182,15 +211,18 @@ def test_grouped_polars_nullable_sources_match_pandas_with_categorical_neighbors
         actual = preprocessor.transform(incoming)
         assert not isinstance(actual, dict)
         assert sparse.issparse(actual) == (preprocessor.output_format_ == "sparse")
-        np.testing.assert_array_equal(actual.toarray() if sparse.issparse(actual) else np.asarray(actual), expected)
+        values = actual.toarray() if sparse.issparse(actual) else np.asarray(actual)
+        np.testing.assert_array_equal(values, expected)
+        for feature, index in indicators.items():
+            np.testing.assert_array_equal(values[:, index], pandas_frame[feature].isna())
         blocks = preprocessor.transform(incoming, return_array=False)
         assert isinstance(blocks, dict)
         assert list(blocks) == ["group_location", "cat_rooms", "cat_plan", "cat_city", "cat_flag"]
         group = blocks["group_location"]
         values = group.toarray() if sparse.issparse(group) else np.asarray(group)
-        np.testing.assert_array_equal(values[:, -2:], pandas_frame[["visits", "income"]].isna().astype(np.float32))
+        np.testing.assert_array_equal(values[:, -2:], pandas_frame[group_sources].isna().astype(np.float32))
     assert polars_frame.equals(original)
-    assert polars_frame.null_count()["visits"][0] == 1
+    assert {feature: polars_frame[feature].null_count() for feature in missing_rows} == dict.fromkeys(missing_rows, 1)
     with pytest.raises(PretabDataError) as failure:
         from_polars.transform(polars_frame.drop("visits"))
     assert "group 'group_location'" in str(failure.value)
