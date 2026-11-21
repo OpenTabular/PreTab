@@ -202,6 +202,10 @@ PreTab's dense block-output boundary. It does not construct or fit a DeepTab
 model, and `block_widths` is not a DeepTab configuration object.
 
 ```{note}
+PreTab accepts eager `polars.DataFrame` inputs, but end-to-end DeepTab training
+and prediction with Polars are not supported by this integration. Use an input
+format documented by your version of DeepTab.
+
 Dictionary output is not supported for out-of-fold assembly by
 `CrossFittedTransformer`. Use matrix output for that training workflow. An
 ordinary all-data `fit` followed by a dictionary `transform` is not a substitute
