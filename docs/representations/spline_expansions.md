@@ -83,13 +83,10 @@ Increase `output_dim` for more wiggle, decrease it to regularize.
 ```
 
 ```{note}
-Every spline in this family exposes `get_penalty_matrix(feature_index=0, diff_order=2)`, a
-`D^T D` second-difference penalty matrix of shape `(m, m)`, where `m` is the fitted non-bias
-width (plus the bias
-row/column left unpenalized when `include_bias=True`). It is not limited to the "penalized"
-splines further down this page. Note that `diff_order` is specific to this B/M/I family; the
-cubic, natural cubic, P-spline, tensor-product, and thin-plate variants expose
-`get_penalty_matrix(feature_index=0)` with their own fixed penalty construction instead.
+The B/M/I family exposes `get_penalty_matrix(feature_index=0, diff_order=2)` and
+the corresponding typed `get_penalty_spec()`. The returned matrix covers the
+fitted output width, including a zero row and column for the leading bias if present.
+See [Typed spline penalties](#typed-spline-penalties) for the other families.
 ```
 
 ## M-spline and I-spline
@@ -186,9 +183,9 @@ $$
 \lambda\, \beta^\top D^\top D\, \beta,
 $$
 
-where $D$ is the `diff_order`-th order difference operator (the same matrix returned by
-`get_penalty_matrix()`) and $\lambda$ is chosen by the downstream penalized model, not by
-`PSplineTransformer` itself.
+where $D$ is the `diff_order`-th order difference operator. `get_penalty_matrix()`
+returns $D^\top D$, padded for the optional unpenalized bias. The downstream model,
+not `PSplineTransformer`, chooses $\lambda$ and adds the penalty to its loss.
 
 ```python
 import numpy as np
@@ -231,8 +228,9 @@ $$
 \Phi_{k_1, \dots, k_d}(x_1, \dots, x_d) = \prod_{j=1}^{d} B_{k_j}(x_j).
 $$
 
-It exposes an anisotropic penalty per marginal via
-`get_penalty_matrix(feature_index=...)`.
+`get_penalty_matrix(feature_index=...)` returns a marginal matrix.
+`get_penalty_specs()` returns one full joint matrix per source direction, ready
+to apply to the coefficients of the tensor basis.
 
 ```python
 import numpy as np
@@ -293,6 +291,100 @@ has one fitted width and one output block, including its raw missing states.
 The [multivariate tutorial](../tutorials/multivariate_features.md) shows how to
 configure groups and inspect the actual width rather than assigning it to each source.
 ```
+
+## Typed spline penalties
+
+Fit the spline first, then call its typed accessor. Each {py:class}`pretab.PenaltySpec`
+pairs a penalty matrix with the ordered `coefficient_names` and zero-based
+`coefficient_indices` of the fitted transformer's output. `axis` identifies the
+input direction. It does not index the coefficients. The legacy matrix accessors
+remain available, and neither accessor changes the fitted basis or trains a model.
+
+| Spline family                | Typed accessor                                       | Matrix convention                                                                                           |
+| ---------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| B-spline, M-spline, I-spline | `get_penalty_spec(feature_index=0, diff_order=None)` | Coefficient differences. Defaults to order 2; the accessor accepts an explicit order.                       |
+| P-spline                     | `get_penalty_spec(feature_index=0)`                  | Coefficient differences of fitted order 1 or 2. Higher orders remain available through the legacy accessor. |
+| Natural cubic                | `get_penalty_spec(feature_index=0)`                  | Approximate integrated squared second derivative, using finite differences and trapezoidal integration.     |
+| Cubic regression             | `get_penalty_spec(feature_index=0)`                  | Integrated squared second derivative, using piecewise Simpson integration, exact in exact arithmetic.       |
+| Tensor-product               | `get_penalty_specs()`                                | One full joint coefficient-difference matrix per fitted axis, using the fitted order.                       |
+| Thin-plate                   | None                                                 | Experimental legacy matrix only; positive semidefiniteness is not guaranteed.                               |
+
+For $m$ selected coefficients, `matrix` is a detached, read-only `float64`
+array of shape $(m, m)$. Let $P$ denote that matrix and $\beta$ the coefficient
+vector in the recorded order. The unweighted penalty is $\beta^\top P\beta$,
+with no implicit factor of $1/2$. Symmetry, positive semidefiniteness and
+numerical rank use the recorded tolerance `atol + rtol * spectral_norm`, where
+the norm is of the symmetric part of $P$. Eigenvalues above that threshold
+count toward `rank`; `nullity` is $m$ minus `rank`. Accepted entries are not
+rounded, clipped, or symmetrized. A penalty can be singular without being invalid.
+
+For coefficient differences, $P = D^\top D$ and the penalty is
+$\lVert D\beta\rVert_2^2$. A difference penalty of order $r$ on $q$ non-bias
+coefficients has rank $q-r$ and nullity $r$ when $1 \le r < q$; a leading
+bias is unpenalized and adds one null direction. Differences operate on the
+ordered coefficients, not derivatives in input units. The two curvature
+penalties instead integrate over their fitted input domains. The linear term
+and any explicit bias have zero curvature. Scaling inputs before fitting can
+change these curvature matrices, even if the output width stays the same.
+
+The tensor matrices share the full joint coefficient order (C order, with the
+last declared axis varying fastest). Each direction applies a marginal
+difference operator along its axis, holding the others fixed. With marginal
+bias enabled, that direction leaves its own bias index unpenalized; other
+directions may still penalize such terms. Apply the matrices to the same
+joint coefficients and add their quadratic forms with nonnegative weights
+$\lambda_j$. Do not substitute marginal matrices or add matrices defined in
+different coefficient coordinates without first aligning them.
+
+### Fit with a quadratic penalty
+
+This example fits a P-spline basis, then uses its penalty in a least-squares
+model. Because the example uses the **sum** of squared residuals, the normal
+equations add $\lambda P$ to the design's Gram matrix. A mean-reduced loss uses
+a different effective weight, so choose the weight for your loss convention.
+
+```python
+import numpy as np
+from pretab.transformers import PSplineTransformer
+
+source = np.linspace(0.0, 1.0, 80)
+features = source.reshape(-1, 1)
+target = np.sin(2.0 * np.pi * source)
+spline = PSplineTransformer(output_dim=6, diff_order=2, include_bias=False).fit(features)
+penalty = spline.get_penalty_spec()
+indices = np.asarray(penalty.coefficient_indices)
+assert tuple(spline.get_feature_names_out()[indices]) == penalty.coefficient_names
+design = spline.transform(features)[:, indices]
+
+weight = 0.1
+matrix = penalty.matrix
+coefficients = np.linalg.solve(design.T @ design + weight * matrix, design.T @ target)
+residuals = design @ coefficients - target
+roughness = coefficients @ matrix @ coefficients
+loss = residuals @ residuals + weight * roughness
+
+assert np.isfinite(loss)
+np.testing.assert_allclose(roughness, np.sum(np.diff(coefficients, n=2) ** 2))
+```
+
+### Use in DeepTab and other estimators
+
+Apply the quadratic form to the downstream weights that multiply the spline
+basis columns directly, not to the input values or activations. `coefficient_indices`
+are local to the fitted transformer's output. In a combined model input, use the
+fitted block layout and output lineage to find the corresponding columns. For
+a tensor group, keep the full joint basis in one block; do not split the penalty
+by source or include raw missing indicators in it. The
+[multivariate tutorial](../tutorials/multivariate_features.md) shows how to
+inspect that fitted layout. This is consumer guidance, not a DeepTab configuration API.
+
+For a tensor-based training loop, copy the read-only array to a fixed tensor
+on the coefficients' device and dtype. If you have several coefficient vectors
+for the same basis (for example, several output units), compute the form for each
+vector and reduce the results consistently with your task loss. Recheck the
+alignment after refitting or changing the design. `to_summary()` can log the
+convention, coordinates, numerical rank and matrix checksum without including
+the matrix. It is not a way to restore the matrix or train from the summary alone.
 
 ## Where to go next
 
