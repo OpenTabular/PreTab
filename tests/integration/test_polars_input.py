@@ -197,13 +197,53 @@ def test_grouped_polars_nullable_sources_match_pandas_with_categorical_neighbors
     assert "missing sources ('visits',)" in str(failure.value)
 
 
-def test_polars_input_with_polars_output(frames):
-    _, polars_frame, y = frames
-    pre = Preprocessor(numerical_method="minmax").set_output(transform="polars").fit(polars_frame, y)
-    out = pre.transform(polars_frame)
-    assert isinstance(out, pl.DataFrame)
-    assert out.columns == list(pre.get_feature_names_out())
-    assert out.shape == (polars_frame.height, pre.total_output_dim_)
+@pytest.mark.parametrize("container", ["default", "pandas", "polars", "blocks"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+def test_polars_input_output_matrix(frames, container, output_format):
+    from scipy import sparse
+
+    pandas_frame, polars_frame, y = frames
+    reference = Preprocessor(numerical_method="minmax", categorical_method="one-hot", output_format="dense")
+    expected = reference.fit_transform(pandas_frame, y)
+    assert isinstance(expected, np.ndarray)
+    names = list(reference.get_feature_names_out())
+
+    blocks = container == "blocks"
+    pre = Preprocessor(
+        numerical_method="minmax",
+        categorical_method="one-hot",
+        output_format=output_format,
+        output_structure="blocks" if blocks else "matrix",
+    ).set_output(transform="default" if blocks else container)
+    training = pre.fit_transform(polars_frame, y)
+    np.testing.assert_array_equal(pre.get_feature_names_out(), names)
+    reordered = polars_frame.select(polars_frame.columns[::-1])
+    for result in (training, pre.transform(reordered)):
+        if blocks:
+            assert isinstance(result, dict)
+            assert list(result) == ["num_income", "num_visits", "cat_rooms", "cat_plan", "cat_city", "cat_flag"]
+            values = []
+            for block, width in zip(result.values(), reference.output_dims_.values(), strict=True):
+                if output_format == "sparse":
+                    assert isinstance(block, sparse.csr_matrix)
+                    block = block.toarray()
+                else:
+                    assert isinstance(block, np.ndarray)
+                assert block.shape == (polars_frame.height, width)
+                values.append(block)
+            actual = np.concatenate(values, axis=1)
+        elif container in ("pandas", "polars"):
+            assert isinstance(result, pd.DataFrame if container == "pandas" else pl.DataFrame)
+            assert isinstance(result, _NamedFrame)
+            assert list(result.columns) == names
+            actual = np.asarray(result)
+        elif output_format == "sparse":
+            assert isinstance(result, sparse.csr_matrix)
+            actual = result.toarray()
+        else:
+            assert isinstance(result, np.ndarray)
+            actual = result
+        np.testing.assert_array_equal(actual, expected)
 
 
 @pytest.mark.parametrize("output", ["pandas", "polars"])
