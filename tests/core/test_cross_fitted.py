@@ -13,6 +13,8 @@ import numpy as np
 import pytest
 from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from pretab import CrossFittedTransformer, LeakageWarning, Preprocessor
 from pretab.core._typing import TransformerLike
@@ -156,6 +158,32 @@ def test_cross_fit_preflights_inner_policy_before_cloning(data, monkeypatch):
     monkeypatch.setattr("pretab.core.supervised.clone", reject_clone)
     with pytest.raises(InvalidParamError, match=r"(?s)Preprocessor\.task.*target-aware placement.*continuous"):
         outer.fit(X, target)
+
+
+def test_pipeline_placement_diagnostic_is_reused_by_cross_fit_folds(monkeypatch):
+    X = np.linspace(-2, 2, 12).reshape(-1, 1)
+    target = X[:, 0] ** 2 + 0.123
+    pipeline = make_pipeline(
+        StandardScaler(),
+        Preprocessor(numerical_method="rbf", task="classification", task_validation="warn", output_dim=3),
+    )
+    cross_fit = CrossFittedTransformer(pipeline, n_folds=3, shuffle=False)
+    make_splitter = cross_fit._make_splitter
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always", ConfigWarning)
+
+        def check_before_split():
+            diagnostics = [item for item in recorded if item.category is ConfigWarning]
+            assert len(diagnostics) == 1
+            assert "target-aware placement uses task='classification'" in str(diagnostics[0].message)
+            return make_splitter()
+
+        monkeypatch.setattr(cross_fit, "_make_splitter", check_before_split)
+        result = cross_fit.fit_transform(X, target)
+
+    assert result.shape == (len(target), 3)
+    assert sum(item.category is ConfigWarning for item in recorded) == 1
 
 
 # --- fit_transform returns the kind of output transform returns (issue #90) ---------
