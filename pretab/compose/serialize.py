@@ -37,6 +37,7 @@ from ..core.parameters import UNSET
 from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
 from ..exceptions import PretabSerializationError
+from ..expansion.spline.penalty import PenaltySpec, _copy_provenance
 from ..placement.base import PlacementResult
 from ..preprocessing.floats import NoTransformer, ToFloatTransformer
 from .config import FeatureGroup, RepresentationConfig
@@ -69,6 +70,7 @@ _ALLOWED_DATACLASSES = frozenset(
         TransformerSpec,
         RepresentationConfig,
         FeatureGroup,
+        PenaltySpec,
     }
 )
 
@@ -166,6 +168,22 @@ def _encode(obj):
         return {"__estimator__": {"class": _qualname(obj), "state": _encode_mapping(vars(obj))}}
     if type(obj) is RepresentationConfig:
         fields = {key: _encode(value) for key, value in obj.to_dict().items()}
+        return {"__dataclass__": {"class": _qualname(obj), "fields": fields}}
+    if type(obj) is PenaltySpec:
+        fields = _encode_mapping(
+            {
+                "matrix": obj.matrix,
+                "kind": obj.kind,
+                "order": obj.order,
+                "axis": obj.axis,
+                "coordinate_system": obj.coordinate_system,
+                "coefficient_names": obj.coefficient_names,
+                "coefficient_indices": obj.coefficient_indices,
+                "atol": obj.atol,
+                "rtol": obj.rtol,
+                "provenance": _copy_provenance(obj.provenance),
+            }
+        )
         return {"__dataclass__": {"class": _qualname(obj), "fields": fields}}
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         fields = {f.name: _encode(getattr(obj, f.name)) for f in dataclasses.fields(obj)}

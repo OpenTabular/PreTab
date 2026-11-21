@@ -18,7 +18,14 @@ import pytest
 from sklearn import config_context
 from sklearn.base import clone
 
-from pretab import Preprocessor, PretabSerializationError, RepresentationConfig, RepresentationPolicy
+from pretab import (
+    FeatureGroup,
+    PenaltySpec,
+    Preprocessor,
+    PretabSerializationError,
+    RepresentationConfig,
+    RepresentationPolicy,
+)
 from pretab.compose.registry import TransformerSpec
 from pretab.compose.serialize import SCHEMA_VERSION, _decode, _encode, _encode_mapping
 from pretab.core.parameters import UNSET
@@ -606,6 +613,69 @@ def test_representation_config_decoder_runs_value_validation(fields, constraint)
         }
     }
     with pytest.raises(InvalidParamError, match=constraint):
+        _decode(payload)
+
+
+def test_feature_group_codec_preserves_order_and_nested_config():
+    value = FeatureGroup("joint", (10, "first"), RepresentationConfig("tensorspline", output_dim=3))
+
+    restored = _decode(json.loads(json.dumps(_encode(value), allow_nan=False)))
+
+    assert type(restored) is FeatureGroup
+    assert restored == value
+    assert restored.columns == (10, "first")
+
+
+def test_penalty_spec_codec_preserves_exact_immutable_values():
+    value = PenaltySpec(
+        matrix=[[-0.0, 0.0, 0.0], [0.0, 1.0, -1.0], [0.0, -1.0, 1.0]],
+        kind="coefficient_difference",
+        order=1,
+        axis=("age",),
+        coordinate_system="basis_coefficients",
+        coefficient_names=("bias", "basis_0", "basis_1"),
+        coefficient_indices=(3, 4, 5),
+        atol=1e-12,
+        rtol=1e-9,
+        provenance={"source": {"details": [{"label": "age", "verified": True}, None]}},
+    )
+
+    payload = json.loads(json.dumps(_encode(value), allow_nan=False))
+    fields = payload["__dataclass__"]["fields"]
+    assert "__ndarray__" in fields["matrix"]
+    assert {"_matrix_bytes", "rank", "nullity"}.isdisjoint(fields)
+    restored = _decode(payload)
+
+    assert type(restored) is PenaltySpec
+    assert restored == value
+    assert restored.matrix.dtype == np.float64
+    assert restored.matrix.tobytes() == value.matrix.tobytes()
+    assert (restored.rank, restored.nullity) == (1, 2)
+    with pytest.raises(ValueError, match="WRITEABLE"):
+        restored.matrix.setflags(write=True)
+    with pytest.raises(TypeError):
+        restored.provenance["source"]["details"][0]["label"] = "changed"
+
+
+def test_penalty_spec_decoder_runs_matrix_validation():
+    payload = {
+        "__dataclass__": {
+            "class": "pretab.expansion.spline.penalty:PenaltySpec",
+            "fields": _encode_mapping(
+                {
+                    "matrix": np.array([[-1.0]]),
+                    "kind": "curvature",
+                    "order": None,
+                    "axis": ("age",),
+                    "coordinate_system": "basis_coefficients",
+                    "coefficient_names": ("basis_0",),
+                    "coefficient_indices": (0,),
+                }
+            ),
+        }
+    }
+
+    with pytest.raises(InvalidParamError, match="positive semidefinite"):
         _decode(payload)
 
 
