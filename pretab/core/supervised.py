@@ -38,6 +38,7 @@ from .representation import RepresentationSpecMixin
 from .validation import (
     _check_task_target_once,
     _task_target_scope,
+    _TaskValidationMode,
     _validate_task_validation,
     is_polars_frame,
     polars_to_pandas,
@@ -222,23 +223,23 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
             return StratifiedKFold(n_splits=self.n_folds, shuffle=self.shuffle, random_state=seed)
         return KFold(n_splits=self.n_folds, shuffle=self.shuffle, random_state=seed)
 
-    def _validate_fit_params(self, y):
+    def _validate_fit_params(self, y) -> _TaskValidationMode:
         if y is None:
             raise IncompatibleParamsError("CrossFittedTransformer requires y at fit time; got y=None.")
         if not isinstance(self.n_folds, (int, np.integer)) or self.n_folds < 2:
             raise InvalidParamError(f"n_folds must be an integer >= 2; got {self.n_folds!r}.")
         validate_task(self.task, type(self).__name__)
-        _validate_task_validation(self.task_validation, type(self).__name__)
+        return _validate_task_validation(self.task_validation, type(self).__name__)
 
     def _preflight_task_target(self, X, y):
-        self._validate_fit_params(y)
-        self._check_fit_target(X, y)
+        mode = self._validate_fit_params(y)
+        self._check_fit_target(X, y, mode=mode)
 
-    def _check_fit_target(self, X, y):
+    def _check_fit_target(self, X, y, *, mode: _TaskValidationMode):
         _check_task_target_once(
             y,
             task=self.task,
-            mode=self.task_validation,
+            mode=mode,
             estimator=type(self).__name__,
             role="cross-fitting",
             n_samples=len(X),
@@ -254,13 +255,13 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
 
     def _fit_full(self, X, y):
         """Validate inputs and fit ``estimator_``; return input, target and diagnostic receipts."""
-        self._validate_fit_params(y)
+        mode = self._validate_fit_params(y)
         X_arr = _as_2d(X)
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):
             raise PretabDataError(f"X and y must have same length. Got {len(X_arr)} and {len(y_arr)}")
         with _task_target_scope(y) as receipts:
-            self._check_fit_target(X_arr, y)
+            self._check_fit_target(X_arr, y, mode=mode)
             estimator = cast(TransformerLike, clone(self.transformer))
             token = _cross_fit_active.set(True)
             try:
@@ -324,7 +325,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         try:
             for train_idx, test_idx in splitter.split(X_arr, y_arr):
                 train_y = y_arr[train_idx]
-                with _task_target_scope(train_y, receipts):
+                with _task_target_scope(train_y, receipts.copy()):
                     fold = self._fit_fold(_take_rows(X_arr, train_idx), train_y)
                 fold_out = fold.transform(_take_rows(X_arr, test_idx))
                 if isinstance(fold_out, dict):

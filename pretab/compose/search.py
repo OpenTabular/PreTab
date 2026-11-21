@@ -13,7 +13,7 @@ from copy import deepcopy
 from typing import cast
 
 import numpy as np
-from sklearn.base import BaseEstimator, clone, is_classifier
+from sklearn.base import BaseEstimator, clone, is_classifier, is_regressor
 from sklearn.metrics import check_scoring
 from sklearn.model_selection import BaseCrossValidator, check_cv
 from sklearn.utils import get_tags
@@ -21,7 +21,14 @@ from sklearn.utils.metaestimators import available_if
 from sklearn.utils.validation import _check_method_params, check_is_fitted
 
 from ..core._typing import PredictorLike
-from ..core.validation import _validate_task_validation, is_polars_frame, polars_to_pandas
+from ..core.validation import (
+    _check_task_target_once,
+    _task_target_scope,
+    _TaskValidationMode,
+    _validate_task_validation,
+    is_polars_frame,
+    polars_to_pandas,
+)
 from ..exceptions import InvalidParamError
 from ..preprocessor import Preprocessor
 
@@ -136,6 +143,23 @@ class RepresentationSearchCV(BaseEstimator):
             params.setdefault("task", "classification")
         return Preprocessor(numerical_method=method, **params)
 
+    def _preflight_task_targets(self, X, y, methods, *, mode: _TaskValidationMode, classifier, n_samples):
+        inner_mode = dict(self.preprocessor_params or {}).get("task_validation", "off")
+        if mode == "off" and isinstance(inner_mode, str) and inner_mode == "off":
+            return
+        owner = type(self).__name__
+        for method in methods:
+            self._make_preprocessor(method)._preflight_task_target(X, y, outer_mode=mode, owner=owner)
+        if mode != "off" and (classifier or is_regressor(self.estimator)):
+            _check_task_target_once(
+                y,
+                task="classification" if classifier else "regression",
+                mode=mode,
+                estimator=owner,
+                role="representation search",
+                n_samples=n_samples,
+            )
+
     def fit(self, X, y=None, *, groups=None, **fit_params):
         """Search over ``methods`` and refit the best representation on all data.
 
@@ -172,7 +196,7 @@ class RepresentationSearchCV(BaseEstimator):
             raise InvalidParamError("methods must be a non-empty sequence of numerical methods.")
         if y is None:
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
-        _validate_task_validation(self.task_validation, type(self).__name__)
+        mode = _validate_task_validation(self.task_validation, type(self).__name__)
         y_arr = np.asarray(y).ravel()
         if is_polars_frame(X):
             # Converted once, so every fold's rows carry the dtypes of the whole frame,
@@ -182,7 +206,10 @@ class RepresentationSearchCV(BaseEstimator):
         # As in scikit-learn's searches: per-sample fit params are made indexable
         # so each fold can take its training rows.
         fit_params = _check_method_params(X, params=fit_params)
-        cv = cast(BaseCrossValidator, check_cv(self.cv, y_arr, classifier=is_classifier(self.estimator)))
+        classifier = is_classifier(self.estimator)
+        cv = cast(BaseCrossValidator, check_cv(self.cv, y_arr, classifier=classifier))
+        with _task_target_scope(y) as receipts:
+            self._preflight_task_targets(X, y, methods, mode=mode, classifier=classifier, n_samples=n_samples)
         # Reuse the same held-out rows for every candidate, including splitters
         # whose random state advances on each call to split().
         splits = list(cv.split(np.zeros(n_samples), y_arr, groups))
@@ -195,7 +222,9 @@ class RepresentationSearchCV(BaseEstimator):
             for train_idx, test_idx in splits:
                 pre = self._make_preprocessor(method)
                 est = cast(PredictorLike, clone(self.estimator))
-                x_train = pre.fit_transform(_row_subset(X, train_idx), y_arr[train_idx], return_array=True)
+                train_y = y_arr[train_idx]
+                with _task_target_scope(train_y, receipts.copy()):
+                    x_train = pre.fit_transform(_row_subset(X, train_idx), train_y, return_array=True)
                 fold_params = _check_method_params(X, params=fit_params, indices=train_idx)
                 est.fit(x_train, y_arr[train_idx], **fold_params)
                 scorer = cast("Callable[..., float]", check_scoring(est, scoring=self.scoring))
@@ -211,7 +240,8 @@ class RepresentationSearchCV(BaseEstimator):
         self.best_method_ = best_method
         self.best_score_ = best_score
         self.best_preprocessor_ = self._make_preprocessor(best_method)
-        x_all = self.best_preprocessor_.fit_transform(X, y_arr, return_array=True)
+        with _task_target_scope(y_arr, receipts.copy()):
+            x_all = self.best_preprocessor_.fit_transform(X, y_arr, return_array=True)
         self.best_estimator_ = cast(PredictorLike, clone(self.estimator)).fit(x_all, y_arr, **fit_params)
         self.n_features_in_ = self.best_preprocessor_.n_features_in_
         # scikit-learn convention: feature names are recorded only for input whose

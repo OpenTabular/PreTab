@@ -6,6 +6,9 @@ here is a controlled nonlinear signal (``sin``) where an expressive basis
 (``bspline``) must beat a linear ``standardization`` baseline.
 """
 
+import os
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -20,11 +23,12 @@ from sklearn.model_selection import (
     StratifiedKFold,
     check_cv,
     cross_val_score,
+    cross_validate,
 )
 from sklearn.svm import SVC
 
 from pretab import RepresentationSearchCV
-from pretab.exceptions import InvalidParamError
+from pretab.exceptions import ConfigWarning, InvalidParamError
 
 # Unsupervised, deterministic placement so scores are reproducible fold to fold.
 _UNSUPERVISED = {"target_aware": False, "placement_strategy": "uniform", "output_dim": 10}
@@ -147,6 +151,104 @@ def test_invalid_search_task_validation_rejected(nonlinear_data):
     assert search.get_params()["task_validation"] == "WARN"
     with pytest.raises(InvalidParamError, match=r"RepresentationSearchCV\.task_validation"):
         search.fit(X, y)
+
+
+def test_search_preserves_inner_mode_validation(nonlinear_data):
+    X, y = nonlinear_data
+    search = RepresentationSearchCV(
+        LinearRegression(), methods=["minmax"], preprocessor_params={"task_validation": np.array(["off", "warn"])}
+    )
+
+    with pytest.raises(InvalidParamError, match=r"Preprocessor\.task_validation"):
+        search.fit(X, y)
+
+
+def test_search_checks_later_candidate_before_cloning(nonlinear_data, monkeypatch):
+    X, y = nonlinear_data
+    search = RepresentationSearchCV(
+        LinearRegression(),
+        methods=["minmax", "rbf"],
+        preprocessor_params={"task": "classification", "task_validation": "raise"},
+    )
+
+    def reject_clone(*args, **kwargs):
+        pytest.fail("cloned before checking the later candidate")
+
+    monkeypatch.setattr("pretab.compose.search.clone", reject_clone)
+    with pytest.raises(InvalidParamError, match=r"(?s)Preprocessor\.task.*target-aware placement.*continuous"):
+        search.fit(X, pd.Series(y))
+
+
+def test_search_checks_outer_classification_before_splitting(nonlinear_data):
+    X, y = nonlinear_data
+    search = RepresentationSearchCV(LogisticRegression(), methods=["minmax"], task_validation="raise")
+
+    with pytest.raises(InvalidParamError, match=r"(?s)RepresentationSearchCV\.task.*representation search.*continuous"):
+        search.fit(X, y)
+
+
+@pytest.mark.parametrize("inner_mode", ["warn", "raise"])
+def test_search_keeps_distinct_contracts_after_failed_fit(inner_mode):
+    values = np.linspace(-2, 2, 18)
+    X = pd.DataFrame({"value": values})
+    target = pd.Series(values**2 + 0.123)
+    search = RepresentationSearchCV(
+        LogisticRegression(),
+        methods=["rbf"],
+        cv=2,
+        preprocessor_params={"task_validation": inner_mode, "output_dim": 3},
+        task_validation="warn",
+    )
+    exception = InvalidParamError if inner_mode == "raise" else ValueError
+    match = r"(?s)Preprocessor\.task.*target-aware placement.*continuous" if inner_mode == "raise" else "continuous"
+
+    for _ in range(2):
+        with pytest.warns(ConfigWarning) as diagnostics, pytest.raises(exception, match=match):
+            search.fit(X, target)
+        messages = [str(item.message) for item in diagnostics]
+        expected_roles = ["target-aware placement"]
+        if inner_mode == "warn":
+            expected_roles.append("representation search")
+        assert len(messages) == len(expected_roles)
+        for message, role in zip(messages, expected_roles, strict=True):
+            assert message.startswith(f"RepresentationSearchCV: {role}")
+
+
+class _DiagnosticRecordingSearch(RepresentationSearchCV):
+    def fit(self, X, y=None, *, groups=None, **fit_params):
+        self.fit_pid_ = os.getpid()
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always", ConfigWarning)
+            super().fit(X, y, groups=groups, **fit_params)
+        self.task_diagnostics_ = [str(item.message) for item in recorded if item.category is ConfigWarning]
+        return self
+
+
+@pytest.mark.parametrize("n_jobs", [1, 2], ids=["serial", "worker-process"])
+@pytest.mark.parametrize(("outer_mode", "owner"), [("off", "Preprocessor"), ("warn", "_DiagnosticRecordingSearch")])
+def test_search_owns_placement_diagnostic_once_per_cv_fit(n_jobs, outer_mode, owner):
+    values = np.linspace(-2, 2, 18)
+    X = pd.DataFrame({"value": values})
+    target = pd.Series(values**2 + 0.123)
+    search = _DiagnosticRecordingSearch(
+        LinearRegression(),
+        methods=["rbf", "relu"],
+        cv=2,
+        preprocessor_params={"task": "classification", "task_validation": "warn", "output_dim": 3},
+        task_validation=outer_mode,
+    )
+
+    result = cross_validate(search, X, target, cv=3, n_jobs=n_jobs, return_estimator=True)
+
+    assert np.isfinite(result["test_score"]).all()
+    assert len(result["estimator"]) == 3
+    for fitted in result["estimator"]:
+        assert (fitted.fit_pid_ == os.getpid()) == (n_jobs == 1)
+        assert set(fitted.cv_results_) == {"rbf", "relu"}
+        assert fitted.best_preprocessor_.task_validation == "warn"
+        assert len(fitted.task_diagnostics_) == 1
+        assert fitted.task_diagnostics_[0].startswith(f"{owner}: target-aware placement")
+        assert "target type 'continuous'" in fitted.task_diagnostics_[0]
 
 
 class _RowRecorder(RegressorMixin, BaseEstimator):
@@ -388,7 +490,8 @@ def test_classifier_search_places_against_class_labels(class_data):
     assert set(search.predict(X)) <= {"pos", "neg"}
 
 
-def test_classifier_search_keeps_an_explicit_task(class_data):
+@pytest.mark.parametrize("use_string_labels", [False, True])
+def test_classifier_search_keeps_an_explicit_task(class_data, use_string_labels):
     X, y = class_data
     search = RepresentationSearchCV(
         LogisticRegression(),
@@ -396,7 +499,7 @@ def test_classifier_search_keeps_an_explicit_task(class_data):
         cv=3,
         preprocessor_params={"task": "regression", "task_validation": "warn"},
         task_validation="raise",
-    ).fit(X, (y == "pos").astype(int))
+    ).fit(X, y if use_string_labels else (y == "pos").astype(int))
     assert search.best_preprocessor_.task == "regression"
     assert search.best_preprocessor_.task_validation == "warn"
     assert search.task_validation == "raise"

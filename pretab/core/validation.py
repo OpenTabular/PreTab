@@ -83,13 +83,17 @@ def single_target(y, estimator: str, *, fix: str | None = None) -> np.ndarray:
     return y.ravel()
 
 
-def _validate_task_validation(mode: object, estimator: str) -> None:
+_TaskValidationMode = Literal["off", "warn", "raise"]
+
+
+def _validate_task_validation(mode: object, estimator: str) -> _TaskValidationMode:
     """Validate the requested consistency policy without normalizing it."""
     if not isinstance(mode, str) or mode not in ("off", "warn", "raise"):
         raise invalid_param_error(estimator, "task_validation", mode, "must be 'off', 'warn', or 'raise'")
+    return cast(_TaskValidationMode, mode)
 
 
-_TaskTargetContract = tuple[str, Literal["off", "warn", "raise"], str]
+_TaskTargetContract = tuple[str, _TaskValidationMode, str]
 _task_target_context: ContextVar[tuple[object, set[_TaskTargetContract]] | None] = ContextVar(
     "_task_target_context", default=None
 )
@@ -115,7 +119,7 @@ def _check_task_target_once(
     y: object,
     *,
     task: str,
-    mode: Literal["off", "warn", "raise"],
+    mode: _TaskValidationMode,
     estimator: str,
     role: str,
     n_samples: int,
@@ -136,7 +140,7 @@ def _validate_task_target(
     y: object,
     *,
     task: str,
-    mode: Literal["off", "warn", "raise"],
+    mode: _TaskValidationMode,
     estimator: str,
     role: str,
     n_samples: int | None = None,
