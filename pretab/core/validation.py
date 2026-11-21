@@ -8,6 +8,8 @@ warning registry de-duplicate it instead of re-firing per transformer per
 
 import sys
 import warnings
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Literal, cast
 
 import numpy as np
@@ -87,6 +89,49 @@ def _validate_task_validation(mode: object, estimator: str) -> None:
         raise invalid_param_error(estimator, "task_validation", mode, "must be 'off', 'warn', or 'raise'")
 
 
+_TaskTargetContract = tuple[str, Literal["off", "warn", "raise"], str]
+_task_target_context: ContextVar[tuple[object, set[_TaskTargetContract]] | None] = ContextVar(
+    "_task_target_context", default=None
+)
+
+
+@contextmanager
+def _task_target_scope(y: object, receipts: set[_TaskTargetContract] | None = None):
+    """Bind completed checks only to this target or an explicitly related fold."""
+    active = _task_target_context.get()
+    if receipts is None and active is not None and active[0] is y:
+        yield active[1]
+        return
+    if receipts is None:
+        receipts = set()
+    token = _task_target_context.set((y, receipts))
+    try:
+        yield receipts
+    finally:
+        _task_target_context.reset(token)
+
+
+def _check_task_target_once(
+    y: object,
+    *,
+    task: str,
+    mode: Literal["off", "warn", "raise"],
+    estimator: str,
+    role: str,
+    n_samples: int,
+) -> None:
+    if mode == "off" or y is None:
+        return
+    active = _task_target_context.get()
+    receipts = active[1] if active is not None and active[0] is y else None
+    contract = (task, mode, role)
+    if receipts is not None and contract in receipts:
+        return
+    _validate_task_target(y, task=task, mode=mode, estimator=estimator, role=role, n_samples=n_samples)
+    if receipts is not None:
+        receipts.add(contract)
+
+
 def _validate_task_target(
     y: object,
     *,
@@ -94,6 +139,7 @@ def _validate_task_target(
     mode: Literal["off", "warn", "raise"],
     estimator: str,
     role: str,
+    n_samples: int | None = None,
 ) -> None:
     """Diagnose clear mismatches for a validated task, mode and target-consuming role.
 
@@ -109,6 +155,7 @@ def _validate_task_target(
     if (
         values.size == 0
         or values.ndim not in (1, 2)
+        or (n_samples is not None and values.shape[0] != n_samples)
         or (values.ndim == 2 and values.shape[-1] != 1)
         or values.dtype.kind not in "biufOU"
         or pd.isna(values).any()

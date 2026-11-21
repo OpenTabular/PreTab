@@ -24,6 +24,7 @@ from .compose.feature_detection import (
     with_string_labels,
 )
 from .compose.inspection import (
+    _block_uses_task,
     _iter_fitted_blocks,
     block_uses_target,
     build_feature_info,
@@ -52,7 +53,7 @@ from .core._typing import TransformerLike
 from .core.logging import configure_logging, get_logger
 from .core.parameters import UNSET, validate_task
 from .core.policy import RepresentationPolicy, apply_constant_policy
-from .core.validation import _validate_task_validation
+from .core.validation import _check_task_target_once, _validate_task_validation
 from .exceptions import (
     ConfigWarning,
     DataWarning,
@@ -609,29 +610,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         start_time = time.perf_counter()
 
         resolved = self._resolved_params()
-        config = PreprocessorConfig.from_params(
-            numerical_method=resolved["numerical_method"],
-            categorical_method=resolved["categorical_method"],
-            feature_preprocessing=resolved["feature_preprocessing"],
-            output_dim=resolved["output_dim"],
-            degree=resolved["degree"],
-            target_aware=resolved["target_aware"],
-            placement_strategy=resolved["placement_strategy"],
-            task=resolved["task"],
-            adaptive=resolved["adaptive"],
-            min_output_dim=resolved["min_output_dim"],
-            max_output_dim=resolved["max_output_dim"],
-            random_state=resolved["random_state"],
-            scaling=resolved["scaling"],
-            cat_cutoff=resolved["cat_cutoff"],
-            treat_all_integers_as_numerical=resolved["treat_all_integers_as_numerical"],
-            numerical_imputation=resolved["numerical_imputation"],
-            categorical_imputation=resolved["categorical_imputation"],
-            add_missing_indicator=resolved["add_missing_indicator"],
-            missing_policy=resolved["missing_policy"],
-            verbose=resolved["verbose"],
-            feature_groups=resolved["feature_groups"],
-        )
+        config = self._fit_config(resolved)
 
         if config.feature_groups:
             group_frame = to_dataframe(X)
@@ -647,16 +626,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         fitted_on_array = not has_column_labels(X)
         X = to_dataframe(X)
 
-        if self.feature_preprocessing:
-            unknown_features = set(self.feature_preprocessing) - set(X.columns)
-            if unknown_features:
-                raise invalid_param_error(
-                    type(self).__name__,
-                    "feature_preprocessing",
-                    sorted(unknown_features),
-                    "every key must name a column present in X",
-                    valid=X.columns,
-                )
+        self._validate_feature_overrides(X)
 
         if self.missing_policy == "error":
             self._reject_missing(X)
@@ -697,25 +667,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             numeric_values[:, np.isnan(numeric_values).all(axis=0)] = 0.0
             apply_constant_policy(numeric_values, self.policy_, estimator=self)
 
-        valid_formats = ("auto", "dense", "sparse")
-        if self.output_format not in valid_formats:
-            raise invalid_param_error(
-                type(self).__name__,
-                "output_format",
-                self.output_format,
-                "must be one of 'auto', 'dense', 'sparse'",
-                valid=set(valid_formats),
-            )
-
-        valid_structures = ("matrix", "blocks")
-        if self.output_structure not in valid_structures:
-            raise invalid_param_error(
-                type(self).__name__,
-                "output_structure",
-                self.output_structure,
-                "must be one of 'matrix', 'blocks'",
-                valid=set(valid_structures),
-            )
+        self._validate_fit_output()
 
         # Ask ColumnTransformer to assemble the representation in the requested
         # container whenever its component outputs permit it. In particular,
@@ -735,6 +687,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         # ColumnTransformer.fit runs fit_transform internally; keep the training
         # output to resolve output_format="auto" once, from the training density.
         X_ct = self._column_transformer_input(X)
+        self._check_placement_target(self.column_transformer_, y, config.task, resolved["task_validation"], len(X_ct))
         try:
             training_output = self.column_transformer_.fit_transform(X_ct, y)
         except ValueError as exc:
@@ -889,6 +842,84 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
 
         return self.fit(X, y, embeddings=embeddings).transform(X, embeddings, return_array)
+
+    @staticmethod
+    def _fit_config(resolved):
+        return PreprocessorConfig.from_params(
+            **{field.name: resolved[field.name] for field in fields(PreprocessorConfig)}
+        )
+
+    def _validate_feature_overrides(self, frame):
+        if self.feature_preprocessing:
+            unknown_features = set(self.feature_preprocessing) - set(frame.columns)
+            if unknown_features:
+                raise invalid_param_error(
+                    type(self).__name__,
+                    "feature_preprocessing",
+                    sorted(unknown_features),
+                    "every key must name a column present in X",
+                    valid=frame.columns,
+                )
+
+    def _validate_fit_output(self):
+        valid_formats = ("auto", "dense", "sparse")
+        if self.output_format not in valid_formats:
+            raise invalid_param_error(
+                type(self).__name__,
+                "output_format",
+                self.output_format,
+                "must be one of 'auto', 'dense', 'sparse'",
+                valid=set(valid_formats),
+            )
+
+        valid_structures = ("matrix", "blocks")
+        if self.output_structure not in valid_structures:
+            raise invalid_param_error(
+                type(self).__name__,
+                "output_structure",
+                self.output_structure,
+                "must be one of 'matrix', 'blocks'",
+                valid=set(valid_structures),
+            )
+
+    def _check_placement_target(self, transformer, y, task, mode, n_samples, *, estimator=None):
+        if mode == "off" or y is None:
+            return
+        blocks = transformer.get_params(deep=False)["transformers"]
+        if any(_block_uses_task(block) for _, block, _ in blocks):
+            _check_task_target_once(
+                y,
+                task=task,
+                mode=mode,
+                estimator=estimator or type(self).__name__,
+                role="target-aware placement",
+                n_samples=n_samples,
+            )
+
+    def _preflight_task_target(self, X, y, *, outer_mode="off", owner=None):
+        """Check active placement contracts on a wrapper's full input before it fits clones."""
+        _validate_task_validation(self.task_validation, type(self).__name__)
+        if y is None or (self.task_validation == "off" and outer_mode == "off"):
+            return
+        resolved = self._resolved_params()
+        config = self._fit_config(resolved)
+        frame = to_dataframe(X)
+        self._validate_feature_overrides(frame)
+        if self.missing_policy == "error":
+            self._reject_missing(frame)
+        numerical, categorical = detect_column_types(
+            frame,
+            cat_cutoff=config.cat_cutoff,
+            treat_all_integers_as_numerical=config.treat_all_integers_as_numerical,
+            estimator_name=type(self).__name__,
+        )
+        if config.feature_groups:
+            config.validate_feature_groups(frame.columns, numerical, y=y)
+        with_string_labels(frame)
+        self._validate_fit_output()
+        transformer = build_column_transformer(config, numerical, categorical)
+        self._check_placement_target(transformer, y, config.task, outer_mode, len(frame), estimator=owner)
+        self._check_placement_target(transformer, y, config.task, resolved["task_validation"], len(frame))
 
     def _resolved_params(self):
         """Return the effective parameters after expanding ``preset``.

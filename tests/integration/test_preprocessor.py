@@ -255,6 +255,17 @@ def test_invalid_facade_task_validation_rejected(sample_data, mode):
         processor.fit(frame, target)
 
 
+def test_task_diagnostic_requires_active_placement():
+    frame = pd.DataFrame({"value": np.linspace(0, 1, 24)})
+    target = frame["value"]
+    processor = Preprocessor(numerical_method="rbf", task="classification", task_validation="raise")
+    with pytest.raises(InvalidParamError, match=r"target-aware placement.*continuous"):
+        processor.fit(frame, target)
+
+    processor.set_params(feature_preprocessing={"value": "minmax"})
+    processor.fit(frame, target)
+
+
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
 @pytest.mark.parametrize("fitted", [False, True], ids=["unfitted", "fitted"])
 def test_structured_feature_params_survive_fit_and_clone(sample_data, typed, fitted):

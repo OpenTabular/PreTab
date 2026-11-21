@@ -401,6 +401,21 @@ def _resolve_block_representation(pipeline, columns):
     return _locate_block_representation(pipeline, columns)[1]
 
 
+def _block_uses_task(transformer) -> bool:
+    """Check a constructed block for a target consumer configured with a task."""
+    separate_state = _separate_state_branches(transformer)
+    representation = separate_state[0] if separate_state is not None else transformer
+    for name, step in representation.steps:
+        spec = TRANSFORMER_REGISTRY.get(name)
+        if spec is None or not isinstance(step, spec.transformer_cls) or getattr(step, "task", None) is None:
+            continue
+        if spec.target_usage == "required" or (
+            spec.target_usage == "optional" and getattr(step, "target_aware", False)
+        ):
+            return True
+    return False
+
+
 def block_uses_target(transformer) -> bool:
     """Whether a fitted single-feature or joint block's representation consumed ``y``.
 

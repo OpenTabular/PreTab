@@ -23,6 +23,7 @@ import pandas as pd
 from scipy import sparse as sp
 from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
 from ..exceptions import (
@@ -34,7 +35,13 @@ from ..exceptions import (
 from ._typing import TransformerLike
 from .parameters import validate_task
 from .representation import RepresentationSpecMixin
-from .validation import _validate_task_validation, is_polars_frame, polars_to_pandas
+from .validation import (
+    _check_task_target_once,
+    _task_target_scope,
+    _validate_task_validation,
+    is_polars_frame,
+    polars_to_pandas,
+)
 
 __all__ = ["CrossFittedTransformer", "in_controlled_context", "warn_target_leakage"]
 
@@ -215,27 +222,55 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
             return StratifiedKFold(n_splits=self.n_folds, shuffle=self.shuffle, random_state=seed)
         return KFold(n_splits=self.n_folds, shuffle=self.shuffle, random_state=seed)
 
-    def _fit_full(self, X, y):
-        """Validate inputs and fit ``estimator_``; return 2D input and target array."""
+    def _validate_fit_params(self, y):
         if y is None:
             raise IncompatibleParamsError("CrossFittedTransformer requires y at fit time; got y=None.")
         if not isinstance(self.n_folds, (int, np.integer)) or self.n_folds < 2:
             raise InvalidParamError(f"n_folds must be an integer >= 2; got {self.n_folds!r}.")
         validate_task(self.task, type(self).__name__)
         _validate_task_validation(self.task_validation, type(self).__name__)
+
+    def _preflight_task_target(self, X, y):
+        self._validate_fit_params(y)
+        self._check_fit_target(X, y)
+
+    def _check_fit_target(self, X, y):
+        _check_task_target_once(
+            y,
+            task=self.task,
+            mode=self.task_validation,
+            estimator=type(self).__name__,
+            role="cross-fitting",
+            n_samples=len(X),
+        )
+        transformer = self.transformer
+        while isinstance(transformer, Pipeline):
+            transformer = next(
+                (step for _, step in transformer.steps if step is not None and step != "passthrough"), None
+            )
+        preflight = getattr(transformer, "_preflight_task_target", None)
+        if preflight is not None:
+            preflight(X, y)
+
+    def _fit_full(self, X, y):
+        """Validate inputs and fit ``estimator_``; return input, target and diagnostic receipts."""
+        self._validate_fit_params(y)
         X_arr = _as_2d(X)
         y_arr = np.asarray(y).ravel()
         if len(X_arr) != len(y_arr):
             raise PretabDataError(f"X and y must have same length. Got {len(X_arr)} and {len(y_arr)}")
-        estimator = cast(TransformerLike, clone(self.transformer))
-        token = _cross_fit_active.set(True)
-        try:
-            estimator.fit(X_arr, y_arr)
-        finally:
-            _cross_fit_active.reset(token)
+        with _task_target_scope(y) as receipts:
+            self._check_fit_target(X_arr, y)
+            estimator = cast(TransformerLike, clone(self.transformer))
+            token = _cross_fit_active.set(True)
+            try:
+                with _task_target_scope(y_arr, receipts):
+                    estimator.fit(X_arr, y_arr)
+            finally:
+                _cross_fit_active.reset(token)
         self.estimator_ = estimator
         self.n_features_in_ = X_arr.shape[1]
-        return X_arr, y_arr
+        return X_arr, y_arr, receipts
 
     def fit(self, X, y=None):
         """Fit the all-data ``estimator_`` used by :meth:`transform`."""
@@ -280,7 +315,7 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
             or if a fold's output has an invalid shape, a different width, or
             DataFrame columns other than the all-data fit's.
         """
-        X_arr, y_arr = self._fit_full(X, y)
+        X_arr, y_arr, receipts = self._fit_full(X, y)
         names = list(self.estimator_.get_feature_names_out())
         width = len(names)
         blocks, test_indices = [], []
@@ -288,7 +323,9 @@ class CrossFittedTransformer(RepresentationSpecMixin, TransformerMixin, BaseEsti
         token = _cross_fit_active.set(True)
         try:
             for train_idx, test_idx in splitter.split(X_arr, y_arr):
-                fold = self._fit_fold(_take_rows(X_arr, train_idx), y_arr[train_idx])
+                train_y = y_arr[train_idx]
+                with _task_target_scope(train_y, receipts):
+                    fold = self._fit_fold(_take_rows(X_arr, train_idx), train_y)
                 fold_out = fold.transform(_take_rows(X_arr, test_idx))
                 if isinstance(fold_out, dict):
                     raise IncompatibleParamsError(

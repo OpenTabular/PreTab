@@ -14,9 +14,9 @@ import pytest
 from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.model_selection import KFold, StratifiedKFold
 
-from pretab import CrossFittedTransformer, LeakageWarning
+from pretab import CrossFittedTransformer, LeakageWarning, Preprocessor
 from pretab.core._typing import TransformerLike
-from pretab.exceptions import IncompatibleParamsError, InvalidParamError
+from pretab.exceptions import ConfigWarning, IncompatibleParamsError, InvalidParamError
 from pretab.transformers import PLETransformer
 
 
@@ -128,6 +128,34 @@ def test_cross_fit_task_validation_survives_clone_and_fit(data):
     assert isinstance(copied, CrossFittedTransformer)
     copied.fit(X, y)
     assert copied.get_params(deep=False) == transformer.get_params(deep=False) | {"transformer": copied.transformer}
+
+
+def test_nested_cross_fit_task_diagnostic_emits_once_per_operation(data):
+    X, _ = data
+    target = np.where(X[:, 0] < 0, "low", "high")
+    inner = CrossFittedTransformer(PLETransformer(task="classification"), n_folds=3, task_validation="warn")
+    outer = CrossFittedTransformer(inner, n_folds=3, task_validation="warn")
+
+    for _ in range(2):
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always", ConfigWarning)
+            outer.fit_transform(X, target)
+        diagnostics = [item for item in recorded if item.category is ConfigWarning]
+        assert len(diagnostics) == 1
+        assert "cross-fitting uses task='regression'" in str(diagnostics[0].message)
+
+
+def test_cross_fit_preflights_inner_policy_before_cloning(data, monkeypatch):
+    X, target = data
+    inner = Preprocessor(numerical_method="rbf", task="classification", task_validation="raise")
+    outer = CrossFittedTransformer(inner)
+
+    def reject_clone(*args, **kwargs):
+        pytest.fail("cloned before checking the inner task policy")
+
+    monkeypatch.setattr("pretab.core.supervised.clone", reject_clone)
+    with pytest.raises(InvalidParamError, match=r"(?s)Preprocessor\.task.*target-aware placement.*continuous"):
+        outer.fit(X, target)
 
 
 # --- fit_transform returns the kind of output transform returns (issue #90) ---------
