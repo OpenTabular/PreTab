@@ -41,6 +41,7 @@ scipy = ">=1.10,<2.0"
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0"
 pytest-cov = "^4.1"
+jsonschema = "^4.26"
 ruff = "0.15.12"       # keep in sync with .pre-commit-config.yaml ruff rev
 pre-commit = "^3.6"
 commitizen = "^3.29.1"
