@@ -3,6 +3,9 @@
 Thanks for contributing to pretab. This page covers environment setup, the local
 workflow, and what a pull request needs to pass review.
 
+Read the [architecture contract](architecture.md) before changing how methods are
+registered, how fitted state is interpreted, or how modules depend on one another.
+
 ## Code of Conduct
 
 All contributors are expected to follow the project

@@ -68,4 +68,5 @@
    :hidden:
 
    developer_guide/contributing
+   developer_guide/architecture
    developer_guide/release

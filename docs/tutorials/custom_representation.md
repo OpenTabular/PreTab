@@ -160,4 +160,6 @@ the others.
 - [Representations overview](../representations/overview.md) to see the built-in families your
   method joins.
 - [Extensibility API](../api/extension.rst) for the full signatures.
+- [Architecture contract](../developer_guide/architecture.md) for dependency boundaries,
+  fitted state, and why registration does not enable spec persistence.
 - The `examples/pretab-chebyshev/` package for a complete, tested template.

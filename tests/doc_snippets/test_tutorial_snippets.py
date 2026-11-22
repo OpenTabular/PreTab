@@ -1,7 +1,6 @@
-"""Executes the python code fences in the tutorial pages so API drift breaks CI
-instead of the docs quietly going stale.
+"""Executes the Python code fences in tutorials and selected documentation pages.
 
-Each tutorial's ```python blocks run in one shared namespace, in source order,
+Each page's ```python blocks run in one shared namespace, in source order,
 exactly as written on the page. Blocks that only show expected console output
 (```text fences) are not touched. The companion notebook is kept in sync with its
 executed tutorial section without notebook-rendering dependencies in CI.
@@ -47,6 +46,7 @@ _TUTORIALS = [
     ROOT / "README.md",
     ROOT / "docs" / "homepage.md",
     ROOT / "docs" / "getting_started" / "quickstart.md",
+    ROOT / "docs" / "developer_guide" / "architecture.md",
 ]
 
 
