@@ -173,6 +173,12 @@ including adaptive sizing and separate missing indicators. Representation
 summaries describe the representation itself, excluding separate indicators;
 output budgets and reported output dimensions include those indicators.
 
+Specs retain schema version 1. ``params`` describes the current constructor
+requests; ``resolved_config``, when present, describes the last successful fit.
+The reader restores the encoded ``state`` rather than fitting from either set of
+settings. See :ref:`portable-serialization` for the field reference, reading
+legacy specs, downgrade limits, and when to use pickle instead.
+
 .. warning::
 
     Load specs only from trusted sources. Dependency versions recorded in a

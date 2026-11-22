@@ -23,42 +23,82 @@ with no stochastic component ignore the seed. The standalone kernel approximatio
 directly; they are fit outside `Preprocessor` since they operate on the whole feature block.
 ```
 
+(portable-serialization)=
+
 ## Portable serialization
 
-`to_spec` writes a fitted `Preprocessor` to a versioned, declarative schema, and `from_spec`
-reconstructs it. The spec records the schema and library versions, the resolved parameters,
-and the per-representation fitted state (parameters, knots, centers, columns, scaling).
-
-The spec is strict JSON, so any standard parser (JavaScript, Go, Rust, JSON schema validators)
-reads it. Non-finite floats, such as the imputers' `missing_values=np.nan`, are stored as a
-tagged value, `{"__float__": "nan"}` (or `"inf"`, `"-inf"`), instead of a bare `NaN` token.
-Specs written by PreTab 1.0.0, which contain bare `NaN` tokens, still load.
-The reverse is not supported: older readers cannot decode the new float tags.
-Keep the original spec if you may need to roll back to PreTab 1.0.0.
-The tagged encoding also changes fingerprints for fitted state containing non-finite
-values, including the default imputers; this change does not alter transformed values.
+`to_spec()` exports a fitted `Preprocessor` as a JSON-compatible dictionary and can also
+write it to a file. `from_spec()` restores it from either form without refitting.
 
 ```python
+pre.fit(df, y)
 spec = pre.to_spec()                 # returns a dict
 pre.to_spec("representation.json")   # or writes JSON to a path
 
 restored = Preprocessor.from_spec("representation.json")
 ```
 
+### What's in a spec
+
+- `schema_version`, `pretab_version`, and `library_versions` identify the format and the
+  environment that wrote the spec.
+- `params` holds constructor requests at export time. These can change after fit.
+- `resolved_config` holds effective settings recorded at the last successful fit, including
+  normalized declared feature overrides and groups in declared order. It is absent if the
+  fit has no settings record.
+- `feature_names_out` and `feature_lineage` give the output column order and fitted
+  provenance, including group identity and ordered sources where applicable.
+- `output_dims` and `total_output_dim` give actual per-block and total widths, including
+  separate missing indicators. These are not requested `output_dim` values.
+- `representations` describes blocks that expose representation metadata. Group entries
+  include `group_id`, ordered `columns`, fitted `dimension`, and a half-open `output_slice`.
+  Supported typed penalties add compact `penalties` metadata, including coefficient
+  coordinates and a matrix checksum, not the matrix itself.
+- `state` is the encoded fitted object state. This is what the reader restores; the
+  descriptive fields alone cannot recreate the learned transformation.
+
+Use `get_resolved_config()` to inspect effective settings for the **current** requests.
+It is not a substitute for the recorded fit-time `resolved_config`. Don't edit a spec to
+change a fit: the reader checks recorded configuration and layout fields against the
+stored state where applicable and raises `PretabSerializationError` on mismatches.
+Those checks do not authenticate the artifact.
+
+### Compatibility
+
+The current writer still uses `schema_version: 1`. It writes strict JSON, encoding
+non-finite floats such as the default imputer's `np.nan` as tagged values, for example
+`{"__float__": "nan"}`, instead of bare `NaN`. Standard JSON parsers can inspect new specs;
+restoring the fitted object requires PreTab.
+
+The current reader loads supported PreTab 1.0.0 schema-v1 specs, including legacy bare
+`NaN` tokens and specs without the added metadata. It does not invent a missing fit-time
+settings record. **Downgrades are not supported:** PreTab 1.0.0 cannot decode the new
+float tags, even though the schema number is unchanged. Keep the original artifact and
+its environment for rollback. The change to tagged encoding can affect fingerprints for
+state containing non-finite values without changing transformed values.
+
 ```{important}
 Load specs only from trusted sources. Reconstruction restricts imports to `pretab`,
 `scikit-learn`, `numpy`, and `scipy`, reconstructs dataclasses only from an exact, closed
 allow-list, and bypasses estimator initialization and pickle hooks. These restrictions are
-not a sandbox: importing library modules can still execute code. Use the same PreTab and
-dependency versions when restoring; recorded versions are informational, and cross-version
-compatibility is not guaranteed.
+not a sandbox: importing library modules can still execute code. Recorded versions are
+informational, not a guarantee of compatibility. Use the original environment for exact
+replay, and verify fitted outputs when upgrading.
 ```
 
+### Spec or pickle?
+
+Use a spec when you need an inspectable JSON artifact for supported fitted PreTab state.
 Supported built-in representations reproduce `transform` bit-for-bit in the same environment.
-Third-party representations and pretrained language models are not supported by the JSON
-serializer; unsupported state raises `PretabSerializationError` when the spec is built. The
-spec is serialized before `to_spec(path)` opens the file, so a failed save leaves an existing
-spec at that path untouched.
+The spec covers preprocessing, not a downstream model. Registering a third-party
+representation for fitting does not make it restorable from a spec; don't rely on specs
+to persist third-party representations or pretrained language models. A serialization
+failure occurs before `to_spec(path)` opens the destination.
+
+Use pickle or joblib when you need to persist a larger Python object, such as a complete
+scikit-learn pipeline, and every component supports that mechanism. Neither is a
+cross-version guarantee. Unpickling can execute arbitrary code: only load trusted
+pickle or joblib artifacts. The same trusted-source requirement applies to specs.
 
 ```{note}
 Restoring a PreTab 1.0.0 `Preprocessor` from a spec or trusted pickle repairs
@@ -69,7 +109,7 @@ fingerprints. Feature information reports the fitted layout; previously incorrec
 dimension metadata can change. Standalone helper validation is unchanged.
 Fingerprints can differ from 1.0.0 because the fitted metadata and JSON encoding
 have been corrected. This targeted repair is not a general guarantee of
-cross-version compatibility. Only unpickle artifacts from trusted sources.
+cross-version compatibility.
 ```
 
 When refitting after an upgrade, check output names and widths before reusing a
