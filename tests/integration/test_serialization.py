@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 from sklearn import config_context
 from sklearn.base import clone
+from sklearn.exceptions import NotFittedError
 
 from pretab import (
     FeatureGroup,
@@ -314,6 +315,55 @@ def test_spec_content_describes_the_fit_after_requests_change(frame):
     assert refit_spec["resolved_config"]["feature_groups"] is None
     assert refit_spec["resolved_config"]["feature_preprocessing"]["extra"]["params"]["gamma"] == 1.5
     assert "group_joint" not in refit_spec["output_dims"]
+
+
+@pytest.mark.parametrize("via_file", [False, True], ids=["dict", "file"])
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        pytest.param(("output_dims", "group_joint"), 1, id="block-width"),
+        pytest.param(("total_output_dim",), 1, id="total-width"),
+        pytest.param(("params", "feature_preprocessing", "extra", "output_dim"), 4, id="requested-width"),
+        pytest.param(("params", "feature_groups", "joint", "columns"), ["a", "b"], id="requested-group-order"),
+        pytest.param(("resolved_config", "feature_preprocessing", "extra", "output_dim"), 4, id="fitted-width"),
+        pytest.param(("resolved_config", "feature_groups", 0, "columns"), ["a", "b"], id="fitted-group-order"),
+        pytest.param(("representations", 1, "dimension"), 1, id="group-summary-width"),
+        pytest.param(("representations", 1, "columns"), ["a", "b"], id="group-summary-order"),
+        pytest.param(("representations", 1, "output_slice"), [0, 1], id="group-summary-slice"),
+    ],
+)
+def test_from_spec_rejects_inconsistent_metadata(frame, tmp_path, via_file, path, value):
+    fitting_frame = frame.assign(extra=np.linspace(-2, 2, len(frame)))
+    processor = Preprocessor(
+        numerical_method="minmax",
+        target_aware=False,
+        placement_strategy="uniform",
+        feature_preprocessing={"extra": {"method": "rbf", "output_dim": 3}},
+        feature_groups={
+            "joint": {"columns": ["b", "a"], "representation": {"method": "tensorspline", "output_dim": 4}}
+        },
+    ).fit(fitting_frame)
+    spec = processor.to_spec()
+    assert spec["representations"][1]["group_id"] == "group_joint"
+    destination = spec
+    for key in path[:-1]:
+        destination = destination[key]
+    assert destination[path[-1]] != value
+    destination[path[-1]] = value
+
+    source = spec
+    if via_file:
+        source = tmp_path / "inconsistent.json"
+        source.write_text(json.dumps(spec, allow_nan=False), encoding="utf-8")
+    with pytest.raises(PretabSerializationError, match=path[0]):
+        Preprocessor.from_spec(source)
+
+
+def test_to_spec_unfitted_does_not_create_file(tmp_path):
+    path = tmp_path / "unfitted.json"
+    with pytest.raises(NotFittedError):
+        Preprocessor().to_spec(path)
+    assert not path.exists()
 
 
 @pytest.mark.parametrize("group_method", ["tensorspline", "tprs"])

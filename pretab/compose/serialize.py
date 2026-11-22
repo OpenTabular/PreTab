@@ -391,6 +391,16 @@ def _penalty_summaries(leaf) -> list[dict]:
     return [penalty.to_summary() for penalty in penalties]
 
 
+def _group_layout(block, columns: list[str]) -> dict:
+    span = block.span
+    return {
+        "columns": columns,
+        "group_id": block.group_id,
+        "dimension": span.stop - span.start,
+        "output_slice": [span.start, span.stop],
+    }
+
+
 def _representation_summary(preprocessor, *, include_penalties: bool = False) -> list:
     """Declarative per-representation summary (family/columns/locations).
 
@@ -425,10 +435,7 @@ def _representation_summary(preprocessor, *, include_penalties: bool = False) ->
         entry = spec_fn(input_features=block_columns if fits_block else None).to_dict()
         entry["columns"] = block_columns
         if block.group_id is not None:
-            span = block.span
-            entry["group_id"] = block.group_id
-            entry["dimension"] = span.stop - span.start
-            entry["output_slice"] = [span.start, span.stop]
+            entry.update(_group_layout(block, block_columns))
         if include_penalties and (penalties := _penalty_summaries(leaf)):
             entry["penalties"] = penalties
         summary.append(entry)
@@ -471,6 +478,47 @@ def check_spec_schema(data: dict) -> None:
         )
 
 
+def _validate_group_layout(representations, column_transformer) -> None:
+    if not isinstance(representations, list) or not all(isinstance(entry, dict) for entry in representations):
+        raise PretabSerializationError("Spec 'representations' must be a list of mappings.")
+    fields = ("columns", "group_id", "dimension", "output_slice")
+    declared = [{field: entry.get(field) for field in fields} for entry in representations if "group_id" in entry]
+    fitted = [
+        _group_layout(block, [str(column) for column in block.columns])
+        for block in _iter_fitted_blocks(column_transformer)
+        if block.group_id is not None
+        and getattr(representation_leaf(block.transformer), "get_representation_spec", None) is not None
+    ]
+    if declared != fitted:
+        raise PretabSerializationError("Spec 'representations' group layout does not match stored preprocessor state.")
+
+
+def _validate_spec_metadata(data: dict, preprocessor) -> None:
+    """Check descriptive fields against their source in restored state, when available."""
+    state = vars(preprocessor)
+    has_fit_config = "_fit_config_" in state
+    has_fitted_metadata = has_fit_config or "output_dims" in data or "total_output_dim" in data
+    expected = {}
+    if "params" in data and has_fitted_metadata:
+        expected["params"] = _json_safe(preprocessor.get_params(deep=False))
+    if "resolved_config" in data and has_fit_config:
+        expected["resolved_config"] = _json_safe(state["_fit_config_"])
+    if "output_dims" in data:
+        expected["output_dims"] = _json_safe(preprocessor.output_dims_)
+    if "total_output_dim" in data:
+        names = data.get("feature_names_out")
+        if isinstance(names, list):
+            expected["total_output_dim"] = len(names)
+        else:
+            spans = preprocessor.column_transformer_.output_indices_.values()
+            expected["total_output_dim"] = max((span.stop for span in spans), default=0)
+    for field, value in expected.items():
+        if data[field] != value:
+            raise PretabSerializationError(f"Spec {field!r} does not match stored preprocessor state.")
+    if "representations" in data and has_fitted_metadata:
+        _validate_group_layout(data["representations"], preprocessor.column_transformer_)
+
+
 def _repair_legacy_sparse_feature_counts(preprocessor) -> None:
     """Repair the sparse-input helper width stored by PreTab 1.0.0."""
     column_transformer = getattr(preprocessor, "column_transformer_", None)
@@ -506,4 +554,5 @@ def preprocessor_from_spec(data: dict):
     if isinstance(output_config, dict) and output_config.get("transform") == "polars":
         _require_polars()
     _repair_legacy_sparse_feature_counts(obj)
+    _validate_spec_metadata(data, obj)
     return obj

@@ -1578,6 +1578,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Raises
         ------
+        PretabSerializationError
+            If recorded widths, configuration, or group layout disagree with
+            the stored state or feature names. These checks do not authenticate
+            the spec; only load specs from trusted sources.
         OptionalDependencyError
             If the spec explicitly requests Polars output and Polars is unavailable.
         """
