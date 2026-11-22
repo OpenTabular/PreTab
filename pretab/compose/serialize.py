@@ -36,7 +36,7 @@ from .._version import __version__ as _PRETAB_VERSION
 from ..core.parameters import UNSET
 from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
-from ..exceptions import PretabSerializationError
+from ..exceptions import PretabConfigError, PretabSerializationError
 from ..expansion.spline.p_spline import PSplineTransformer
 from ..expansion.spline.penalty import PenaltySpec, _copy_provenance
 from ..placement.base import PlacementResult
@@ -197,6 +197,55 @@ def _encode(obj):
 def _encode_mapping(mapping: dict) -> dict:
     """Encode a ``str``-keyed attribute mapping (an estimator/object ``__dict__``)."""
     return {str(k): _encode(v) for k, v in mapping.items()}
+
+
+def _canonicalize_feature_block(transformer: dict, *, structured: bool) -> None:
+    """Keep the encoded representation leaf compatible with the legacy fingerprint."""
+    pipeline = transformer["__estimator__"]["state"]
+    if "transformer_list" in pipeline:
+        branches = dict(item["__tuple__"] for item in pipeline["transformer_list"])
+        pipeline = branches["representation"]["__estimator__"]["state"]
+    method, leaf = pipeline["steps"][-1]["__tuple__"]
+    state = leaf["__estimator__"]["state"]
+    if method == "pspline":
+        fitted = state.get("_penalty_fit_")
+        if fitted == {"__tuple__": [state.get("diff_order"), state.get("include_bias")]}:
+            state.pop("_penalty_fit_")
+    if not structured:
+        return
+    spec = TRANSFORMER_REGISTRY.get(method)
+    if spec is None or not spec.supports_adaptive_resolution:
+        return
+    if state.get("adaptive") is False:
+        for field in ("min_output_dim", "max_output_dim"):
+            if field in spec.allowed_args and state.get(field) == {"__unset__": True}:
+                state[field] = None
+
+
+def _canonicalize_feature_fingerprint(state: dict, requests) -> None:
+    """Normalize single-feature requests and blocks without changing replay state."""
+    structured = set()
+    if isinstance(requests, dict):
+        for (feature, request), pair in zip(requests.items(), state["feature_preprocessing"]["__dict__"], strict=True):
+            if isinstance(request, dict):
+                try:
+                    request = RepresentationConfig.from_dict(request)
+                except PretabConfigError:
+                    continue
+            if type(request) is RepresentationConfig:
+                settings = request.to_dict()
+                method_only = (
+                    settings.keys() == {"method", "params", "name"} and not request.params and request.name is None
+                )
+                pair[1] = request.method if method_only else settings
+                structured.add(str(feature))
+    graph = state.get("column_transformer_")
+    if isinstance(graph, dict):
+        for field in ("transformers", "transformers_"):
+            for block in graph["__estimator__"]["state"][field]:
+                name, transformer, columns = block["__tuple__"]
+                if name.startswith(("num_", "cat_")) and len(columns) == 1 and isinstance(transformer, dict):
+                    _canonicalize_feature_block(transformer, structured=columns[0] in structured)
 
 
 def _json_safe(obj):

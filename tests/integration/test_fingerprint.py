@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 from sklearn.base import clone
 
-from pretab import FeatureGroup, Preprocessor
+from pretab import FeatureGroup, Preprocessor, RepresentationConfig
 from pretab.compose.inspection import representation_leaf
 from pretab.compose.registry import (
     CATEGORICAL_ALIASES,
@@ -54,6 +54,69 @@ def test_fingerprint_is_hex_sha256(frame, target):
 
 def test_fingerprint_deterministic_same_fit(frame, target):
     assert _fit(frame, target).fingerprint_ == _fit(frame, target).fingerprint_
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("order", [("a", "b"), ("b", "a")], ids=["forward", "reversed"])
+@pytest.mark.parametrize(("method", "missing_policy"), [("rbf", None), ("rbf", "separate_state"), ("pspline", None)])
+def test_fingerprint_matches_equivalent_per_feature_syntax(frame, target, typed, order, method, missing_policy):
+    methods = {"a": method, "b": "minmax"}
+    legacy = {feature: methods[feature] for feature in order}
+    structured = {
+        feature: RepresentationConfig(method) if typed else {"method": method} for feature, method in legacy.items()
+    }
+    params = {
+        "numerical_method": "none",
+        "placement_strategy": "uniform",
+        "random_state": 17,
+        "missing_policy": missing_policy,
+    }
+    reference = _fit(frame, target, feature_preprocessing=legacy, **params)
+    opposite = _fit(frame, target, feature_preprocessing=dict(reversed(legacy.items())), **params)
+    candidate = _fit(frame, target, feature_preprocessing=structured, **params)
+    restored = Preprocessor.from_spec(candidate.to_spec())
+    expected = np.asarray(reference.transform(frame, return_array=True))
+
+    assert reference.fingerprint_ != opposite.fingerprint_
+    for processor in (candidate, restored):
+        request = processor.feature_preprocessing
+        assert request is not None
+        assert list(request.items()) == list(structured.items())
+        assert processor.fingerprint_ == reference.fingerprint_
+        np.testing.assert_array_equal(processor.get_feature_names_out(), reference.get_feature_names_out())
+        output = np.asarray(processor.transform(frame, return_array=True))
+        assert output.tobytes() == expected.tobytes()
+
+
+def test_fingerprint_canonicalizes_structured_setting_order(frame, target):
+    typed = RepresentationConfig(
+        "rbf", adaptive=True, min_output_dim=5, max_output_dim=9, params={"gamma": 1.0, "random_state": 17}
+    )
+    mapping = typed.to_dict()
+    reordered = dict(reversed(mapping.items()))
+    reordered["params"] = dict(reversed(mapping["params"].items()))
+
+    def fingerprint(request):
+        return _fit(frame, target, placement_strategy="uniform", feature_preprocessing={"a": request}).fingerprint_
+
+    expected = fingerprint(typed)
+    assert fingerprint(mapping) == fingerprint(reordered) == expected
+    assert fingerprint(mapping | {"max_output_dim": 10}) != expected
+    assert fingerprint(mapping | {"params": mapping["params"] | {"gamma": 2.0}}) != expected
+
+
+def test_fingerprint_omits_only_redundant_pspline_penalty_snapshot(frame, target):
+    processor = _fit(frame, target, feature_preprocessing={"a": "pspline"}, placement_strategy="uniform")
+    restored = Preprocessor.from_spec(processor.to_spec())
+    current_leaf = representation_leaf(processor.column_transformer_.named_transformers_["num_a"])
+    legacy_leaf = representation_leaf(restored.column_transformer_.named_transformers_["num_a"])
+
+    del legacy_leaf._penalty_fit_
+    assert processor.fingerprint_ == restored.fingerprint_
+    assert current_leaf._penalty_fit_ == (2, False)
+
+    current_leaf.diff_order = legacy_leaf.diff_order = 1
+    assert processor.fingerprint_ != restored.fingerprint_
 
 
 @pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])

@@ -45,6 +45,7 @@ from .compose.output import (
 )
 from .compose.serialize import (
     SCHEMA_VERSION,
+    _canonicalize_feature_fingerprint,
     _repair_legacy_sparse_feature_counts,
     preprocessor_from_spec,
     preprocessor_to_spec,
@@ -1607,6 +1608,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             state.pop("feature_groups", None)
         if state.get("task_validation") == "off":
             state.pop("task_validation")
+        _canonicalize_feature_fingerprint(state, self.feature_preprocessing)
         return {
             "schema_version": spec["schema_version"],
             "pretab_version": spec["pretab_version"],
@@ -1624,6 +1626,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         the fitted state (knot / center / bin locations, scaler statistics, encoder
         categories). The digest is deterministic across processes and machines, so
         the same fitted state and configuration produce the same fingerprint.
+
+        A method-only per-feature mapping or :class:`RepresentationConfig` can
+        match its legacy string when the spelling, override order, and fitted
+        settings agree. Named fields within a structured override are unordered;
+        the order of per-feature overrides and of group declarations still matters.
 
         Raises
         ------
