@@ -176,6 +176,28 @@ try to be an everything-library.
   The [failure modes](../representations/choosing_a_method.md#when-basis-expansion-does-not-help)
   section is explicit about where it does not help.
 
+## What's new in PreTab 1.1
+
+- **More control per feature.** Set a [width or method options](../core_concepts/configuration.md)
+  for individual columns, or use a [`FeatureGroup`](../tutorials/multivariate_features.md)
+  to fit a joint spline across numerical columns.
+- **Inspect what was fitted.** Read [actual widths and output lineage](../core_concepts/outputs_and_inspection.md)
+  and use [`PenaltySpec`](../representations/spline_expansions.md) to align supported
+  spline penalties with fitted basis coefficients.
+- **Use Polars directly.** Pass an [eager `polars.DataFrame`](../core_concepts/configuration.md#polars-dataframe-input)
+  to `Preprocessor` without PyArrow.
+- **Export strict JSON.** [Schema-v1 specs](../core_concepts/reproducibility.md) can
+  record fit-time settings and output layout. Supported 1.0.0 specs still load in 1.1.
+
+**Upgrading:** PreTab 1.1 supports Python 3.11 through 3.13. On Python 3.10,
+stay on PreTab 1.0.0 or [upgrade Python](installation.md#python-310-migration).
+
+```{note}
+Use fitted attributes and methods in code rather than parsing verbose inspection
+text, which may change. Only the thin-plate spline's legacy penalty matrix is
+experimental, not its transform. The matrix is not guaranteed positive semidefinite.
+```
+
 ## Where to go next
 
 - [Installation](installation.md) sets up PreTab and its optional extras.
