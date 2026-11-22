@@ -1091,6 +1091,46 @@ def test_types_a_spec_cannot_load_are_rejected_at_save_time():
         _encode(list)
 
 
+class _ExternalEstimator(NoTransformer):
+    pass
+
+
+def test_nested_external_estimator_is_rejected_by_spec_callers(frame, tmp_path):
+    processor = Preprocessor(numerical_method="minmax").fit(frame)
+    expected = processor.transform(frame)
+    path = tmp_path / "spec.json"
+    spec = processor.to_spec(path)
+    saved = path.read_bytes()
+    fingerprint = processor.fingerprint_
+    assert processor.reproducibility_report()["fingerprint"] == fingerprint
+    restored = Preprocessor.from_spec(path)
+    assert restored.to_spec() == spec
+    assert restored.fingerprint_ == fingerprint
+    np.testing.assert_array_equal(restored.transform(frame), expected)
+
+    fitted_pipeline = processor.column_transformer_.named_transformers_["num_a"]
+    nested = {"estimators": [_ExternalEstimator()]}
+    fitted_pipeline.extension_state_ = nested
+    missing_path = tmp_path / "not-created.json"
+    message = r"_ExternalEstimator.*Registration does not enable spec persistence.*built-in"
+
+    with pytest.raises(PretabSerializationError, match=message):
+        processor.to_spec()
+    with pytest.raises(PretabSerializationError, match=message):
+        processor.to_spec(path)
+    with pytest.raises(PretabSerializationError, match=message):
+        processor.to_spec(missing_path)
+    with pytest.raises(PretabSerializationError, match=message):
+        _ = processor.fingerprint_
+    with pytest.raises(PretabSerializationError, match=message):
+        processor.reproducibility_report()
+
+    assert path.read_bytes() == saved
+    assert not missing_path.exists()
+    assert fitted_pipeline.extension_state_ is nested
+    np.testing.assert_array_equal(processor.transform(frame), expected)
+
+
 def test_object_arrays_written_before_element_encoding_still_load():
     from pretab.compose.serialize import _decode
 

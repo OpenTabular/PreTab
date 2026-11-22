@@ -166,6 +166,13 @@ def _encode(obj):
     if isinstance(obj, list):
         return [_encode(v) for v in obj]
     if isinstance(obj, BaseEstimator):
+        cls = type(obj)
+        if not _module_allowed(cls.__module__):
+            raise PretabSerializationError(
+                f"Cannot serialize estimator {cls.__module__}.{cls.__qualname__} in a schema-v1 spec. "
+                "Registration does not enable spec persistence. Use a supported built-in representation for JSON "
+                "replay, or a trusted pickle or joblib checkpoint in a matching environment if all components support it."
+            )
         return {"__estimator__": {"class": _qualname(obj), "state": _encode_mapping(vars(obj))}}
     if type(obj) is RepresentationConfig:
         fields = {key: _encode(value) for key, value in obj.to_dict().items()}

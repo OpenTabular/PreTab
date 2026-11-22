@@ -91,14 +91,18 @@ replay, and verify fitted outputs when upgrading.
 Use a spec when you need an inspectable JSON artifact for supported fitted PreTab state.
 Supported built-in representations reproduce `transform` bit-for-bit in the same environment.
 The spec covers preprocessing, not a downstream model. Registering a third-party
-representation for fitting does not make it restorable from a spec; don't rely on specs
-to persist third-party representations or pretrained language models. A serialization
-failure occurs before `to_spec(path)` opens the destination.
+representation enables fitting and transforming, not spec persistence. `to_spec()` raises
+`PretabSerializationError` and names the unsupported estimator if its module is outside
+the spec's allowed modules, even when it is nested in an otherwise supported pipeline.
+The fitted object is unchanged, and `to_spec(path)` raises before opening the destination.
+Use supported built-in representations when you need JSON replay; don't rely on specs
+to persist third-party representations or pretrained language models.
 
 Use pickle or joblib when you need to persist a larger Python object, such as a complete
-scikit-learn pipeline, and every component supports that mechanism. Neither is a
-cross-version guarantee. Unpickling can execute arbitrary code: only load trusted
-pickle or joblib artifacts. The same trusted-source requirement applies to specs.
+scikit-learn pipeline, and every component supports that mechanism. Use a matching
+environment to restore the checkpoint; neither format guarantees cross-version replay.
+Unpickling can execute arbitrary code: only load trusted pickle or joblib artifacts.
+The same trusted-source requirement applies to specs.
 
 ```{note}
 Restoring a PreTab 1.0.0 `Preprocessor` from a spec or trusted pickle repairs
@@ -144,6 +148,10 @@ versions, seed, output dtype and format, output widths, and the per-feature fami
 ```python
 pre.reproducibility_report()
 ```
+
+`fingerprint_` and `reproducibility_report()` require supported spec state. Both raise
+`PretabSerializationError` on unsupported estimator state rather than returning a digest
+or partial report.
 
 ## Immutable lifecycle
 

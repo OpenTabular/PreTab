@@ -164,7 +164,7 @@ configuration needs no syntax change, and can be mixed with structured entries.
 Configuration, output, and reproducibility
 ------------------------------------------
 
-Fitted preprocessors using string, mapping, or
+Fitted preprocessors with supported state using string, mapping, or
 :class:`~pretab.RepresentationConfig` entries can be saved with
 :meth:`~pretab.Preprocessor.to_spec` and restored with
 :meth:`~pretab.Preprocessor.from_spec` in the same environment. Restored names,
@@ -178,6 +178,13 @@ requests; ``resolved_config``, when present, describes the last successful fit.
 The reader restores the encoded ``state`` rather than fitting from either set of
 settings. See :ref:`portable-serialization` for the field reference, reading
 legacy specs, downgrade limits, and when to use pickle instead.
+
+Registration does not enable spec persistence. ``to_spec()``, ``fingerprint_``,
+and ``reproducibility_report()`` raise ``PretabSerializationError`` on unsupported
+estimator state, including nested estimators. File export raises before opening
+the destination. Use supported built-in representations for JSON replay, or a
+trusted pickle or joblib checkpoint in a matching environment if all components
+support it.
 
 .. warning::
 

@@ -22,7 +22,7 @@ from pretab import (
 from pretab.compose import registry
 from pretab.compose.config import PreprocessorConfig
 from pretab.compose.factory import create_transformer
-from pretab.exceptions import ConfigWarning
+from pretab.exceptions import ConfigWarning, PretabSerializationError
 
 
 class _Square(BaseRepresentation):
@@ -150,6 +150,18 @@ def test_register_end_to_end_through_preprocessor():
     # the registered "square" method yields non-negative values bounded by 1.
     assert (out >= -1e-9).all()
     assert out.max() <= 1 + 1e-9
+
+
+def test_registered_external_estimator_is_rejected_at_save_time():
+    register_representation("square_reg", _Square)
+    frame = pd.DataFrame({"value": np.linspace(0.0, 1.0, 12)})
+    processor = Preprocessor(numerical_method="square_reg", target_aware=False, placement_strategy="uniform").fit(frame)
+    expected = processor.transform(frame, return_array=True)
+
+    with pytest.raises(PretabSerializationError, match=r"_Square.*Registration does not enable spec persistence"):
+        processor.to_spec()
+
+    np.testing.assert_array_equal(processor.transform(frame, return_array=True), expected)
 
 
 def test_registered_positive_only_feature_info_matches_fitted_layout(monkeypatch):
