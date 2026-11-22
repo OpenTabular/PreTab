@@ -52,7 +52,7 @@ def target():
 
 
 @pytest.mark.parametrize("restore_format", ["pickle", "spec"])
-def test_legacy_state_restores_constructor_defaults(frame, restore_format):
+def test_legacy_state_restores_constructor_defaults(frame, restore_format, tmp_path):
     processor = Preprocessor(numerical_method="rbf", target_aware=False, placement_strategy="uniform").fit(frame)
     expected = processor.transform(frame)
     fingerprint = processor.fingerprint_
@@ -70,14 +70,20 @@ def test_legacy_state_restores_constructor_defaults(frame, restore_format):
         del spec["state"]["_fit_config_"]
         for key in ("resolved_config", "output_dims", "total_output_dim", "feature_lineage"):
             del spec[key]
-        restored = Preprocessor.from_spec(spec)
+        spec["schema_version"] = 1
+        path = tmp_path / "legacy-v1.json"
+        path.write_text(json.dumps(spec, allow_nan=False), encoding="utf-8")
+        restored = Preprocessor.from_spec(path)
 
     assert restored.get_params(deep=False)["feature_groups"] is None
     assert restored.get_params(deep=False)["task_validation"] == "off"
     assert restored.get_resolved_config()["feature_groups"] is None
     assert restored.get_resolved_config()["task_validation"] == "off"
     assert restored.fingerprint_ == fingerprint
-    assert "resolved_config" not in restored.to_spec()
+    rewritten = restored.to_spec()
+    assert rewritten["schema_version"] == 1
+    assert "resolved_config" not in rewritten
+    assert "_fit_config_" not in rewritten["state"]
     np.testing.assert_array_equal(restored.transform(frame), expected)
     copied = clone(restored)
     assert isinstance(copied, Preprocessor)
