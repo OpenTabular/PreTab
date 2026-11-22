@@ -355,6 +355,13 @@ city     categorical  imputer -> onehot -> to_float      3      3
 )
 ```
 
+After the table, `get_feature_info()` logs the effective settings recorded at fit time
+for declared feature overrides and groups, with group sources in their declared order.
+This section does not enumerate every pipeline step. Its `output_dim`, when present, is
+a configuration setting; the table's `dim` is the actual fitted width. Edits after fit
+do not change the recorded settings. Use `get_resolved_config()` for current settings.
+Older fits without a settings record report that it is unavailable.
+
 ```{tip}
 `get_feature_info()` is a handy, no-setup way to check exactly what happened to each feature:
 which pipeline it went through, how many output columns it produced, and (for categoricals)

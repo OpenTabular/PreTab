@@ -337,6 +337,33 @@ def build_transformer_summary(numerical_info, categorical_info, embedding_info):
     return lines
 
 
+def _build_effective_settings_summary(fit_config: dict | None) -> list[str]:
+    """Render settings recorded for declared overrides and groups at fit time."""
+    if fit_config is None:
+        return ["Fit-time effective settings unavailable (not recorded)."]
+
+    def format_settings(settings):
+        fields = [
+            f"{key}={value!r}"
+            for key, value in settings.items()
+            if key != "params" and not (key == "name" and value is None)
+        ]
+        fields.extend(f"{key}={value!r}" for key, value in settings.get("params", {}).items())
+        return ", ".join(fields)
+
+    rows = [
+        f"feature {feature!r}: {format_settings(settings)}"
+        for feature, settings in (fit_config["feature_preprocessing"] or {}).items()
+    ]
+    rows.extend(
+        f"group_{group['name']} (sources={group['columns']!r}): {format_settings(group['representation'])}"
+        for group in fit_config["feature_groups"] or []
+    )
+    if not rows:
+        return ["Fit-time effective settings: no per-feature overrides or groups recorded."]
+    return ["Fit-time effective settings (declared overrides and groups; fitted dimensions are shown above):", *rows]
+
+
 # Mapping from pipeline step name to (family, component) for representation-bearing
 # scikit-learn steps that do not expose ``get_representation_spec``.
 _STEP_FAMILY = {

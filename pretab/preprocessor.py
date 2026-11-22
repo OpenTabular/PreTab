@@ -25,6 +25,7 @@ from .compose.feature_detection import (
 )
 from .compose.inspection import (
     _block_uses_task,
+    _build_effective_settings_summary,
     _iter_fitted_blocks,
     block_uses_target,
     build_feature_info,
@@ -1452,8 +1453,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         verbose : bool, default=True
             If True, renders an aligned per-feature table through the ``pretab``
             logger (attaching a stream handler when no host handler receives its
-            records), without lowering a more verbose level set earlier. If False,
-            the info dicts are returned silently.
+            records), without lowering a more verbose level set earlier. The
+            table is followed by the recorded fit-time settings for declared
+            feature overrides and groups, or an explicit notice for older fits
+            without that record. If False, the info dicts are returned silently.
 
         Returns
         -------
@@ -1490,6 +1493,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 categorical_feature_info,
                 embedding_feature_info,
             ):
+                logger.info(line)
+            for line in _build_effective_settings_summary(getattr(self, "_fit_config_", None)):
                 logger.info(line)
 
         return numerical_feature_info, categorical_feature_info, embedding_feature_info

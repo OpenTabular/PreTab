@@ -317,6 +317,47 @@ def test_spec_content_describes_the_fit_after_requests_change(frame):
     assert "group_joint" not in refit_spec["output_dims"]
 
 
+@pytest.mark.parametrize("restore", ["none", "current", "legacy"])
+def test_verbose_feature_info_uses_recorded_fit_settings(frame, caplog, restore):
+    fitting_frame = frame.assign(extra=np.linspace(-2, 2, len(frame)))
+    override = {"method": "RBF", "output_dim": 3, "gamma": 0.5}
+    processor = Preprocessor(
+        numerical_method="minmax",
+        target_aware=False,
+        placement_strategy="uniform",
+        feature_preprocessing={"extra": override},
+        feature_groups=[FeatureGroup("joint", ("b", "a"), RepresentationConfig("tensorspline", output_dim=4))],
+    ).fit(fitting_frame)
+    override["gamma"] = 1.5
+    processor.set_params(feature_groups=None)
+    if restore != "none":
+        spec = processor.to_spec()
+        if restore == "legacy":
+            del spec["state"]["_fit_config_"]
+            del spec["resolved_config"]
+        processor = Preprocessor.from_spec(json.loads(json.dumps(spec, allow_nan=False)))
+
+    before = processor.to_spec()
+    fingerprint = processor.fingerprint_
+    with caplog.at_level("INFO", logger="pretab"):
+        quiet = processor.get_feature_info(verbose=False)
+        assert not caplog.messages
+        assert processor.get_feature_info() == quiet
+
+    assert quiet[0]["group_joint"]["dimension"] == 16
+    assert "gamma=1.5" not in caplog.text
+    if restore == "legacy":
+        assert "Fit-time effective settings unavailable (not recorded)." in caplog.messages
+    else:
+        single = next(message for message in caplog.messages if message.startswith("feature 'extra':"))
+        assert "method='rbf'" in single and "output_dim=3" in single and "gamma=0.5" in single
+        assert "placement_strategy='uniform'" in single and "target_aware=False" in single
+        group = next(message for message in caplog.messages if message.startswith("group_joint (sources=['b', 'a']):"))
+        assert "method='tensorspline'" in group and "output_dim=4" in group
+    assert processor.fingerprint_ == fingerprint
+    assert processor.to_spec() == before
+
+
 @pytest.mark.parametrize("via_file", [False, True], ids=["dict", "file"])
 @pytest.mark.parametrize(
     ("path", "value"),
