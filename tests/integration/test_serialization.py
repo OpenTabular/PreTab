@@ -59,6 +59,7 @@ def test_legacy_state_restores_constructor_defaults(frame, restore_format):
     if restore_format == "pickle":
         del processor.feature_groups
         del processor.task_validation
+        del processor._fit_config_
         restored = pickle.loads(pickle.dumps(processor))  # noqa: S301
     else:
         spec = processor.to_spec()
@@ -66,6 +67,9 @@ def test_legacy_state_restores_constructor_defaults(frame, restore_format):
         del spec["params"]["feature_groups"]
         del spec["state"]["task_validation"]
         del spec["params"]["task_validation"]
+        del spec["state"]["_fit_config_"]
+        for key in ("resolved_config", "output_dims", "total_output_dim", "feature_lineage"):
+            del spec[key]
         restored = Preprocessor.from_spec(spec)
 
     assert restored.get_params(deep=False)["feature_groups"] is None
@@ -73,6 +77,7 @@ def test_legacy_state_restores_constructor_defaults(frame, restore_format):
     assert restored.get_resolved_config()["feature_groups"] is None
     assert restored.get_resolved_config()["task_validation"] == "off"
     assert restored.fingerprint_ == fingerprint
+    assert "resolved_config" not in restored.to_spec()
     np.testing.assert_array_equal(restored.transform(frame), expected)
     copied = clone(restored)
     assert isinstance(copied, Preprocessor)
@@ -261,6 +266,102 @@ def test_representation_summary_present(frame, target):
     spec = p.to_spec()
     families = {entry["family"] for entry in spec["representations"]}
     assert "rbf" in families
+
+
+def test_spec_content_describes_the_fit_after_requests_change(frame):
+    X = frame.assign(extra=np.linspace(-2, 2, len(frame)))
+    override = {"method": "RBF", "output_dim": 3, "gamma": 0.5}
+    processor = Preprocessor(
+        numerical_method="minmax",
+        target_aware=False,
+        placement_strategy="quantile",
+        feature_preprocessing={"extra": override},
+        feature_groups=[FeatureGroup("joint", ("b", "a"), RepresentationConfig("tensorspline", output_dim=4))],
+    ).fit(X)
+    override["gamma"] = 1.5
+    processor.set_params(numerical_method="none", feature_groups=None)
+
+    spec = json.loads(json.dumps(processor.to_spec(), allow_nan=False))
+
+    assert spec["params"]["numerical_method"] == "none"
+    assert spec["params"]["feature_preprocessing"]["extra"]["gamma"] == 1.5
+    assert spec["params"]["feature_groups"] is None
+    resolved = spec["resolved_config"]
+    assert resolved["numerical_method"] == "minmax"
+    extra = resolved["feature_preprocessing"]["extra"]
+    assert (extra["method"], extra["output_dim"], extra["params"]["gamma"]) == ("rbf", 3, 0.5)
+    group = resolved["feature_groups"][0]
+    assert (group["name"], group["columns"], group["representation"]["method"]) == ("joint", ["b", "a"], "tensorspline")
+    assert spec["output_dims"] == processor.output_dims_
+    assert spec["total_output_dim"] == processor.total_output_dim_
+    assert spec["feature_lineage"] == [item.to_dict() for item in processor.get_feature_lineage()]
+    assert [item["source_features"] for item in spec["feature_lineage"] if item.get("group_id")] == [["b", "a"]] * spec[
+        "output_dims"
+    ]["group_joint"]
+
+    restored = Preprocessor.from_spec(spec)
+    assert restored.to_spec()["resolved_config"] == resolved
+    np.testing.assert_array_equal(restored.transform(X), processor.transform(X))
+
+    processor.fit(X)
+    refit_spec = processor.to_spec()
+    assert refit_spec["resolved_config"]["feature_groups"] is None
+    assert refit_spec["resolved_config"]["feature_preprocessing"]["extra"]["params"]["gamma"] == 1.5
+    assert "group_joint" not in refit_spec["output_dims"]
+
+
+@pytest.mark.parametrize("group_method", ["tensorspline", "tprs"])
+def test_spec_content_includes_only_supported_penalty_summaries(frame, group_method):
+    X = frame.assign(extra=np.linspace(-2, 2, len(frame)))
+    X.loc[::7, "b"] = np.nan
+    width_option = "output_dim" if group_method == "tensorspline" else "n_components"
+    processor = Preprocessor(
+        numerical_method="pspline",
+        output_dim=7,
+        target_aware=False,
+        placement_strategy="uniform",
+        feature_groups={"joint": {"columns": ["b", "a"], "representation": {"method": group_method, width_option: 4}}},
+        missing_policy="separate_state",
+    ).fit(X)
+
+    spec = json.loads(json.dumps(processor.to_spec(), allow_nan=False))
+    group = next(entry for entry in spec["representations"] if entry.get("group_id") == "group_joint")
+    single = next(entry for entry in spec["representations"] if entry["columns"] == ["extra"])
+    (penalty,) = single["penalties"]
+    assert penalty["shape"] == [single["output_dim"]] * 2
+    assert penalty["order"] == 2
+    assert len(penalty["matrix_sha256"]) == 64
+    assert "matrix" not in penalty
+    if group_method == "tensorspline":
+        assert [penalty["axis"] for penalty in group["penalties"]] == [["b"], ["a"]]
+        assert group["dimension"] == group["output_dim"] + 2
+        for penalty in group["penalties"]:
+            assert penalty["shape"] == [group["output_dim"]] * 2
+            assert "matrix" not in penalty
+    else:
+        assert "penalties" not in group
+    assert Preprocessor.from_spec(spec).to_spec()["representations"] == spec["representations"]
+
+    del spec["state"]["_fit_config_"]
+    legacy_spec = Preprocessor.from_spec(spec).to_spec()
+    assert "resolved_config" not in legacy_spec
+    assert all("penalties" not in entry for entry in legacy_spec["representations"])
+
+
+def test_spec_content_keeps_legacy_only_pspline_orders_replayable(frame):
+    processor = Preprocessor(
+        numerical_method="minmax",
+        target_aware=False,
+        placement_strategy="uniform",
+        feature_preprocessing={"a": {"method": "pspline", "output_dim": 7, "diff_order": 3}},
+    ).fit(frame)
+
+    spec = json.loads(json.dumps(processor.to_spec(), allow_nan=False))
+    entry = next(entry for entry in spec["representations"] if entry["columns"] == ["a"])
+
+    assert "penalties" not in entry
+    restored = Preprocessor.from_spec(spec)
+    np.testing.assert_array_equal(restored.transform(frame), processor.transform(frame))
 
 
 @pytest.mark.parametrize("leaf_input", ["imputed", "frame"])
@@ -875,7 +976,9 @@ def test_failed_save_leaves_an_existing_spec_untouched(tmp_path, monkeypatch, un
     # already-opened file used to leave a truncated, invalid spec behind.
     spec = pre.to_spec()
     monkeypatch.setattr(
-        preprocessor_module, "preprocessor_to_spec", lambda _: {**spec, "state": {"unsupported_": unsupported}}
+        preprocessor_module,
+        "preprocessor_to_spec",
+        lambda _processor, **_options: {**spec, "state": {"unsupported_": unsupported}},
     )
     with pytest.raises(PretabSerializationError, match="cannot be written as JSON"):
         pre.to_spec(path)

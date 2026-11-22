@@ -248,6 +248,10 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         check_is_fitted(self, "penalty_")
         return self.penalty_[feature_index]
 
+    def _has_legacy_only_penalty(self) -> bool:
+        fitted = getattr(self, "_penalty_fit_", None)
+        return fitted is not None and fitted[0] not in (1, 2)
+
     def get_penalty_spec(
         self, feature_index: int | np.integer[Any] = 0, *, diff_order: int | np.integer[Any] | None = None
     ) -> PenaltySpec:
@@ -273,7 +277,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         if fitted is None:
             raise invalid_param_error(estimator, "get_penalty_spec", None, "refit to record the fitted penalty order")
         order, include_bias = fitted
-        if order not in (1, 2):
+        if self._has_legacy_only_penalty():
             raise invalid_param_error(
                 estimator,
                 "diff_order",

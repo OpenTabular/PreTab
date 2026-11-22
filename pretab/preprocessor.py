@@ -668,6 +668,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             apply_constant_policy(numeric_values, self.policy_, estimator=self)
 
         self._validate_fit_output()
+        fit_summary = self._resolved_config_summary(resolved, config, numerical_features=numerical_features)
 
         # Ask ColumnTransformer to assemble the representation in the requested
         # container whenever its component outputs permit it. In particular,
@@ -679,6 +680,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
+        vars(self).pop("_fit_config_", None)
         # The Preprocessor wraps its own output (set_output / output_format), so the
         # internal steps always produce plain arrays. Otherwise a global
         # ``sklearn.set_config(transform_output="pandas")`` reaches them and the
@@ -732,6 +734,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if verbose >= 3:
             self._log_internal_decisions()
 
+        self._fit_config_ = fit_summary
         return self
 
     def transform(self, X, embeddings=None, return_array=None):
@@ -990,22 +993,29 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
         resolved = self._resolved_params()
         if resolved["feature_preprocessing"] or resolved["feature_groups"] is not None:
-            config = PreprocessorConfig.from_params(
-                **{field.name: resolved[field.name] for field in fields(PreprocessorConfig)}
-            )
-            if resolved["feature_preprocessing"]:
-                resolved["feature_preprocessing"] = {
-                    feature: config.representation_for(feature).to_dict() for feature in config.feature_preprocessing
+            return self._resolved_config_summary(resolved, self._fit_config(resolved))
+        return copy.deepcopy(resolved)
+
+    @staticmethod
+    def _resolved_config_summary(resolved, config: PreprocessorConfig, *, numerical_features=None):
+        resolved = dict(resolved)
+        if resolved["feature_preprocessing"]:
+            numerical = None if numerical_features is None else set(numerical_features)
+            resolved["feature_preprocessing"] = {
+                feature: config.representation_for(
+                    feature, is_numerical=None if numerical is None else feature in numerical
+                ).to_dict()
+                for feature in config.feature_preprocessing
+            }
+        if resolved["feature_groups"] is not None:
+            resolved["feature_groups"] = [
+                {
+                    "name": group.name,
+                    "columns": list(group.columns),
+                    "representation": config.group_representation_for(group).to_dict(),
                 }
-            if resolved["feature_groups"] is not None:
-                resolved["feature_groups"] = [
-                    {
-                        "name": group.name,
-                        "columns": list(group.columns),
-                        "representation": config.group_representation_for(group).to_dict(),
-                    }
-                    for group in config.feature_groups
-                ]
+                for group in config.feature_groups
+            ]
         return copy.deepcopy(resolved)
 
     def get_feature_names_out(self, input_features=None):
@@ -1511,6 +1521,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Only load specs from trusted sources. Third-party representations and
         pretrained language models are not supported by this serializer.
 
+        ``params`` describes the current constructor request. When recorded at
+        fit, ``resolved_config`` describes the settings used for the fitted
+        graph. Output dimensions and lineage describe fitted output, including
+        indicator columns. Supported fitted penalties are summarized without
+        their matrices; the encoded ``state`` remains the source for replay.
+
         Parameters
         ----------
         path : str, os.PathLike, or None, default=None
@@ -1579,7 +1595,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     # --- Fingerprint & reproducibility ---
     def _canonical_spec(self) -> dict:
         """Deterministic subset of the spec used for fingerprinting."""
-        spec = preprocessor_to_spec(self)
+        spec = preprocessor_to_spec(self, include_fitted_metadata=False)
         # Runtime reports and advisory lifecycle flags do not change the fitted
         # representation. Keep them in serialization, but out of its identity.
         state = {
@@ -1632,7 +1648,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             Group metadata comes from the fitted graph, not current requests.
         """
         check_is_fitted(self)
-        spec = preprocessor_to_spec(self)
+        spec = preprocessor_to_spec(self, include_fitted_metadata=False)
         representations = {
             entry.get("group_id", entry["columns"][0]): entry.get("family")
             for entry in spec["representations"]

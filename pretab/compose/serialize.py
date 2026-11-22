@@ -37,13 +37,14 @@ from ..core.parameters import UNSET
 from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
 from ..exceptions import PretabSerializationError
+from ..expansion.spline.p_spline import PSplineTransformer
 from ..expansion.spline.penalty import PenaltySpec, _copy_provenance
 from ..placement.base import PlacementResult
 from ..preprocessing.floats import NoTransformer, ToFloatTransformer
 from .config import FeatureGroup, RepresentationConfig
 from .inspection import _iter_fitted_blocks, representation_leaf
 from .output import _require_polars
-from .registry import TransformerSpec
+from .registry import TRANSFORMER_REGISTRY, TransformerSpec
 
 SCHEMA_VERSION = 1
 
@@ -321,7 +322,27 @@ def _library_versions() -> dict:
     }
 
 
-def _representation_summary(preprocessor) -> list:
+def _penalty_summaries(leaf) -> list[dict]:
+    scope = next(
+        (
+            spec.arity
+            for spec in TRANSFORMER_REGISTRY.values()
+            if spec.typed_penalty and spec.transformer_cls is type(leaf)
+        ),
+        None,
+    )
+    if scope is None:
+        return []
+    if scope == "multivariate":
+        penalties = leaf.get_penalty_specs()
+    else:
+        if isinstance(leaf, PSplineTransformer) and leaf._has_legacy_only_penalty():
+            return []
+        penalties = (leaf.get_penalty_spec(feature_index=index) for index in range(leaf.n_features_in_))
+    return [penalty.to_summary() for penalty in penalties]
+
+
+def _representation_summary(preprocessor, *, include_penalties: bool = False) -> list:
     """Declarative per-representation summary (family/columns/locations).
 
     One entry per block whose representation ends in a PreTab transformer, built from its
@@ -359,22 +380,35 @@ def _representation_summary(preprocessor) -> list:
             entry["group_id"] = block.group_id
             entry["dimension"] = span.stop - span.start
             entry["output_slice"] = [span.start, span.stop]
+        if include_penalties and (penalties := _penalty_summaries(leaf)):
+            entry["penalties"] = penalties
         summary.append(entry)
     return summary
 
 
-def preprocessor_to_spec(preprocessor) -> dict:
+def preprocessor_to_spec(preprocessor, *, include_fitted_metadata: bool = True) -> dict:
     """Serialize a fitted preprocessor into a portable, versioned spec dictionary."""
     check_is_fitted(preprocessor)
-    return {
+    state = vars(preprocessor)
+    if not include_fitted_metadata:
+        state = {key: value for key, value in state.items() if key != "_fit_config_"}
+    has_fit_config = "_fit_config_" in state
+    spec = {
         "schema_version": SCHEMA_VERSION,
         "pretab_version": _PRETAB_VERSION,
         "library_versions": _library_versions(),
         "params": _json_safe(preprocessor.get_params(deep=False)),
         "feature_names_out": [str(name) for name in preprocessor.get_feature_names_out()],
-        "representations": _representation_summary(preprocessor),
-        "state": _encode_mapping(vars(preprocessor)),
+        "representations": _representation_summary(preprocessor, include_penalties=has_fit_config),
+        "state": _encode_mapping(state),
     }
+    if include_fitted_metadata:
+        if has_fit_config:
+            spec["resolved_config"] = _json_safe(state["_fit_config_"])
+        spec["output_dims"] = _json_safe(preprocessor.output_dims_)
+        spec["total_output_dim"] = preprocessor.total_output_dim_
+        spec["feature_lineage"] = _json_safe([item.to_dict() for item in preprocessor.get_feature_lineage()])
+    return spec
 
 
 def check_spec_schema(data: dict) -> None:
