@@ -46,23 +46,22 @@ steps and watch the total column count.
 
 ## Adaptive sizing
 
-Some features are simple and some are complex, and one fixed width rarely suits all of them.
-PLE, the feature maps, and the freely-placed knot splines can size each feature from the data
-instead.
+For supported methods, `adaptive=True` lets fitting adjust the per-feature width. The
+`min_output_dim` and `max_output_dim` settings specify the requested bounds. How they are used
+depends on the method and placement path:
 
-`adaptive`
-: When `True`, the width for each feature is chosen from the data and kept inside
-`[min_output_dim, max_output_dim]`. Fixed-width methods such as the plain scalers ignore
-this flag.
-
-`min_output_dim`, `max_output_dim`
-: The lower and upper bounds that apply only when `adaptive=True` (defaults `5` and `10`).
-They are ignored otherwise.
+- **Supervised search.** Two explicit bounds define the search window. An unset bound can
+  fall back to `output_dim`, which must still be valid for the method even when both bounds
+  are set. PLE always uses the target and does not take a `target_aware` flag.
+- **Target-free placement.** B-, M-, and I-splines start from `output_dim` and adjust the
+  unsupervised knots toward the bounds. With bounds `[4, 6]`, a target-free B-spline can
+  keep a requested width of 5 or reduce a requested width of 12 to 6. Other methods, such
+  as RBF and natural cubic splines, keep their ordinary sizing on the target-free path.
 
 ```{note}
-When `adaptive=True` and both `min_output_dim` and `max_output_dim` are set, `output_dim` has
-no effect at all: the window comes entirely from the two bounds. `output_dim` only matters in
-adaptive mode when one of the bounds is left unset, where it fills in for the missing one.
+B-, M-, and I-splines can fit fewer columns than `min_output_dim` when there are too few
+distinct input values for the requested knots. Use `output_dims_` or `total_output_dim_`
+after fitting a `Preprocessor` to size a downstream model.
 ```
 
 ```python
@@ -70,6 +69,8 @@ from pretab import Preprocessor
 
 pre = Preprocessor(
     numerical_method="rbf",
+  target_aware=True,
+  placement_strategy="cart",
     adaptive=True,
     min_output_dim=4,
     max_output_dim=12,

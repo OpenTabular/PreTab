@@ -18,6 +18,7 @@ from pretab.compose import registry
 ROOT = Path(__file__).parents[2]
 TUTORIALS_DIR = ROOT / "docs" / "tutorials"
 CORE_CONCEPTS_DIR = ROOT / "docs" / "core_concepts"
+REPRESENTATIONS_DIR = ROOT / "docs" / "representations"
 
 _FENCE = re.compile(r"^```python\n(.*?)^```\s*$", re.DOTALL | re.MULTILINE)
 
@@ -45,8 +46,13 @@ def _code_blocks(path: Path, section: str | None = None) -> list[tuple[int, str]
 _PAGES = [
     *sorted(TUTORIALS_DIR.glob("*.md")),
     *sorted(CORE_CONCEPTS_DIR.glob("*.md")),
+    REPRESENTATIONS_DIR / "functional_expansions.md",
+    REPRESENTATIONS_DIR / "kernel_approximation.md",
+    REPRESENTATIONS_DIR / "numerical_encoding.md",
+    REPRESENTATIONS_DIR / "spline_expansions.md",
     ROOT / "README.md",
     ROOT / "docs" / "homepage.md",
+    ROOT / "docs" / "getting_started" / "overview.md",
     ROOT / "docs" / "getting_started" / "quickstart.md",
     ROOT / "docs" / "developer_guide" / "architecture.md",
 ]
@@ -76,11 +82,6 @@ def isolate_document_state(tmp_path, monkeypatch):
             TUTORIALS_DIR / "multivariate_features.md",
             "Grouped preprocessing with Preprocessor",
             id="feature-groups",
-        ),
-        pytest.param(
-            ROOT / "docs" / "representations" / "spline_expansions.md",
-            "Typed spline penalties",
-            id="spline-penalties",
         ),
     ],
 )

@@ -20,22 +20,45 @@ declare intent once, for example "expand `age` with a spline, encode `income` wi
 piecewise-linear bins, treat `hour` as periodic", and PreTab fits the corresponding basis
 per column, tracks where every output column came from, and hands back a clean matrix.
 
+The examples on this page use the same small regression dataset.
+
 ```python
+import numpy as np
+import pandas as pd
+
 from pretab import Preprocessor
 
-pre = Preprocessor(feature_preprocessing={
-    "age": "naturalspline",   # smooth non-linear effect
-    "income": "ple",          # supervised piecewise-linear encoding
-    "hour": "fourier",        # periodic representation
-    "city": "one-hot",        # categorical
-})
+rng = np.random.default_rng(0)
+n_rows = 64
+df = pd.DataFrame(
+  {
+    "age": rng.uniform(18, 65, size=n_rows),
+    "income": rng.uniform(25_000, 90_000, size=n_rows),
+    "hour": rng.integers(0, 24, size=n_rows),
+    "city": rng.choice(["Oslo", "Rome"], size=n_rows),
+  }
+)
+y = np.sin(df["age"] / 10) + np.log(df["income"]) + np.cos(2 * np.pi * df["hour"] / 24)
+
+pre = Preprocessor(
+  task="regression",
+  random_state=0,
+  feature_preprocessing={
+    "age": "naturalspline",
+    "income": "ple",
+    "hour": "fourier",
+    "city": "one-hot",
+  },
+)
 X = pre.fit_transform(df, y)
+assert X.shape == (len(df), len(pre.get_feature_names_out()))
 ```
 
 ## Two ways to use it
 
-PreTab exposes the same capabilities through two surfaces. They share the same underlying
-code, so the choice is about ergonomics, not capability.
+`Preprocessor` and standalone transformers share many of the same representations. Use
+`Preprocessor` to configure a whole table, or compose standalone transformers when you need
+to control each pipeline step or use a standalone-only method.
 
 ::::{grid} 1 1 2 2
 :gutter: 3
@@ -47,8 +70,8 @@ strategies from one config.
 :::
 
 :::{grid-item-card} Standalone transformers
-Every strategy is also a plain scikit-learn transformer you can import and compose inside a
-`Pipeline` or `ColumnTransformer`. Reach for them when you want a single estimator object.
+Import a transformer from `pretab.transformers` and use it on its own or inside a
+`Pipeline` or `ColumnTransformer`.
 :::
 
 ::::
@@ -60,15 +83,12 @@ map), or want the framework services that live at this level: feature lineage,
 output-format control, missing-value policy, output budgets, serialization, and a
 reproducibility fingerprint.
 
-```python
-from pretab import Preprocessor
+The fitted `Preprocessor` above can also return the same four features as separate blocks.
 
-pre = Preprocessor(feature_preprocessing={
-    "age": "naturalspline",
-    "income": "ple",
-    "city": "one-hot",
-})
-X = pre.fit_transform(df, y)   # one stacked array, or output_structure="blocks" for a dict
+```python
+blocks = pre.transform(df, return_array=False)
+assert set(blocks) == {"num_age", "num_income", "num_hour", "cat_city"}
+assert sum(block.shape[1] for block in blocks.values()) == X.shape[1]
 ```
 
 **Reach for standalone transformers** when you want a single estimator object that composes
@@ -76,18 +96,25 @@ cleanly inside one `Pipeline`, rely on scikit-learn model selection (`cross_val_
 `GridSearchCV`, `step__param` hyperparameter addressing), or need fine control over one
 column's transformer and its parameters.
 
+This pipeline uses just `age` and `income`. It fits their representations and Ridge on the
+training split, then transforms and predicts on held-out rows.
+
 ```python
 from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
 from sklearn.linear_model import Ridge
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 
 from pretab.transformers import NaturalCubicSplineTransformer, PLETransformer
 
 features = ColumnTransformer([
     ("age", NaturalCubicSplineTransformer(output_dim=10), ["age"]),
-    ("income", PLETransformer(output_dim=12), ["income"]),
+  ("income", PLETransformer(output_dim=12, task="regression", random_state=0), ["income"]),
 ])
 model = Pipeline([("features", features), ("ridge", Ridge())])
+df_train, df_test, y_train, _ = train_test_split(df, y, random_state=0)
+model.fit(df_train, y_train)
+assert model.predict(df_test).shape == (len(df_test),)
 ```
 
 ```{note}
@@ -117,21 +144,27 @@ PreTab is not a competitor to scikit-learn. Every transformer subclasses `BaseEs
 The real question is what PreTab adds where scope overlaps with scikit-learn's own
 `SplineTransformer`, `KBinsDiscretizer`, `PolynomialFeatures`, and `TargetEncoder`.
 
-| Capability                 | scikit-learn                                                                    | PreTab                                                                                                                                                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Knot / threshold placement | Fixed `n_knots`, placed `"uniform"` or `"quantile"` before fitting              | Configured via `output_dim` (how many basis functions you want); PreTab derives the knot count from it and places them with `placement_strategy`, optionally target-aware (a CART or LightGBM model places them where the target changes fastest) |
-| How many basis functions   | You pick a fixed count                                                          | `adaptive=True` searches a width in `[min_output_dim, max_output_dim]` from the data                                                                                                                                                              |
-| Leakage safety             | `TargetEncoder` cross-fits internally; nothing else does, and nothing warns you | Every supervised representation emits a `LeakageWarning` outside a `Pipeline`, and any of them can be wrapped in `CrossFittedTransformer`                                                                                                         |
-| Feature provenance         | `get_feature_names_out()` returns names only                                    | A typed `RepresentationSpec` per transformer plus a `FeatureLineage` record per output column (family, component, target usage)                                                                                                                   |
-| Persistence                | `pickle` / `joblib`, which execute arbitrary code on load                       | `to_spec()` / `from_spec()`: a versioned JSON spec for supported fitted state, plus a stable `fingerprint_`; restore trusted specs in the same environment                                                                                        |
-| Choosing per column        | Hand-assemble a `ColumnTransformer` yourself                                    | One `Preprocessor(feature_preprocessing={...})`, validated against a capability registry so incompatible combinations (a required-target method without `y`, for example) raise a typed error at fit time                                         |
+| Capability               | scikit-learn                                                                     | PreTab                                                                                                                                                                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Knot placement           | `SplineTransformer` places `"uniform"` or `"quantile"` knots during `fit`        | Configured via `output_dim` (how many basis functions you want); PreTab derives the knot count from it and places them with `placement_strategy`, optionally target-aware (a CART or LightGBM model places them where the target changes fastest) |
+| How many basis functions | You pick a fixed count                                                           | `adaptive=True` searches a width in `[min_output_dim, max_output_dim]` from the data                                                                                                                                                              |
+| Target-aware fitting     | `TargetEncoder.fit_transform` cross-fits; `fit` followed by `transform` does not | `CrossFittedTransformer` makes out-of-fold training features when the output width is consistent across folds. Direct standalone fits that use `y` can emit `LeakageWarning`.                                                                     |
+| Feature provenance       | `get_feature_names_out()` returns names only                                     | A typed `RepresentationSpec` per transformer plus a `FeatureLineage` record per output column (family, component, target usage)                                                                                                                   |
+| Persistence              | `pickle` / `joblib`, which execute arbitrary code on load                        | `to_spec()` / `from_spec()`: a versioned JSON spec for supported fitted state, plus a stable `fingerprint_`; restore trusted specs in the same environment                                                                                        |
+| Choosing per column      | Hand-assemble a `ColumnTransformer` yourself                                     | One `Preprocessor(feature_preprocessing={...})`, validated against a capability registry so incompatible combinations (a required-target method without `y`, for example) raise a typed error at fit time                                         |
+
+```{warning}
+A fit inside `Preprocessor` or a scikit-learn `Pipeline` does not emit the standalone
+`LeakageWarning`. That does not make the fit leakage-safe by itself. For evaluation, fit
+the whole pipeline on training rows only, or cross-validate the unfitted pipeline. See
+[Target awareness](../core_concepts/target_awareness.md).
+```
 
 ```{note}
 Piecewise-linear encoding (`ple`) and the neural-style basis maps (`rbf`, `relu`, `sigmoid`,
 `tanh`, deterministic `fourier`) have no scikit-learn equivalent. `rff` and `nystroem` are thin
-wrappers around scikit-learn's own `RBFSampler` and `Nystroem`; unlike the other methods on
-this page, they operate on the whole feature block at once, so they are standalone
-transformers rather than a per-column `Preprocessor` choice.
+wrappers around scikit-learn's own `RBFSampler` and `Nystroem`. Both operate on whole
+feature blocks and are available as standalone transformers only.
 ```
 
 ## When to reach for PreTab
@@ -163,8 +196,9 @@ full breakdown.
 Knowing the boundaries is as useful as knowing the features. PreTab deliberately does not
 try to be an everything-library.
 
-- **Not a modelling library.** PreTab produces features. It does not fit predictors, tune
-  models, or select features for you. It sits _in front of_ an estimator.
+- **Not a modelling library.** PreTab supplies representations, not predictors. Use your own
+  estimator downstream. [`RepresentationSearchCV`](../api/search_and_cross_fitting.rst)
+  fits that estimator while comparing candidate representations by cross-validation.
 - **Not a time-series toolkit.** Generic lag and rolling-window utilities were removed on
   purpose. PreTab keeps the periodic encoding that expresses cyclic structure (hour, day,
   month) but leaves sequence modelling to dedicated libraries.

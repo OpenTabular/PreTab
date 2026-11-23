@@ -1,23 +1,21 @@
 # Installation
 
-PreTab 1.1 supports Python 3.11 to 3.13, with the following minimum core dependency versions:
+PreTab 1.1 supports Python 3.11 to 3.13. The table distinguishes the declared minimum
+dependency versions from the pinned versions tested in the Python 3.11 CI job.
 
-| Dependency     | Minimum |
-| -------------- | ------- |
-| `numpy`        | 1.24    |
-| `pandas`       | 2.0     |
-| `scipy`        | 1.10    |
-| `scikit-learn` | 1.6     |
+| Dependency     | Declared minimum | Tested CI pin |
+| -------------- | ---------------- | ------------- |
+| `numpy`        | 1.24             | 1.24.4        |
+| `pandas`       | 2.0              | 2.0.3         |
+| `scipy`        | 1.10             | 1.10.1        |
+| `scikit-learn` | 1.6              | 1.6.0         |
 
 ```{note}
-`scikit-learn>=1.6` is required for the `__sklearn_tags__` tag-dispatch API pretab's
-transformers use. A dedicated CI job installs exactly these minimum versions and runs the
-test suite against them, so this floor is verified, not just declared.
+PreTab's transformers require `scikit-learn>=1.6` for the `__sklearn_tags__` API.
 ```
 
 The core dependencies are NumPy >=1.24,<3, pandas >=2,<3, SciPy >=1.10,<2,
-and scikit-learn >=1.6,<2. The scikit-learn minimum matches the validation and
-estimator-tag APIs used by PreTab.
+and scikit-learn >=1.6,<2.
 
 ## From PyPI
 
@@ -119,7 +117,13 @@ preprocessing, feature lineage, leakage-safe cross-fitting, serialization, and m
 seconds, and doubles as the reviewer smoke test:
 
 ```bash
-just quickstart   # or: python scripts/quickstart.py
+just quickstart
+```
+
+Without `just`, run the script in the Poetry environment:
+
+```bash
+poetry run python scripts/quickstart.py
 ```
 
 To work on the documentation, also install the docs group:

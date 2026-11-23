@@ -79,7 +79,7 @@ print(f"5-fold R2: {scores.mean():.3f} +/- {scores.std():.3f}")
 ```
 
 ```text
-5-fold R2: 0.948 +/- 0.005
+5-fold R2: 0.944 +/- 0.004
 ```
 
 ## Tune with GridSearchCV
@@ -105,7 +105,7 @@ print(f"best CV R2:  {grid.best_score_:.3f}")
 
 ```text
 best params: {'features__age__output_dim': 6, 'ridge__alpha': 0.1}
-best CV R2:  0.949
+best CV R2:  0.945
 ```
 
 Every pretab transformer participates in the search grid just like a native `sklearn` step.

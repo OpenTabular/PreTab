@@ -12,11 +12,12 @@ A complete, installable version of this example lives in the repository under
 
 ## Subclass `BaseRepresentation`
 
-`BaseRepresentation` gives you the shared scikit-learn contract: NaN-aware validation, estimator
-tags, `get_feature_names_out`, and a typed `RepresentationSpec`. You implement `fit`,
-`transform`, and one sizing hook, and declare a small amount of metadata. Fitted on a DataFrame,
-`self._validate` records the column names as `feature_names_in_` and checks them at `transform`,
-and the output names use them (`length_f0` rather than `x0_f0`).
+`BaseRepresentation` provides input validation, scikit-learn tags, `get_feature_names_out`,
+and a typed `RepresentationSpec`. The shared validator accepts `NaN` by default, but it does
+not impute values for you. This example sets `_allow_nan = False` because computing a column's
+range requires finite data. When fitted on a DataFrame, `self._validate` records its column names
+and checks them at transform time. The output names use the recorded names (`length_f0` rather
+than `x0_f0`).
 
 ```python
 import numpy as np
@@ -31,6 +32,7 @@ class ChebyshevRepresentation(BaseRepresentation):
     feature_kind = "numerical"
     scope = "univariate"
     supervision = "unsupervised"
+    _allow_nan = False
 
     def __init__(self, degree=5):
         self.degree = degree
@@ -47,7 +49,7 @@ class ChebyshevRepresentation(BaseRepresentation):
         return np.clip(2.0 * (X - self.data_min_) / span - 1.0, -1.0, 1.0)
 
     def transform(self, X):
-        check_is_fitted(self, "n_features_in_")
+        check_is_fitted(self, ("data_min_", "data_max_"))
         z = self._rescale(np.asarray(self._validate(X, reset=False), dtype=float))
         theta = np.arccos(z)
         blocks = [
@@ -122,14 +124,18 @@ import pandas as pd
 
 rng = np.random.default_rng(0)
 df = pd.DataFrame({"x": rng.uniform(-3, 3, size=500)})
-y = np.cos(df["x"] * 2) + rng.normal(0, 0.1, size=500)
+df.loc[0, "x"] = np.nan
 
 pre = Preprocessor(numerical_method="chebyshev", degree=8)
-X2 = pre.fit_transform(df, y)
+X2 = pre.fit_transform(df)
+assert X2.shape == (len(df), 8)
+assert np.isfinite(X2).all()
 ```
 
 The `allowed_args` list tells `Preprocessor` which of its shared keyword arguments to pass
-through to your constructor.
+through to your constructor. Its numerical pipeline imputes the missing value before calling
+the representation. When using the transformer on its own, pass finite data or put an imputer
+before it in a pipeline.
 
 ## Ship it as a plugin
 

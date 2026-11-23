@@ -253,7 +253,7 @@ X = rng.uniform(-3, 3, size=(n, 2))
 y = np.exp(-(X[:, 0] ** 2 + X[:, 1] ** 2)) * 5 + rng.normal(0, 0.2, n)
 
 model = Pipeline([
-    ("tps", ThinPlateSplineTransformer(n_components=20)),
+  ("tps", ThinPlateSplineTransformer(n_components=20, random_state=0)),
     ("ridge", Ridge(alpha=1.0)),
 ])
 
@@ -278,13 +278,16 @@ features approximate an RBF kernel without forming the full kernel matrix.
 from pretab.transformers import RandomFourierFeaturesTransformer
 
 model = Pipeline([
-    ("rff", RandomFourierFeaturesTransformer(n_components=200, gamma=0.5)),
+  ("rff", RandomFourierFeaturesTransformer(n_components=200, gamma=0.5, random_state=0)),
     ("ridge", Ridge(alpha=1.0)),
 ])
 
 scores = cross_val_score(model, X, y, cv=5, scoring="r2")
 print(f"5-fold R2: {scores.mean():.3f} +/- {scores.std():.3f}")
 ```
+
+Both examples seed the transformer as well as the data generator. This makes landmark
+selection and random projections repeatable in the same environment.
 
 ```{note}
 Random Fourier features and Nyström both approximate a kernel machine. Random Fourier features
