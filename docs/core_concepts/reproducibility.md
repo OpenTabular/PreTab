@@ -11,14 +11,17 @@ placement, and the randomized feature maps. Set it to an integer whenever you ne
 output, for example in tests or published experiments.
 
 ```python
+import numpy as np
 from pretab import Preprocessor
 
+X = np.linspace(0.0, 1.0, 50).reshape(-1, 1)
+y = np.sin(2 * np.pi * X[:, 0])
 pre = Preprocessor(numerical_method="rbf", random_state=0)
 ```
 
 ```{note}
-With a fixed `random_state`, repeated fits on the same data produce identical output. Methods
-with no stochastic component ignore the seed. The standalone kernel approximations
+In the same environment, a fixed `random_state` lets you repeat a fit on the same data.
+Methods with no stochastic component ignore the seed. The standalone kernel approximations
 (`RandomFourierFeaturesTransformer`, `NystroemFeaturesTransformer`) accept `random_state`
 directly; they are fit outside `Preprocessor` since they operate on the whole feature block.
 ```
@@ -31,11 +34,12 @@ directly; they are fit outside `Preprocessor` since they operate on the whole fe
 write it to a file. `from_spec()` restores it from either form without refitting.
 
 ```python
-pre.fit(df, y)
+pre.fit(X, y)
 spec = pre.to_spec()                 # returns a dict
 pre.to_spec("representation.json")   # or writes JSON to a path
 
 restored = Preprocessor.from_spec("representation.json")
+np.testing.assert_array_equal(pre.transform(X), restored.transform(X))
 ```
 
 ### What's in a spec
@@ -127,14 +131,14 @@ resolved config, the schema, the fitted parameters, the output-column order, the
 library versions, and the output precision.
 
 ```python
-pre.fit(df, y)
-pre.fingerprint_
+fingerprint = pre.fingerprint_
+assert fingerprint == restored.fingerprint_
 ```
 
 Inference reports and advisory lifecycle flags are excluded from the fingerprint.
-The fingerprint is deterministic within a process and across processes, and it survives a
-`to_spec` / `from_spec` round-trip. Two preprocessors with the same fingerprint will produce
-the same output; a change to config, data, seed, or version changes the fingerprint.
+It identifies the fitted state and configuration, not the raw training data. For example,
+changing the target of an unsupervised fit can leave the fingerprint unchanged. A spec
+round-trip in the same environment preserves the fingerprint.
 
 ```{tip}
 Log the fingerprint alongside model metrics. If it changes unexpectedly between runs, your
@@ -167,8 +171,16 @@ accidental mutation of something you intend to deploy.
 
 ```python
 pre.freeze()          # lock it
-pre.is_frozen()       # True
-pre.set_params(...)   # raises FrozenRepresentationError while frozen
+assert pre.is_frozen()
+
+from pretab import FrozenRepresentationError
+
+try:
+  pre.set_params(output_dim=9)
+except FrozenRepresentationError:
+  pass
+else:
+  raise AssertionError("Expected a frozen preprocessor to reject parameter changes")
 ```
 
 Freezing is useful when a representation is validated and about to ship. To make a fresh,

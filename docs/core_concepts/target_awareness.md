@@ -19,8 +19,8 @@ Every method declares how it uses `y` through three levels.
 from pretab.transformers import PLETransformer
 
 t = PLETransformer()
-t.requires_y      # True: PLE always needs y
-t.is_supervised   # True
+assert t.requires_y
+assert t.is_supervised
 ```
 
 ```{warning}
@@ -44,8 +44,10 @@ After fitting, a transformer reports whether it actually consumed the target thr
 whether it was supervised.
 
 ```python
-t = PLETransformer().fit(x, y)
-t.uses_target_    # True
+X = [[0.0], [1.0], [2.0]]
+y = [0.1, 0.4, 1.2]
+t = PLETransformer().fit(X, y)  # Emits LeakageWarning when run directly.
+assert t.uses_target_
 ```
 
 ## Leakage safety
@@ -54,10 +56,11 @@ Fitting a supervised transformer on your full dataset and then evaluating on par
 target information and inflates scores. PreTab warns when it detects this pattern.
 
 ```{important}
-A supervised transformer emits a `LeakageWarning` when it is fit with a target **outside** a
-cross-validation or `Pipeline` context. Inside a scikit-learn `Pipeline`, `ColumnTransformer`,
-`Preprocessor`, or a cross-fitting wrapper, the warning is suppressed because those contexts
-already keep the fit confined to the training fold.
+`LeakageWarning` is a reminder, not a check of your data split. A supervised transformer
+can warn when fitted directly with `y`. PreTab suppresses the warning inside a scikit-learn
+`Pipeline`, `ColumnTransformer`, `Preprocessor`, or cross-fitting wrapper. That suppression
+does not mean rows were held out: a pipeline fitted on the full dataset still sees the full
+dataset. Split before fitting, or pass the entire pipeline to cross-validation.
 ```
 
 The safe patterns are:
@@ -141,10 +144,10 @@ predict.
 
 ```{tip}
 Use `CrossFittedTransformer` when you need the **training features themselves** to be
-leakage-free, for example to feed a second-stage model or to report an honest training-set
-metric. A supervised transformer inside a plain `Pipeline` already keeps cross-validation
-honest for `cross_val_score` / `GridSearchCV`, since each fold refits from scratch; you only
-need cross-fitting when you build the training features once and reuse them directly.
+computed without each row's own target, for example to feed a second-stage model. To evaluate
+that model, still use a separate validation or test set, or put the entire workflow inside
+cross-validation. A supervised transformer inside a `Pipeline` passed to `cross_val_score`
+or `GridSearchCV` is refit on each training fold before the held-out fold is scored.
 ```
 
 The fitted spec records `cross_fitted=True` and the number of folds, so the choice is
@@ -191,18 +194,19 @@ search = RepresentationSearchCV(
     random_state=0,
 )
 search.fit(X, y)
-search.cv_results_
+assert search.best_method_ == max(search.cv_results_, key=search.cv_results_.get)
+{method: round(score, 3) for method, score in search.cv_results_.items()}
 search.best_method_
 ```
 
 ```text
-{'minmax': 0.636, 'ple': 0.949, 'bspline': 0.973, 'rbf': 0.841}
+{'minmax': 0.636, 'ple': 0.949, 'bspline': 0.976, 'rbf': 0.841}
 'bspline'
 ```
 
-`bspline` scored highest across the 5 folds for this sine-shaped signal, so `search.
-best_preprocessor_` and `search.best_estimator_` are refit on all the data with `bspline` and
-ready to call `.predict(X_new)`.
+`bspline` had the highest mean validation score for this sine-shaped signal. The selected
+preprocessor and estimator are refit on all the training data, so you can call
+`search.predict(X_new)` on new rows.
 
 When several rows belong to the same unit, such as repeated measurements of one patient, a
 row-level split validates each candidate on units it has already seen in training. Pass a

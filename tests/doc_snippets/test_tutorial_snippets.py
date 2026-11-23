@@ -17,6 +17,7 @@ from pretab.compose import registry
 
 ROOT = Path(__file__).parents[2]
 TUTORIALS_DIR = ROOT / "docs" / "tutorials"
+CORE_CONCEPTS_DIR = ROOT / "docs" / "core_concepts"
 
 _FENCE = re.compile(r"^```python\n(.*?)^```\s*$", re.DOTALL | re.MULTILINE)
 
@@ -41,8 +42,9 @@ def _code_blocks(path: Path, section: str | None = None) -> list[tuple[int, str]
     return blocks
 
 
-_TUTORIALS = [
+_PAGES = [
     *sorted(TUTORIALS_DIR.glob("*.md")),
+    *sorted(CORE_CONCEPTS_DIR.glob("*.md")),
     ROOT / "README.md",
     ROOT / "docs" / "homepage.md",
     ROOT / "docs" / "getting_started" / "quickstart.md",
@@ -68,24 +70,8 @@ def isolate_document_state(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     ("tutorial", "section"),
-    [pytest.param(page, None, id=page.stem) for page in _TUTORIALS]
+    [pytest.param(page, None, id=page.stem) for page in _PAGES]
     + [
-        pytest.param(
-            ROOT / "docs" / "core_concepts" / "configuration.md",
-            "Structured per-feature configuration",
-            id="configuration",
-        ),
-        pytest.param(
-            ROOT / "docs" / "core_concepts" / "configuration.md",
-            "Polars DataFrame input",
-            id="polars-input",
-            marks=pytest.mark.skipif(find_spec("polars") is None, reason="polars is not installed"),
-        ),
-        pytest.param(
-            ROOT / "docs" / "core_concepts" / "resolution_and_placement.md",
-            "Choose a task and validate the target",
-            id="task-validation",
-        ),
         pytest.param(
             TUTORIALS_DIR / "multivariate_features.md",
             "Grouped preprocessing with Preprocessor",
@@ -102,6 +88,9 @@ def isolate_document_state(tmp_path, monkeypatch):
 def test_tutorial_code_runs(tutorial, section):
     namespace: dict = {"__name__": "__main__"}
     blocks = _code_blocks(tutorial, section)
+    if tutorial == CORE_CONCEPTS_DIR / "configuration.md" and find_spec("polars") is None:
+        polars_lines = {line for line, _ in _code_blocks(tutorial, "Polars DataFrame input")}
+        blocks = [(line, source) for line, source in blocks if line not in polars_lines]
     assert blocks, f"No Python examples found in {tutorial.name}: {section}"
     for start_line, source in blocks:
         try:

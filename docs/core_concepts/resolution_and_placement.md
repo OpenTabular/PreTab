@@ -7,19 +7,19 @@ they combine.
 
 ## Resolution: the `output_dim` width
 
-`output_dim` is the main capacity control. It sets the number of non-bias output columns per
-input feature: basis functions for the splines, centers for the feature maps, and bins for
-PLE. A larger value captures finer structure at the cost of more columns and a higher chance
-of overfitting. A smaller value is more compact and regularizes the representation.
+`output_dim` controls capacity for methods that support it. With fixed sizing it requests
+the number of basis functions or centers per input feature, excluding any optional bias
+column. For PLE it sets a maximum number of bins; the fitted width can be smaller. A wider
+representation can capture finer structure but uses more columns and can increase overfitting.
 
 ```{note}
-When you configure through the `Preprocessor`, its single `output_dim` (default `7`) is
-forwarded to **every** numerical method. Per-transformer defaults only apply when you build a
-transformer directly, for example `RBFExpansionTransformer()`.
+`Preprocessor` inherits its global `output_dim` (default `7`) for methods that accept it,
+unless a per-feature request supplies a width. Methods without a width parameter, such as
+`minmax`, ignore it. A standalone transformer uses its own default when no width is supplied.
 ```
 
 ```{warning}
-Numeric binning (`custombin`) is the one exception: `output_dim` sets the number of *bins*,
+For numeric binning (`custombin`), `output_dim` sets the number of *bins*,
 but with the default `encode="ordinal"` each input feature still emits a single output
 column holding the bin index. Pass `encode="onehot"` or `encode="soft"` if you want
 `output_dim` to also control the output width.

@@ -170,6 +170,16 @@ left out falls back to `numerical_method`, and any categorical column left out f
 column is fit with the global default's transformer, exactly as if you had listed it yourself.
 
 ```python
+import pandas as pd
+
+df = pd.DataFrame({
+    "age": np.linspace(25.0, 63.0, 20),
+    "income": np.linspace(25_000.0, 90_000.0, 20),
+    "city": ["Oslo", "Lima"] * 10,
+    "region": ["north", "south"] * 10,
+})
+y = 0.4 * df["age"] + 0.0002 * df["income"]
+
 pre = Preprocessor(
     numerical_method="bspline",          # applies to every numerical column not listed below
     feature_preprocessing={
@@ -177,6 +187,12 @@ pre = Preprocessor(
         "city": "one-hot",
     },
 ).fit(df, y)
+
+numerical, categorical, _ = pre.get_feature_info(verbose=False)
+assert numerical["age"]["preprocessing"].endswith("bspline")
+assert numerical["income"]["preprocessing"].endswith("rbf")
+assert categorical["city"]["dimension"] == 2
+assert categorical["region"]["dimension"] == 1
 ```
 
 | Column   | Kind        | Listed in `feature_preprocessing`? | Resolved method                     |
