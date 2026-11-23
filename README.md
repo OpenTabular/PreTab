@@ -26,10 +26,13 @@ embeddings) is also available as a standalone transformer. Because it speaks the
 API, PreTab drops straight into `Pipeline` and `ColumnTransformer` workflows and accepts any
 sklearn transformer alongside its own.
 
-Beyond the transformers themselves, every fitted representation is self-describing: it
-reports per-output-column lineage, guards supervised methods against leakage, serializes to
-a portable versioned spec, and can be extended with your own representations through a
-public, discoverable protocol.
+Fitted preprocessors report which inputs produced each output column. PreTab warns when
+supervised transformers are fitted outside a pipeline or cross-validation context. Supported
+fitted state can be exported to a versioned JSON spec for restoration in the same environment.
+Load specs only from trusted sources. You can also register your own representations.
+
+See [What's new in PreTab 1.1](https://pretab.readthedocs.io/en/latest/getting_started/overview.html#whats-new-in-pretab-1-1)
+for release highlights and upgrade guidance.
 
 ## Why PreTab?
 
@@ -63,16 +66,17 @@ import pandas as pd
 
 from pretab import Preprocessor
 
+rng = np.random.default_rng(0)
 df = pd.DataFrame({
-    "age": np.random.randint(18, 65, size=100),
-    "income": np.random.normal(60_000, 15_000, size=100).astype(int),
-    "city": np.random.choice(["Berlin", "Munich", "Hamburg"], size=100),
-    "experience": np.random.randint(0, 40, size=100),
+  "age": rng.integers(18, 65, size=100),
+  "income": rng.normal(60_000, 15_000, size=100).astype(int),
+  "city": rng.choice(["Berlin", "Munich", "Hamburg"], size=100),
+  "experience": rng.integers(0, 40, size=100),
 })
-y = np.random.randn(100)
+y = rng.standard_normal(100)
 
 # Global strategies: PLE for numerics, integer codes for categoricals
-preprocessor = Preprocessor(numerical_method="ple", categorical_method="int")
+preprocessor = Preprocessor(numerical_method="ple", categorical_method="int", task="regression")
 
 X = preprocessor.fit_transform(df, y)   # single stacked array, one row per sample
 
@@ -175,7 +179,8 @@ pip install pretab
 ```bash
 pip install "pretab[embeddings]"   # adds sentence-transformers, for the `pretrained` strategy
 pip install "pretab[lightgbm]"     # adds lightgbm, for placement_strategy="lightgbm"
-pip install "pretab[all]"          # both of the above
+pip install "pretab[polars]"       # adds Polars for eager DataFrame input
+pip install "pretab[all]"          # all three extras
 ```
 
 > **Note:** The core install has no heavy dependencies. Each extra is opt-in and only
@@ -206,29 +211,22 @@ preprocessor = Preprocessor(
     feature_preprocessing={
         "age": "ple",
         "income": "rbf",
-        "experience": "quantile",
+        "experience": {"method": "quantile", "params": {"n_quantiles": len(df)}},
         "city": "one-hot",
     },
     task="regression",
 )
 
-X_array = preprocessor.fit_transform(df, y)              # single stacked ndarray
-X_dict = preprocessor.transform(df, return_array=False)  # {"num_age": ..., "cat_city": ...}
+X_array = preprocessor.fit_transform(df, y)
+X_dict = preprocessor.transform(df, return_array=False)
 
-preprocessor.get_feature_info(verbose=True)              # inspect resolved strategies
+assert X_array.shape == (100, 18)
+assert X_dict["cat_city"].shape == (100, 3)
+assert len(preprocessor.get_feature_lineage()) == X_array.shape[1]
 ```
 
-`get_feature_info(verbose=True)` prints the resolved layout so you can confirm every column
-at a glance:
-
-```text
-feature     kind         pipeline                        dim   cats
--------------------------------------------------------------------
-age         numerical    imputer -> minmax -> ple          7      -
-income      numerical    imputer -> minmax -> rbf          7      -
-experience  numerical    imputer -> minmax -> quantile     1      -
-city        categorical  imputer -> onehot -> to_float     3      3
-```
+The three cities produce three one-hot columns. `get_feature_lineage()` maps each output
+column back to its source feature and representation.
 
 > **Note:** `transform` returns a single stacked array by default, so a `Preprocessor` drops
 > straight into a plain `sklearn.pipeline.Pipeline`. Pass `output_structure="blocks"` (or
