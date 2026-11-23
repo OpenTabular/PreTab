@@ -1,9 +1,10 @@
 Preprocessor
 ============
 
-The high-level entry point. :class:`~pretab.Preprocessor` reads a ``DataFrame``,
-detects feature types, resolves per-column and grouped representations from a single
-configuration, and produces model-ready output with full lineage.
+The high-level entry point. :class:`~pretab.Preprocessor` accepts a pandas
+DataFrame, an eager Polars DataFrame, a NumPy array, or a dictionary of columns.
+It detects feature types, resolves per-column and grouped representations from a
+single configuration, and produces model-ready output with full lineage.
 
 .. currentmodule:: pretab
 

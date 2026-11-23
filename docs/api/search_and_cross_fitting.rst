@@ -31,6 +31,11 @@ Cross-fitting
 Produce out-of-fold training features from a supervised transformer while
 transforming new data with an all-data model.
 
+A wrapped :class:`~pretab.Preprocessor` must use ``output_structure="matrix"``.
+Cross-fitting accepts dense arrays, sparse matrices, and DataFrames as output,
+but not dictionaries of feature blocks. Each fold must match the all-data
+model's output width and, for DataFrames, its column names and order.
+
 The wrapper's keyword-only ``task_validation`` checks its splitter's configured
 task. It does not replace the wrapped estimator's policy. If a later pipeline
 step needs transformed inputs to determine target use, it checks when those
