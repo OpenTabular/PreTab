@@ -4,8 +4,8 @@ pretab is published to [PyPI](https://pypi.org/project/pretab/) with a release-c
 step on [TestPyPI](https://test.pypi.org/project/pretab/) first. The whole flow is driven
 by [commitizen](https://commitizen-tools.github.io/commitizen/) version bumps and Git tags;
 publishing itself runs on GitHub Actions using
-[PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/) (OIDC), so no API
-tokens are stored anywhere.
+[PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/) (OIDC), so neither
+publish workflow needs a stored PyPI API token.
 
 For the SemVer rules and commit conventions that decide the next version, see
 [Versioning](contributing.md#versioning).
@@ -20,20 +20,22 @@ For the SemVer rules and commit conventions that decide the next version, see
 
 ## What runs when
 
-`ci.yml` and `docs.yml` trigger on both `main` and `release/**` branches, so a commit
-pushed straight to a release branch (step 4 below) gets the same feedback as a commit on
-`main`, without waiting for the next RC tag.
+Both `ci.yml` and `docs.yml` run on pushes to `main` and `release/**`, without waiting
+for a release tag. On pull requests, CI checks the target branch and the docs workflow
+checks the changed paths independently.
 
-| Event                |   `ci.yml`    |      `docs.yml`      | Publish workflow       |
-| -------------------- | :-----------: | :------------------: | ---------------------- |
-| PR into `main`       |      ✅       | ✅ (docs paths only) | -                      |
-| Push to `main`       |      ✅       |          ✅          | -                      |
-| Push to `release/**` |      ✅       |          ✅          | -                      |
-| Push tag `vX.Y.ZrcN` | ✅ (via `qa`) |   ✅ (via `docs`)    | `publish-testpypi.yml` |
-| Push tag `vX.Y.Z`    | ✅ (via `qa`) |   ✅ (via `docs`)    | `publish-pypi.yml`     |
+| Event                  | `ci.yml` | `docs.yml`        | Publish workflow       |
+| ---------------------- | -------- | ----------------- | ---------------------- |
+| PR into `main`         | Yes      | On matching paths | None                   |
+| PR into another branch | No       | On matching paths | None                   |
+| Push to `main`         | Yes      | Yes               | None                   |
+| Push to `release/**`   | Yes      | Yes               | None                   |
+| Push tag `vX.Y.ZrcN`   | Via `qa` | Yes               | `publish-testpypi.yml` |
+| Push tag `vX.Y.Z`      | Via `qa` | Yes               | `publish-pypi.yml`     |
 
-Every publish workflow re-runs the full `ci.yml`/`docs.yml` gate on the exact tagged
-commit before anything is uploaded, rather than trusting whatever last passed on `main`.
+Matching tags trigger a standalone docs build. Each publish workflow also calls both
+`ci.yml` and `docs.yml` and waits for those jobs to pass on the exact tagged commit
+before uploading.
 
 ## QA gate checks
 
@@ -48,11 +50,11 @@ commit before anything is uploaded, rather than trusting whatever last passed on
 | Coverage (fails under 90%)                           | `coverage`                     |
 | Optional extras (`embeddings`, `lightgbm`, `polars`) | `optional-deps`                |
 | Docs build (`sphinx-build -W --keep-going`)          | `docs.yml` (separate workflow) |
-| Wheel install + import smoke test                    | publish workflow's own steps   |
+| Tag/version match and clean-wheel quickstart         | publish workflow's own steps   |
 
 ## Prerequisites
 
-- You are a maintainer with permission to push tags to `main`.
+- You are a maintainer with permission to push release tags.
 - The `pypi-publish` and `testpypi-publish` GitHub Environments are configured with
   tag-based protection and trusted publishing enabled.
 - Your working tree is clean and `main` is up to date.
@@ -96,13 +98,32 @@ GitHub pre-release.
 
 ### 4. Verify the release candidate
 
-Install the candidate from TestPyPI in a clean environment and smoke-test it:
+Download the exact candidate wheel from TestPyPI, then install it in a fresh virtual
+environment with dependencies from PyPI. The check verifies both the installed version
+and that the import came from that environment rather than from the checkout.
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ \
-            --extra-index-url https://pypi.org/simple/ \
-            "pretab==X.Y.ZrcN"
-python -c "import pretab; print(pretab.__version__)"
+version=X.Y.ZrcN  # Replace with your tag version, without the leading v.
+verify_dir=$(mktemp -d)
+python3 -m venv "$verify_dir/venv"
+verify_python="$verify_dir/venv/bin/python"
+
+"$verify_python" -m pip download --no-deps --only-binary=:all: \
+  --index-url https://test.pypi.org/simple/ \
+  --dest "$verify_dir" "pretab==$version" &&
+"$verify_python" -m pip install --index-url https://pypi.org/simple/ \
+  "$verify_dir"/pretab-*.whl &&
+"$verify_python" -I - "$version" <<'PY'
+import sys
+from pathlib import Path
+
+import pretab
+
+path = Path(pretab.__file__).resolve()
+assert path.is_relative_to(Path(sys.prefix).resolve()), path
+assert pretab.__version__ == sys.argv[1], pretab.__version__
+print(pretab.__version__, path)
+PY
 ```
 
 If the candidate has problems, fix them on the branch and produce the next RC:
@@ -141,9 +162,27 @@ exactly what both publishing workflows wait on before uploading.
 
 ### 7. Confirm
 
+Confirm that the exact stable version can be installed from PyPI. Use a new virtual
+environment, not the one used to verify the candidate.
+
 ```bash
-pip install --upgrade pretab
-python -c "import pretab; print(pretab.__version__)"
+version=X.Y.Z  # Replace with your tag version, without the leading v.
+verify_dir=$(mktemp -d)
+python3 -m venv "$verify_dir/venv"
+verify_python="$verify_dir/venv/bin/python"
+
+"$verify_python" -m pip install --index-url https://pypi.org/simple/ "pretab==$version" &&
+"$verify_python" -I - "$version" <<'PY'
+import sys
+from pathlib import Path
+
+import pretab
+
+path = Path(pretab.__file__).resolve()
+assert path.is_relative_to(Path(sys.prefix).resolve()), path
+assert pretab.__version__ == sys.argv[1], pretab.__version__
+print(pretab.__version__, path)
+PY
 ```
 
 Check the release on [PyPI](https://pypi.org/project/pretab/) and the auto-generated
@@ -152,5 +191,5 @@ GitHub Release notes.
 ```{tip}
 Need a build artifact without publishing? Run the `build-check.yml` workflow manually from
 the GitHub Actions tab. It builds the wheel and sdist, runs `twine check`, and performs an
-import smoke test.
+import and quickstart check against the installed wheel.
 ```

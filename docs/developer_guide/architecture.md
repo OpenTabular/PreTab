@@ -124,8 +124,9 @@ When `CrossFittedTransformer` wraps a `Preprocessor`, it uses the fitted block's
 actual target use to decide what to refit. A target-consuming representation and
 any steps after it are refit on the fold's training rows. Input-only state from
 the full input to the wrapper stays fitted: column routing, target-free blocks
-and their vocabularies, imputers, scalers, and separate missing branches. A group
-still uses its ordered sources as one block. This keeps category identities and
+and their vocabularies, imputers and scalers before the representation, and
+separate missing branches. A group still uses its ordered sources as one block.
+This keeps category identities and
 indicator columns aligned across folds without letting a representation use the
 held-out row's target. The refitted block must retain its fitted width.
 
@@ -137,10 +138,11 @@ fit the whole pipeline within each outer training split.
 
 ## Optional dependencies and persistence
 
-Keep optional packages at the feature boundary. LightGBM placement and language
-embeddings use the lazy dependency helpers in `pretab.core.dependencies`; Polars
-input and output are handled at the input and output boundaries. Do not make a
-base import or an unrelated method require an extra. Preserve an actionable
+Keep optional packages at the feature boundary. Composition checks availability
+through `pretab.core.dependencies`, without importing the selected model package.
+The LightGBM selector and language embedding transformer import their dependencies
+only when needed. Polars is handled at the input and output boundaries. Do not make
+a base import or an unrelated method require an extra. Preserve an actionable
 `OptionalDependencyError` for the path that needs the missing package.
 
 Registration makes a representation selectable for fitting and inference. It does
