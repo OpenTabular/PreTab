@@ -662,6 +662,7 @@ def test_preprocessor_routes_one_normalized_config_through_the_factory(sample_fr
         "output_structure",
         "output_format",
         "dtype",
+        "task_validation",
     }
     assert set(resolved) == config_fields | facade_fields
     assert config_fields.isdisjoint(facade_fields)
