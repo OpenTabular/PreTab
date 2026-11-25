@@ -6,10 +6,15 @@ import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GridSearchCV
+from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.utils.validation import check_is_fitted
 
+from pretab import RepresentationConfig
+from pretab.core.parameters import UNSET
 from pretab.exceptions import IncompatibleParamsError, InvalidParamError, PretabDataError
+from pretab.expansion.functional.rbf import RBFExpansionTransformer
 from pretab.preprocessor import Preprocessor  # Adjust the import as needed
 
 
@@ -198,6 +203,8 @@ EXPECTED_PARAMS = {
     "dtype",
     "verbose",
     "preset",
+    "feature_groups",
+    "task_validation",
 }
 
 
@@ -220,10 +227,324 @@ def test_clone_preserves_every_param():
         adaptive=True,
         feature_preprocessing={"a": "pspline"},
         verbose=1,
+        task_validation="warn",
     )
     cloned = clone(pre)
     assert isinstance(cloned, Preprocessor)
     assert cloned.get_params() == pre.get_params()
+
+
+@pytest.mark.parametrize("mode", ["off", "warn", "raise"])
+def test_task_validation_resolves_after_set_params(mode):
+    processor = Preprocessor(task="classification")
+    assert processor.get_params(deep=False)["task_validation"] == "off"
+    processor.set_params(task_validation=mode)
+    resolved = processor.get_resolved_config()
+    assert resolved["task_validation"] == mode
+    assert resolved["task"] == "classification"
+
+
+@pytest.mark.parametrize("mode", [None, "WARN", UNSET])
+def test_invalid_facade_task_validation_rejected(sample_data, mode):
+    frame, target = sample_data
+    processor = Preprocessor(task_validation=mode)
+    assert processor.get_params(deep=False)["task_validation"] is mode
+    with pytest.raises(InvalidParamError, match=r"Preprocessor\.task_validation"):
+        processor.get_resolved_config()
+    with pytest.raises(InvalidParamError, match=r"Preprocessor\.task_validation"):
+        processor.fit(frame, target)
+
+
+@pytest.mark.parametrize(
+    ("task", "target", "target_type"),
+    [
+        ("classification", np.linspace(0, 1, 24), "continuous"),
+        ("regression", np.resize(["first", "second", "third"], 24), "multiclass"),
+    ],
+)
+def test_task_diagnostic_requires_active_placement(task, target, target_type):
+    frame = pd.DataFrame({"value": np.linspace(0, 1, 24)})
+    target = pd.Series(target)
+    processor = Preprocessor(numerical_method="rbf", task=task, task_validation="raise")
+    with pytest.raises(InvalidParamError, match=rf"target-aware placement.*task='{task}'.*'{target_type}'"):
+        processor.fit(frame, target)
+
+    processor.set_params(feature_preprocessing={"value": "minmax"})
+    processor.fit(frame, target)
+
+
+@pytest.mark.parametrize(
+    ("task", "pattern"),
+    [
+        pytest.param("regression", [0, 1], id="binary-counts"),
+        pytest.param("regression", [0, 1, 2], id="multiclass-counts"),
+        pytest.param("regression", np.linspace(0.25, 1, 24), id="continuous"),
+        pytest.param("classification", ["first", "second"], id="binary-labels"),
+        pytest.param("classification", ["first", "second", "third"], id="multiclass-labels"),
+    ],
+)
+def test_task_diagnostic_preserves_valid_placement_outputs(task, pattern):
+    frame = pd.DataFrame({"value": np.linspace(0, 1, 24)})
+    target = pd.Series(np.resize(pattern, len(frame)))
+    strict = Preprocessor(numerical_method="rbf", task=task, task_validation="raise", output_dim=3, random_state=0)
+    baseline = clone(strict)
+    assert isinstance(baseline, Preprocessor)
+    baseline.set_params(task_validation="off")
+
+    np.testing.assert_array_equal(
+        strict.fit_transform(frame, target, return_array=True),
+        baseline.fit_transform(frame, target, return_array=True),
+    )
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("fitted", [False, True], ids=["unfitted", "fitted"])
+def test_structured_feature_params_survive_fit_and_clone(sample_data, typed, fitted):
+    frame, target = sample_data
+    frame = frame[["num1"]]
+    settings = {"method": "RBF", "output_dim": 3, "params": {"gamma": 0.5}}
+    representation = RepresentationConfig.from_dict(settings) if typed else settings
+    overrides = {"num1": representation}
+    processor = Preprocessor(
+        numerical_method="none",
+        feature_preprocessing=overrides,
+        output_dim=9,
+        target_aware=False,
+        placement_strategy="quantile",
+        scaling="none",
+    )
+    if fitted:
+        processor.fit(frame, target)
+    for deep in (False, True):
+        assert processor.get_params(deep=deep)["feature_preprocessing"] is overrides
+        assert overrides["num1"] is representation
+
+    fresh = clone(processor)
+    assert isinstance(fresh, Preprocessor)
+    assert fresh.get_params() == processor.get_params()
+    assert isinstance(fresh.feature_preprocessing, dict)
+    assert fresh.feature_preprocessing is not overrides
+    assert fresh.feature_preprocessing["num1"] == representation
+    assert fresh.lifecycle_state_ == "UNFITTED"
+    if not typed:
+        assert fresh.feature_preprocessing["num1"] is not representation
+        settings["params"]["gamma"] = 2.0
+        assert fresh.feature_preprocessing["num1"]["params"]["gamma"] == 0.5
+
+    fresh.fit(frame, target)
+    basis = fresh.column_transformer_.named_transformers_["num_num1"].named_steps["rbf"]
+    assert basis.gamma == 0.5
+    transformed = fresh.transform(frame, return_array=True)
+    assert isinstance(transformed, np.ndarray)
+    assert transformed.shape == (len(frame), 3)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("missing_policy", [None, "separate_state"])
+@pytest.mark.parametrize("target_aware", [False, True], ids=["quantile", "cart"])
+def test_same_method_features_keep_independent_fitted_state(typed, missing_policy, target_aware):
+    values = np.linspace(1.0, 9.0, 80)
+    frame = pd.DataFrame({"first": values, "second": values**2 + 20.0})
+    frame.loc[3, "first"] = np.nan
+    frame.loc[7, "second"] = np.nan
+    target = np.sin(values)
+    settings = {
+        "first": {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.25}},
+        "second": {"method": "rbf", "output_dim": 5, "params": {"gamma": 0.75}},
+    }
+    processor = Preprocessor(
+        feature_preprocessing={
+            feature: RepresentationConfig.from_dict(options) if typed else options
+            for feature, options in settings.items()
+        },
+        target_aware=target_aware,
+        placement_strategy="cart" if target_aware else "quantile",
+        scaling="standardization",
+        random_state=17,
+        missing_policy=missing_policy,
+        output_structure="blocks",
+    ).fit(frame, target)
+    pipelines = []
+    missing_states = []
+    for feature in settings:
+        block = processor.column_transformer_.named_transformers_[f"num_{feature}"]
+        if missing_policy == "separate_state":
+            assert isinstance(block, FeatureUnion)
+            branches = dict(block.transformer_list)
+            missing_states.append(branches["missing"])
+            block = branches["representation"]
+        assert isinstance(block, Pipeline)
+        pipelines.append(block)
+    first, second = pipelines
+    assert first is not second
+    if missing_states:
+        assert missing_states[0] is not missing_states[1]
+    for name in first.named_steps:
+        assert first.named_steps[name] is not second.named_steps[name]
+    first_basis = first.named_steps["rbf"]
+    second_basis = second.named_steps["rbf"]
+    assert isinstance(first_basis, RBFExpansionTransformer)
+    assert isinstance(second_basis, RBFExpansionTransformer)
+    assert (first_basis.output_dim, first_basis.gamma) == (3, 0.25)
+    assert (second_basis.output_dim, second_basis.gamma) == (5, 0.75)
+    assert first_basis.centers_ is not second_basis.centers_
+    assert not np.shares_memory(first_basis.centers_[0], second_basis.centers_[0])
+    for step, attribute in (("imputer", "statistics_"), ("scaler", "mean_"), ("scaler", "scale_")):
+        assert not np.shares_memory(
+            getattr(first.named_steps[step], attribute), getattr(second.named_steps[step], attribute)
+        )
+    sibling_centers = second_basis.centers_[0].copy()
+    sibling_statistics = second.named_steps["imputer"].statistics_.copy()
+    sibling_mean = second.named_steps["scaler"].mean_.copy()
+    sibling_scale = second.named_steps["scaler"].scale_.copy()
+    reference = processor.transform(frame)
+    assert isinstance(reference, dict)
+    indicator = int(missing_policy == "separate_state")
+    assert processor.output_dims_ == {"first": 3 + indicator, "second": 5 + indicator}
+
+    first_basis.centers_[0] += 0.25
+    first.named_steps["imputer"].statistics_ += 1.0
+    first.named_steps["scaler"].mean_ += 0.5
+    changed = processor.transform(frame)
+    assert isinstance(changed, dict)
+    assert not np.array_equal(changed["num_first"], reference["num_first"])
+    np.testing.assert_array_equal(changed["num_second"], reference["num_second"])
+
+    first.fit(frame[["first"]] ** 2, target)
+    refitted = processor.transform(frame)
+    assert isinstance(refitted, dict)
+    np.testing.assert_array_equal(refitted["num_second"], reference["num_second"])
+    np.testing.assert_array_equal(second_basis.centers_[0], sibling_centers)
+    np.testing.assert_array_equal(second.named_steps["imputer"].statistics_, sibling_statistics)
+    np.testing.assert_array_equal(second.named_steps["scaler"].mean_, sibling_mean)
+    np.testing.assert_array_equal(second.named_steps["scaler"].scale_, sibling_scale)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("missing_policy", [None, "separate_state"])
+def test_one_hot_features_keep_independent_fitted_state(typed, missing_policy):
+    frame = pd.DataFrame({"first": ["a", "b", "a", None] * 20, "second": ["x", "y", "z", "x"] * 20})
+    settings = {
+        "first": {"method": "one-hot", "params": {"drop": "first", "sparse_output": False}},
+        "second": {"method": "one-hot", "params": {"drop": None, "sparse_output": False}},
+    }
+    processor = Preprocessor(
+        feature_preprocessing={
+            feature: RepresentationConfig.from_dict(options) if typed else options
+            for feature, options in settings.items()
+        },
+        missing_policy=missing_policy,
+        output_structure="blocks",
+    ).fit(frame)
+    pipelines = []
+    for feature in settings:
+        block = processor.column_transformer_.named_transformers_[f"cat_{feature}"]
+        if missing_policy == "separate_state":
+            assert isinstance(block, FeatureUnion)
+            block = dict(block.transformer_list)["representation"]
+        assert isinstance(block, Pipeline)
+        pipelines.append(block)
+    first, second = pipelines
+    assert first is not second
+    for name in first.named_steps:
+        assert first.named_steps[name] is not second.named_steps[name]
+    first_encoder = first.named_steps["onehot"]
+    second_encoder = second.named_steps["onehot"]
+    assert first_encoder.drop == "first"
+    assert second_encoder.drop is None
+    assert first_encoder.categories_ is not second_encoder.categories_
+    assert not np.shares_memory(first_encoder.categories_[0], second_encoder.categories_[0])
+    assert not np.shares_memory(first.named_steps["imputer"].statistics_, second.named_steps["imputer"].statistics_)
+    sibling_categories = second_encoder.categories_[0].copy()
+    sibling_statistics = second.named_steps["imputer"].statistics_.copy()
+    sibling_block = processor.column_transformer_.named_transformers_["cat_second"]
+    reference = sibling_block.transform(frame[["second"]])
+    indicator = int(missing_policy == "separate_state")
+    assert processor.output_dims_ == {"first": 1 + indicator, "second": 3 + indicator}
+
+    first_encoder.categories_[0][0] = "changed"
+    first.named_steps["imputer"].statistics_[0] = "changed"
+    np.testing.assert_array_equal(second_encoder.categories_[0], sibling_categories)
+    np.testing.assert_array_equal(second.named_steps["imputer"].statistics_, sibling_statistics)
+    np.testing.assert_array_equal(sibling_block.transform(frame[["second"]]), reference)
+
+    first.fit(frame[["first"]].replace({"a": "q", "b": "r"}))
+    np.testing.assert_array_equal(first_encoder.categories_[0], ["q", "r"])
+    np.testing.assert_array_equal(second_encoder.categories_[0], sibling_categories)
+    np.testing.assert_array_equal(second.named_steps["imputer"].statistics_, sibling_statistics)
+    np.testing.assert_array_equal(sibling_block.transform(frame[["second"]]), reference)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("fitted", [False, True], ids=["unfitted", "fitted"])
+def test_pipeline_set_params_replaces_structured_feature_settings(sample_data, typed, fitted):
+    frame, target = sample_data
+    frame = frame[["num1"]]
+    processor = Preprocessor(numerical_method="none", target_aware=False, placement_strategy="quantile", scaling="none")
+    pipeline = Pipeline([("pre", processor)])
+    if fitted:
+        pipeline.fit(frame, target)
+    settings = {"method": "rbf", "output_dim": 5, "params": {"gamma": 0.75}}
+    overrides = {"num1": RepresentationConfig.from_dict(settings) if typed else settings}
+
+    assert pipeline.set_params(pre__feature_preprocessing=overrides) is pipeline
+    assert processor.get_params()["feature_preprocessing"] is overrides
+    if fitted:
+        assert pipeline.transform(frame).shape == (len(frame), 1)
+
+    pipeline.fit(frame, target)
+    basis = processor.column_transformer_.named_transformers_["num_num1"].named_steps["rbf"]
+    assert basis.gamma == 0.75
+    assert pipeline.transform(frame).shape == (len(frame), 5)
+    assert processor.get_params()["feature_preprocessing"] is overrides
+
+
+@pytest.mark.parametrize("n_jobs", [1, 2], ids=["serial", "processes"])
+def test_grid_search_consumes_structured_feature_settings(sample_data, n_jobs):
+    frame, target = sample_data
+    frame = frame[["num1"]]
+    candidates = [
+        {"num1": {"method": "RBF", "output_dim": 2, "params": {"gamma": 0.25}}},
+        {"num1": RepresentationConfig(method="rbf", output_dim=5, params={"gamma": 0.75})},
+    ]
+    processor = Preprocessor(
+        numerical_method="none", output_dim=9, target_aware=False, placement_strategy="quantile", scaling="none"
+    )
+
+    def fitted_width(estimator, frame, target):
+        fitted = estimator.named_steps["pre"]
+        requested = fitted.feature_preprocessing["num1"]
+        settings = requested.to_dict() if isinstance(requested, RepresentationConfig) else requested
+        basis = fitted.column_transformer_.named_transformers_["num_num1"].named_steps["rbf"]
+        transformed = fitted.transform(frame, return_array=True)
+        assert transformed.shape[1] == settings["output_dim"]
+        assert basis.gamma == settings["params"]["gamma"]
+        assert estimator.named_steps["model"].n_features_in_ == settings["output_dim"]
+        assert np.isfinite(estimator.predict(frame)).all()
+        return float(transformed.shape[1])
+
+    search = GridSearchCV(
+        Pipeline([("pre", processor), ("model", Ridge())]),
+        {"pre__feature_preprocessing": candidates},
+        scoring=fitted_width,
+        cv=2,
+        n_jobs=n_jobs,
+    )
+    search.set_params(error_score="raise")
+    search.fit(frame, target)
+
+    np.testing.assert_array_equal(search.cv_results_["mean_test_score"], [2.0, 5.0])
+    assert search.best_params_["pre__feature_preprocessing"] == candidates[1]
+    assert search.best_estimator_.named_steps["pre"].transform(frame, return_array=True).shape == (len(frame), 5)
+    assert processor.lifecycle_state_ == "UNFITTED"
+    assert processor.feature_preprocessing is None
+    assert candidates[0]["num1"] == {"method": "RBF", "output_dim": 2, "params": {"gamma": 0.25}}
+    assert candidates[1]["num1"].to_dict() == {
+        "method": "rbf",
+        "output_dim": 5,
+        "params": {"gamma": 0.75},
+        "name": None,
+    }
 
 
 def test_set_params_roundtrip():
@@ -383,6 +704,73 @@ def test_unknown_feature_preprocessing_key_raises(sample_data):
         Preprocessor(feature_preprocessing={"nnum1": "minmax"}).fit(X, y)
 
 
+@pytest.mark.parametrize("operation", ["fit", "fit_transform"])
+@pytest.mark.parametrize("syntax", ["shorthand", "nested", "value"])
+@pytest.mark.parametrize(
+    ("feature", "settings", "option", "constraint"),
+    [
+        pytest.param(
+            "color", {"method": "one-hot", "degree": 3}, "degree", "is not applicable", id="categorical-degree"
+        ),
+        pytest.param("num1", {"method": "rbf", "degree": 3}, "degree", "is not applicable", id="rbf-degree"),
+        pytest.param("num1", {"method": "minmax", "gamma": 0.5}, "gamma", "is not applicable", id="scaler-gamma"),
+        pytest.param("color", {"method": "OHE", "gamma": 0.5}, "gamma", "is not applicable", id="alias-gamma"),
+        pytest.param(
+            "color", {"method": "one-hot", "output_dim": 3}, "output_dim", "is not applicable", id="categorical-width"
+        ),
+        pytest.param(
+            "color",
+            {"method": "one-hot", "adaptive": True},
+            "adaptive",
+            "method 'one-hot' does not support adaptive resolution",
+            id="categorical-adaptive",
+        ),
+        pytest.param(
+            "color",
+            {"method": "one-hot", "target_aware": True},
+            "target_aware",
+            "method 'one-hot' cannot use the target",
+            id="forbidden-target",
+        ),
+        pytest.param(
+            "num1",
+            {"method": "ple", "target_aware": False},
+            "target_aware",
+            "method 'ple' requires the target",
+            id="required-target",
+        ),
+        pytest.param(
+            "num1",
+            {"method": "pspline", "placement_strategy": "quantile"},
+            "placement_strategy",
+            "is not supported by method 'pspline'",
+            id="unsupported-placement",
+        ),
+    ],
+)
+def test_inapplicable_feature_options_report_feature_path(
+    sample_data, operation, syntax, feature, settings, option, constraint
+):
+    X, y = sample_data
+    X = X.rename(columns={"cat1": "color"})
+    if syntax == "shorthand":
+        representation = settings
+    elif syntax == "nested":
+        representation = RepresentationConfig.from_dict(settings).to_dict()
+    else:
+        representation = RepresentationConfig.from_dict(settings)
+    pre = Preprocessor(feature_preprocessing={feature: representation})
+
+    with pytest.raises(InvalidParamError) as error:
+        getattr(pre, operation)(X, y)
+
+    message = str(error.value)
+    heading = message.splitlines()[0]
+    assert f"feature_preprocessing[{feature!r}]." in heading
+    assert option in heading
+    assert f"Constraint: {constraint}" in message
+
+
 # --- positional width check at transform (issue #72) ------------------------------
 
 
@@ -412,15 +800,25 @@ def test_transform_accepts_positional_input_of_the_fitted_width(as_list):
 
 
 @pytest.mark.parametrize("method", ["bspline", "mspline", "ispline", "pspline", "naturalspline", "rbf"])
-def test_unsupervised_numerical_method_accepts_a_multi_output_target(method):
+@pytest.mark.parametrize("task", ["regression", "classification"])
+def test_unsupervised_numerical_method_accepts_a_multi_output_target(method, task):
     """The B/M/I splines flattened y even when target_aware=False, so a 2-D target
     raised an IndexError in fit while the other methods ignored it."""
     rng = np.random.default_rng(0)
     frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
-    Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
-    options = {"numerical_method": method, "target_aware": False, "placement_strategy": "uniform"}
+    if task == "classification":
+        targets = np.column_stack([frame["a"] > 0, frame["b"] > 0])
+    else:
+        targets = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+    options = {
+        "numerical_method": method,
+        "target_aware": False,
+        "placement_strategy": "uniform",
+        "task": task,
+    }
     reference = Preprocessor(**options).fit(frame).transform(frame)
-    np.testing.assert_array_equal(Preprocessor(**options).fit(frame, Y).transform(frame), reference)
+    strict = Preprocessor(**options).set_params(task_validation="raise")
+    np.testing.assert_array_equal(strict.fit(frame, targets).transform(frame), reference)
 
 
 @pytest.mark.parametrize("method", ["bspline", "mspline", "ispline"])
@@ -444,18 +842,20 @@ def test_multi_output_pipeline_imputes_before_unsupervised_spline(method):
 
 
 @pytest.mark.parametrize("method", ["bspline", "naturalspline", "rbf", "ple"])
-def test_target_aware_numerical_method_rejects_a_multi_output_target(method):
+@pytest.mark.parametrize("mode", ["off", "raise"])
+def test_target_aware_numerical_method_rejects_a_multi_output_target(method, mode):
     """Target-aware placement fits one model on one target. A 2-D target was
     flattened into twice as many values and failed with an unrelated IndexError /
     broadcasting error; it now raises a clear error pointing to target_aware=False."""
     rng = np.random.default_rng(0)
     frame = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
     Y = np.column_stack([np.sin(frame["a"]), np.cos(frame["b"])])
+    processor = Preprocessor(numerical_method=method, task_validation=mode)
 
     with pytest.raises(IncompatibleParamsError, match=r"single target, but y has shape \(200, 2\)"):
-        Preprocessor(numerical_method=method).fit(frame, Y)
+        processor.fit(frame, Y)
     # A column vector is a single target.
-    Preprocessor(numerical_method=method).fit(frame, Y[:, :1])
+    processor.fit(frame, Y[:, :1])
 
 
 @pytest.mark.parametrize(

@@ -30,7 +30,7 @@ jobs:
         id: setup-python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install Poetry
         run: pipx install poetry
@@ -64,7 +64,7 @@ jobs:
         id: setup-python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install Poetry
         run: pipx install poetry
@@ -95,7 +95,7 @@ jobs:
         id: setup-python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install Poetry
         run: pipx install poetry
@@ -127,7 +127,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -158,16 +158,16 @@ jobs:
         run: poetry run pytest tests/ -v
 
   minimum-deps:
-    name: Minimum dependencies (Python 3.10)
+    name: Minimum dependencies (Python 3.11)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
       - name: Install with minimum supported dependency series
         run: >-
-          python -m pip install . pytest pytest-cov
+          python -m pip install . pytest pytest-cov 'jsonschema>=4.26,<5'
           "numpy==1.24.4" "pandas==2.0.3" "scipy==1.10.1" "scikit-learn==1.6.0"
       - name: Run tests
         run: python -m pytest tests/ -q

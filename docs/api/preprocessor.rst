@@ -1,9 +1,10 @@
 Preprocessor
 ============
 
-The high-level entry point. :class:`~pretab.Preprocessor` reads a ``DataFrame``,
-detects feature types, resolves a per-column representation from a single
-configuration, and produces model-ready output with full lineage.
+The high-level entry point. :class:`~pretab.Preprocessor` accepts a pandas
+DataFrame, an eager Polars DataFrame, a NumPy array, or a dictionary of columns.
+It detects feature types, resolves per-column and grouped representations from a
+single configuration, and produces model-ready output with full lineage.
 
 .. currentmodule:: pretab
 
@@ -13,8 +14,183 @@ configuration, and produces model-ready output with full lineage.
 
    Preprocessor
 
+Task and target validation
+--------------------------
+
+``task`` is ``"regression"`` by default. Set it to ``"classification"`` for class
+labels. ``task_validation`` is keyword-only: ``"off"`` (default) skips the
+consistency check, ``"warn"`` emits ``ConfigWarning``, and ``"raise"`` raises
+``InvalidParamError`` before fitting the representations.
+
+The check applies to supported single-output targets when a fitted representation
+uses ``y`` for placement. It does not infer the task, change the target, or extend
+the supported target shapes. Turning it off does not disable task-string validation
+or leakage warnings. See :doc:`../core_concepts/resolution_and_placement` for
+examples and the limits of the diagnostic.
+
+Representation values
+---------------------
+
+:class:`~pretab.RepresentationConfig` stores a representation request with
+read-only, detached parameters and JSON-compatible dictionary conversion.
+Constructing the value does not fit an estimator or resolve method aliases.
+Pass it as a value in ``Preprocessor(feature_preprocessing={...})``; strings
+and mappings with a ``method`` key are accepted there as well.
+
+.. autosummary::
+   :toctree: _autosummary
+   :nosignatures:
+
+   RepresentationConfig
+
+Fields and conversion
+~~~~~~~~~~~~~~~~~~~~~
+
+``method``
+    Required method name or alias. Validation against the selected method
+    happens during configuration resolution or fitting.
+
+``output_dim``
+    Positive requested width, subject to the representation's constraints.
+    An explicit local width suppresses inherited adaptive sizing unless
+    local ``adaptive=True`` also opts in.
+
+``target_aware``, ``placement_strategy``
+    Local target-use and placement controls, where the method supports them.
+
+``adaptive``, ``min_output_dim``, ``max_output_dim``
+    Local adaptive sizing and bounds. Bounds must be positive integers or
+    ``None`` where accepted. Explicit bounds with fixed sizing are invalid.
+
+``params``
+    Family-specific constructor options, such as ``{"gamma": 0.5}`` for
+    RBF. Common fields belong at the top level, not in this mapping.
+    One-hot entries accept encoder options such as ``categories``, ``drop``,
+    ``handle_unknown``, and ``sparse_output``. For example,
+    ``{"method": "one-hot", "params": {"drop": "first", "sparse_output": False}}``
+    drops one category and requests dense encoding. Encoder ``dtype`` values
+    must be portable, such as ``"float32"``, rather than NumPy scalar classes.
+    Use the preprocessor's ``dtype`` to control the final output dtype;
+    encoder settings do not bypass subsequent output conversion.
+
+``name``
+    Optional nonempty metadata label, default ``None``. It does not rename
+    input columns or fitted output features.
+
+Omitted common controls retain ``UNSET`` until resolution. An explicit local
+value takes precedence over an applicable constructor-wide value; ``None``
+is an explicit value only for fields that accept it, not an inheritance marker.
+Imputation, scaling, missing indicators, and output formatting remain run-wide.
+
+Nested ``params`` values may contain strings, booleans, integers, finite floats,
+``None``, sequences, and mappings with string keys. Construction copies them
+into read-only storage. Callables, arbitrary objects, sets, nonfinite floats,
+and circular references are rejected.
+
+``to_dict()`` returns detached dict/list containers, omits ``UNSET`` fields,
+and retains explicit ``None`` values. It preserves the requested method
+spelling; it does not resolve an alias. The result can be passed through
+``json.dumps`` / ``json.loads`` and reconstructed with ``from_dict()``.
+``from_dict()`` also accepts family parameters beside ``method`` and collects
+them under ``params``. Supplying the same option in both places is an error,
+even when the values agree.
+
+.. note::
+
+    This is a value object, not a scikit-learn estimator. It has no fitted state
+    or ``set_params`` method. Replace an entry through the containing
+    preprocessor's ``set_params(feature_preprocessing=...)``, or through
+    ``pre__feature_preprocessing`` when its pipeline step is named ``pre``.
+    The replacement is used by the next fit; it does not refit automatically.
+    Frozen preprocessors reject configuration replacement.
+
+Feature groups
+--------------
+
+:class:`~pretab.FeatureGroup` is an immutable request with three fields:
+``name``, ordered ``columns``, and ``representation``. The representation accepts
+a method string, mapping, or :class:`~pretab.RepresentationConfig`. Pass an ordered
+sequence of these values to ``Preprocessor(feature_groups=...)``, or use a mapping
+from group names to dictionaries containing ``columns`` and ``representation``.
+
+.. autosummary::
+    :toctree: _autosummary
+    :nosignatures:
+
+    FeatureGroup
+
+The supported group methods are ``tensorspline`` and ``tprs``, each with at least
+two detected numerical inputs. Sources are exclusive: they cannot overlap another
+group or an explicit per-feature override. Local representation settings take
+precedence over applicable constructor-wide controls. The value itself neither
+fits an estimator nor resolves method aliases.
+
+Fitted groups appear once as ``group_<name>`` in block output and ``output_dims_``.
+Output names and lineage retain group identity and source order. Joint basis width
+and raw missing-state columns count together for output budgets. Ungrouped numerical
+blocks precede groups in declaration order; categorical blocks follow them.
+
+See the :doc:`multivariate tutorial <../tutorials/multivariate_features>` for
+executable declarations, block widths and trusted-spec replay. Frozen preprocessors
+reject group replacement; otherwise ``set_params(feature_groups=...)`` changes
+the request without refitting the existing representation.
+
+Requested and resolved settings
+-------------------------------
+
+``get_params()`` preserves the raw constructor arguments, including caller-owned
+override mappings. Raw mapping edits before fit remain observable. Typed values
+detach on construction; raw representation settings detach during normalization
+and fitting.
+
+:meth:`~pretab.Preprocessor.get_resolved_config` returns a detached current-request
+dict, retaining the existing outer keys and expanding presets. Declared overrides
+become canonical method mappings with applicable inherited controls and family
+parameters. It does not enumerate undeclared columns, validate actual column
+existence or detected kind before fit, or report learned widths or knot state.
+Reading it never fits or transforms data. After fit or freeze it still describes
+the current request, not the last successful fit. Use ``output_dims_``,
+``total_output_dim_``, and :meth:`~pretab.Preprocessor.get_feature_info` for fitted
+results.
+
+Value construction validates field types and portable data. Resolution additionally
+validates method names, option applicability, and target/placement combinations;
+invalid feature declarations report their configuration path. Actual input checks
+belong to fitting.
+
+See the :doc:`configuration guide <../core_concepts/configuration>` for the
+precedence table and three executable examples. Supported legacy string
+configuration needs no syntax change, and can be mixed with structured entries.
+
 Configuration, output, and reproducibility
 ------------------------------------------
+
+Fitted preprocessors with supported state using string, mapping, or
+:class:`~pretab.RepresentationConfig` entries can be saved with
+:meth:`~pretab.Preprocessor.to_spec` and restored with
+:meth:`~pretab.Preprocessor.from_spec` in the same environment. Restored names,
+lineage, widths, output values, and fingerprints retain the fitted state,
+including adaptive sizing and separate missing indicators. Representation
+summaries describe the representation itself, excluding separate indicators;
+output budgets and reported output dimensions include those indicators.
+
+Specs retain schema version 1. ``params`` describes the current constructor
+requests; ``resolved_config``, when present, describes the last successful fit.
+The reader restores the encoded ``state`` rather than fitting from either set of
+settings. See :ref:`portable-serialization` for the field reference, reading
+legacy specs, downgrade limits, and when to use pickle instead.
+
+Registration does not enable spec persistence. ``to_spec()``, ``fingerprint_``,
+and ``reproducibility_report()`` raise ``PretabSerializationError`` on unsupported
+estimator state, including nested estimators. File export raises before opening
+the destination. Use supported built-in representations for JSON replay, or a
+trusted pickle or joblib checkpoint in a matching environment if all components
+support it.
+
+.. warning::
+
+    Load specs only from trusted sources. Dependency versions recorded in a
+    spec do not guarantee compatibility with a different environment.
 
 Supporting types returned or consumed by the preprocessor.
 

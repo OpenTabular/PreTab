@@ -126,6 +126,17 @@ class TransformerSpec:
     sparse_output : bool
         Whether the method can emit a sparse matrix (e.g. one-hot). Surfaced
         through :func:`pretab.list_representations`.
+    group_compatible : bool
+        Whether the method declares support for explicit column groups.
+        Independent of single-column ``preprocessor_compatible`` selection.
+    min_arity : int
+        Minimum declared group size, relevant only when ``group_compatible``
+        is true. Does not constrain standalone transformer input dimensions.
+    max_arity : int or None
+        Maximum declared group size, or ``None`` for no declared upper bound.
+        Relevant only when ``group_compatible`` is true.
+    typed_penalty : bool
+        Whether the method exposes validated penalty metadata aligned to its output.
     """
 
     name: str
@@ -140,6 +151,10 @@ class TransformerSpec:
     optional_dependency: str | None = None
     periodic: bool = False
     sparse_output: bool = False
+    group_compatible: bool = False
+    min_arity: int = 1
+    max_arity: int | None = 1
+    typed_penalty: bool = False
 
     @property
     def is_numerical(self) -> bool:
@@ -264,12 +279,14 @@ _SPECS: tuple[TransformerSpec, ...] = (
             "max_output_dim",
             "random_state",
         ),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     _spec(
         "naturalspline",
         NaturalCubicSplineTransformer,
         ("output_dim", "include_bias", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     # --- numerical: penalized splines (equally-spaced knots, unsupervised only) ---
@@ -278,6 +295,7 @@ _SPECS: tuple[TransformerSpec, ...] = (
         PSplineTransformer,
         ("output_dim", "degree", "diff_order"),
         placement_strategies=_UNIFORM_ONLY,
+        typed_penalty=True,
     ),
     _spec(
         "tensorspline",
@@ -286,6 +304,10 @@ _SPECS: tuple[TransformerSpec, ...] = (
         arity="multivariate",
         placement_strategies=_UNSUPERVISED_STRATEGIES,
         preprocessor_compatible=False,
+        group_compatible=True,
+        min_arity=2,
+        max_arity=None,
+        typed_penalty=True,
     ),
     # --- numerical: kernel-based thin-plate spline (knot-free, multivariate) ---
     _spec(
@@ -294,6 +316,9 @@ _SPECS: tuple[TransformerSpec, ...] = (
         ("n_components", "landmark_strategy", "rank_strategy", "random_state"),
         arity="multivariate",
         preprocessor_compatible=False,
+        group_compatible=True,
+        min_arity=2,
+        max_arity=None,
     ),
     # --- numerical: kernel-approximation feature maps (multivariate, standalone) ---
     _spec(
@@ -315,25 +340,43 @@ _SPECS: tuple[TransformerSpec, ...] = (
         "bspline",
         BSplineTransformer,
         ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     _spec(
         "mspline",
         MSplineTransformer,
         ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     _spec(
         "ispline",
         ISplineTransformer,
         ("degree", "task", "adaptive", "min_output_dim", "max_output_dim", "random_state"),
+        typed_penalty=True,
         **_BOTH_MODE,
     ),
     # --- numerical / categorical: passthrough ---
     _spec("none", NoTransformer, feature_kind=frozenset({NUMERICAL, CATEGORICAL})),
     # --- categorical-only methods ---
     _spec("int", ContinuousOrdinalTransformer, feature_kind=frozenset({CATEGORICAL})),
-    _spec("one-hot", OneHotEncoder, feature_kind=frozenset({CATEGORICAL}), sparse_output=True),
+    _spec(
+        "one-hot",
+        OneHotEncoder,
+        (
+            "categories",
+            "drop",
+            "sparse_output",
+            "dtype",
+            "handle_unknown",
+            "min_frequency",
+            "max_categories",
+            "feature_name_combiner",
+        ),
+        feature_kind=frozenset({CATEGORICAL}),
+        sparse_output=True,
+    ),
     _spec("onehot_from_ordinal", OneHotFromOrdinalTransformer, feature_kind=frozenset({CATEGORICAL})),
     _spec(
         "pretrained",

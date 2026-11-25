@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import warnings
+from dataclasses import fields
 from typing import cast
 
 import numpy as np
@@ -23,7 +24,9 @@ from .compose.feature_detection import (
     with_string_labels,
 )
 from .compose.inspection import (
-    block_name,
+    _block_uses_task,
+    _build_effective_settings_summary,
+    _iter_fitted_blocks,
     block_uses_target,
     build_feature_info,
     build_feature_lineage,
@@ -41,11 +44,18 @@ from .compose.output import (
     to_dataframe_output,
     validate_embedding_request,
 )
-from .compose.serialize import SCHEMA_VERSION, preprocessor_from_spec, preprocessor_to_spec
+from .compose.serialize import (
+    SCHEMA_VERSION,
+    _canonicalize_feature_fingerprint,
+    _repair_legacy_sparse_feature_counts,
+    preprocessor_from_spec,
+    preprocessor_to_spec,
+)
 from .core._typing import TransformerLike
 from .core.logging import configure_logging, get_logger
 from .core.parameters import UNSET, validate_task
 from .core.policy import RepresentationPolicy, apply_constant_policy
+from .core.validation import _check_task_target_once, _validate_task_validation
 from .exceptions import (
     ConfigWarning,
     DataWarning,
@@ -57,6 +67,7 @@ from .exceptions import (
     PretabSerializationError,
     invalid_param_error,
 )
+from .expansion.spline.multivariate.tensor_product import TensorProductSplineTransformer
 
 logger = get_logger(__name__)
 
@@ -170,10 +181,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         language embeddings). Pass ``None`` (resolved to ``"none"``) to leave categorical
         columns unchanged.
     feature_preprocessing : dict, optional
-        Mapping of individual column names to a method, overriding the global ``numerical_method`` /
-        ``categorical_method`` for those columns only, e.g.
-        ``{"age": "cubicspline", "city": "pretrained"}``. Columns absent from the dict fall back to
-        the global defaults.
+        Mapping of column names to method strings, mappings with a ``method`` key, or
+        :class:`~pretab.RepresentationConfig` values. Forms may be mixed, for example
+        ``{"age": {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.5}}, "city": "one-hot"}``.
+        Local settings override applicable constructor-wide controls; omitted columns use the
+        global methods. A local explicit width disables inherited adaptive sizing unless
+        local ``adaptive=True`` also opts in. Imputation, scaling, and output formatting remain
+        run-wide. Raw mappings stay live until normalization or fit; typed values detach on
+        construction. See :meth:`get_resolved_config` for detached effective declarations,
+        not learned state or realized widths.
     output_dim : int, default=7
         The single width knob shared by every numerical method: the number of non-bias output
         columns produced per input feature (bins for PLE/binning, centers for the feature maps,
@@ -277,9 +293,10 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         features. ``None`` disables the check. A violation is handled per
         ``overflow_policy``.
     max_features_per_input : int or None, default=None
-        Upper bound on the number of output columns any single input feature may
-        expand to. ``None`` disables the check. A violation is handled per
-        ``overflow_policy``.
+        Upper bound on the actual output width of each single feature or joint
+        feature group, including raw missing indicators. A group counts as one
+        unit; its width is not divided among sources. ``None`` disables the check.
+        A violation is handled per ``overflow_policy``.
     max_dense_memory : int or None, default=None
         Upper bound, in bytes, on the estimated dense output footprint
         (``n_rows * total_output_dim_ * itemsize``) evaluated against the training
@@ -340,6 +357,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         and one-hot encodes categoricals, and ``"adaptive"`` sizes each feature's width
         from the data within ``[7, 15]``. Call :meth:`get_resolved_config` to see the
         effective parameters. ``None`` (default) uses the individual parameters unchanged.
+    feature_groups : mapping or sequence, default=None
+        Ordered named declarations of source columns and representation settings.
+        Constructor inputs remain unchanged; :meth:`get_resolved_config` returns
+        detached declarations with canonical methods and applicable settings.
+        ``None`` or an empty collection keeps single-column processing. Each
+        nonempty declaration fits one joint block over its ordered sources.
 
     Attributes
     ----------
@@ -490,6 +513,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         dtype=None,
         verbose=0,
         preset=None,
+        *,
+        feature_groups=None,
+        task_validation="off",
     ):
         """
         Initialize the Preprocessor with various transformation options for tabular data.
@@ -527,6 +553,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         self.dtype = dtype
         self.verbose = verbose
         self.preset = preset
+        self.feature_groups = feature_groups
+        self.task_validation = task_validation
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        if not hasattr(self, "feature_groups"):
+            self.feature_groups = None
+        self.__dict__.setdefault("task_validation", "off")
+        _repair_legacy_sparse_feature_counts(self)
 
     def fit(self, X, y=None, embeddings=None):
         """
@@ -577,42 +612,23 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         start_time = time.perf_counter()
 
         resolved = self._resolved_params()
-        config = PreprocessorConfig.from_params(
-            numerical_method=resolved["numerical_method"],
-            categorical_method=resolved["categorical_method"],
-            feature_preprocessing=resolved["feature_preprocessing"],
-            output_dim=resolved["output_dim"],
-            degree=resolved["degree"],
-            target_aware=resolved["target_aware"],
-            placement_strategy=resolved["placement_strategy"],
-            task=resolved["task"],
-            adaptive=resolved["adaptive"],
-            min_output_dim=resolved["min_output_dim"],
-            max_output_dim=resolved["max_output_dim"],
-            random_state=resolved["random_state"],
-            scaling=resolved["scaling"],
-            cat_cutoff=resolved["cat_cutoff"],
-            treat_all_integers_as_numerical=resolved["treat_all_integers_as_numerical"],
-            numerical_imputation=resolved["numerical_imputation"],
-            categorical_imputation=resolved["categorical_imputation"],
-            add_missing_indicator=resolved["add_missing_indicator"],
-            missing_policy=resolved["missing_policy"],
-            verbose=resolved["verbose"],
-        )
+        config = self._fit_config(resolved)
+
+        if config.feature_groups:
+            group_frame = to_dataframe(X)
+            group_numerical, _ = detect_column_types(
+                group_frame,
+                cat_cutoff=resolved["cat_cutoff"],
+                treat_all_integers_as_numerical=resolved["treat_all_integers_as_numerical"],
+                estimator_name=type(self).__name__,
+            )
+            config.validate_feature_groups(group_frame.columns, group_numerical, y=y)
+            with_string_labels(group_frame)
 
         fitted_on_array = not has_column_labels(X)
         X = to_dataframe(X)
 
-        if self.feature_preprocessing:
-            unknown_features = set(self.feature_preprocessing) - set(X.columns)
-            if unknown_features:
-                raise invalid_param_error(
-                    type(self).__name__,
-                    "feature_preprocessing",
-                    sorted(unknown_features),
-                    "every key must name a column present in X",
-                    valid=X.columns,
-                )
+        self._validate_feature_overrides(X)
 
         if self.missing_policy == "error":
             self._reject_missing(X)
@@ -653,25 +669,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             numeric_values[:, np.isnan(numeric_values).all(axis=0)] = 0.0
             apply_constant_policy(numeric_values, self.policy_, estimator=self)
 
-        valid_formats = ("auto", "dense", "sparse")
-        if self.output_format not in valid_formats:
-            raise invalid_param_error(
-                type(self).__name__,
-                "output_format",
-                self.output_format,
-                "must be one of 'auto', 'dense', 'sparse'",
-                valid=set(valid_formats),
-            )
-
-        valid_structures = ("matrix", "blocks")
-        if self.output_structure not in valid_structures:
-            raise invalid_param_error(
-                type(self).__name__,
-                "output_structure",
-                self.output_structure,
-                "must be one of 'matrix', 'blocks'",
-                valid=set(valid_structures),
-            )
+        self._validate_fit_output()
+        fit_summary = self._resolved_config_summary(resolved, config, numerical_features=numerical_features)
 
         # Ask ColumnTransformer to assemble the representation in the requested
         # container whenever its component outputs permit it. In particular,
@@ -683,6 +682,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             categorical_features,
             sparse_threshold=sparse_threshold,
         )
+        vars(self).pop("_fit_config_", None)
         # The Preprocessor wraps its own output (set_output / output_format), so the
         # internal steps always produce plain arrays. Otherwise a global
         # ``sklearn.set_config(transform_output="pandas")`` reaches them and the
@@ -691,6 +691,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         # ColumnTransformer.fit runs fit_transform internally; keep the training
         # output to resolve output_format="auto" once, from the training density.
         X_ct = self._column_transformer_input(X)
+        self._check_placement_target(self.column_transformer_, y, config.task, resolved["task_validation"], len(X_ct))
         try:
             training_output = self.column_transformer_.fit_transform(X_ct, y)
         except ValueError as exc:
@@ -708,6 +709,13 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             del self.feature_names_in_
 
         self._enforce_output_budget(X.shape[0])
+
+        if config.feature_groups:
+            for block in _iter_fitted_blocks(self.column_transformer_):
+                if block.group_id is not None:
+                    leaf = representation_leaf(block.transformer)
+                    if isinstance(leaf, TensorProductSplineTransformer):
+                        leaf._penalty_source_axes_ = tuple(block.columns)
 
         if verbose >= 1:
             numerical_summary = _method_summary(numerical_features, is_numerical=True, config=config)
@@ -728,6 +736,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         if verbose >= 3:
             self._log_internal_decisions()
 
+        self._fit_config_ = fit_summary
         return self
 
     def transform(self, X, embeddings=None, return_array=None):
@@ -773,7 +782,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         ------
         PretabDataError
             If input matched by position has a different number of columns than
-            ``n_features_in_``: it could never be routed correctly.
+            ``n_features_in_``, or named input is missing a fitted group source.
         """
 
         check_is_fitted(self)
@@ -839,6 +848,84 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         return self.fit(X, y, embeddings=embeddings).transform(X, embeddings, return_array)
 
+    @staticmethod
+    def _fit_config(resolved):
+        return PreprocessorConfig.from_params(
+            **{field.name: resolved[field.name] for field in fields(PreprocessorConfig)}
+        )
+
+    def _validate_feature_overrides(self, frame):
+        if self.feature_preprocessing:
+            unknown_features = set(self.feature_preprocessing) - set(frame.columns)
+            if unknown_features:
+                raise invalid_param_error(
+                    type(self).__name__,
+                    "feature_preprocessing",
+                    sorted(unknown_features),
+                    "every key must name a column present in X",
+                    valid=frame.columns,
+                )
+
+    def _validate_fit_output(self):
+        valid_formats = ("auto", "dense", "sparse")
+        if self.output_format not in valid_formats:
+            raise invalid_param_error(
+                type(self).__name__,
+                "output_format",
+                self.output_format,
+                "must be one of 'auto', 'dense', 'sparse'",
+                valid=set(valid_formats),
+            )
+
+        valid_structures = ("matrix", "blocks")
+        if self.output_structure not in valid_structures:
+            raise invalid_param_error(
+                type(self).__name__,
+                "output_structure",
+                self.output_structure,
+                "must be one of 'matrix', 'blocks'",
+                valid=set(valid_structures),
+            )
+
+    def _check_placement_target(self, transformer, y, task, mode, n_samples, *, estimator=None):
+        if mode == "off" or y is None:
+            return
+        blocks = transformer.get_params(deep=False)["transformers"]
+        if any(_block_uses_task(block) for _, block, _ in blocks):
+            _check_task_target_once(
+                y,
+                task=task,
+                mode=mode,
+                estimator=estimator or type(self).__name__,
+                role="target-aware placement",
+                n_samples=n_samples,
+            )
+
+    def _preflight_task_target(self, X, y, *, outer_mode="off", owner=None):
+        """Check active placement contracts on a wrapper's full input before it fits clones."""
+        _validate_task_validation(self.task_validation, type(self).__name__)
+        if y is None or (self.task_validation == "off" and outer_mode == "off"):
+            return
+        resolved = self._resolved_params()
+        config = self._fit_config(resolved)
+        frame = to_dataframe(X)
+        self._validate_feature_overrides(frame)
+        if self.missing_policy == "error":
+            self._reject_missing(frame)
+        numerical, categorical = detect_column_types(
+            frame,
+            cat_cutoff=config.cat_cutoff,
+            treat_all_integers_as_numerical=config.treat_all_integers_as_numerical,
+            estimator_name=type(self).__name__,
+        )
+        if config.feature_groups:
+            config.validate_feature_groups(frame.columns, numerical, y=y)
+        with_string_labels(frame)
+        self._validate_fit_output()
+        transformer = build_column_transformer(config, numerical, categorical)
+        self._check_placement_target(transformer, y, config.task, outer_mode, len(frame), estimator=owner)
+        self._check_placement_target(transformer, y, config.task, resolved["task_validation"], len(frame))
+
     def _resolved_params(self):
         """Return the effective parameters after expanding ``preset``.
 
@@ -860,6 +947,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         """
         params = self.get_params(deep=False)
         preset = params.pop("preset", None)
+        _validate_task_validation(params["task_validation"], type(self).__name__)
         resolved = {key: (_PRESET_PARAM_DEFAULTS[key] if value is UNSET else value) for key, value in params.items()}
         validate_task(resolved["task"], type(self).__name__)
         if preset is None:
@@ -884,10 +972,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         When ``preset`` is set, its bundled values fill in every parameter the
         caller left at its default while explicitly-set parameters win; the
-        ``preset`` key itself is removed. When ``preset`` is ``None`` this is simply
-        :meth:`get_params` without the ``preset`` entry. The returned dict is the
-        configuration ``fit`` builds from, so it makes a preset's effect inspectable
-        before fitting.
+        ``preset`` key itself is removed. Declared ``feature_preprocessing``
+        entries become ordinary mappings with canonical methods and applicable
+        inherited settings, using the same resolver as fitting. Explicit
+        ``feature_groups`` become an ordered list of mappings with original
+        source labels and resolved representation settings. Other global keys
+        retain their preset-expanded values.
+
+        The result is detached from caller-owned containers and resolves current
+        parameters before or after fit. It does not describe the last fitted
+        graph, infer an input schema, or guarantee realized output widths.
 
         Returns
         -------
@@ -897,9 +991,34 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Raises
         ------
         InvalidParamError
-            If ``task`` or ``preset`` is invalid, exactly as ``fit`` would raise.
+            If ``task``, ``task_validation``, ``preset``, or a declared representation is invalid.
         """
-        return self._resolved_params()
+        resolved = self._resolved_params()
+        if resolved["feature_preprocessing"] or resolved["feature_groups"] is not None:
+            return self._resolved_config_summary(resolved, self._fit_config(resolved))
+        return copy.deepcopy(resolved)
+
+    @staticmethod
+    def _resolved_config_summary(resolved, config: PreprocessorConfig, *, numerical_features=None):
+        resolved = dict(resolved)
+        if resolved["feature_preprocessing"]:
+            numerical = None if numerical_features is None else set(numerical_features)
+            resolved["feature_preprocessing"] = {
+                feature: config.representation_for(
+                    feature, is_numerical=None if numerical is None else feature in numerical
+                ).to_dict()
+                for feature in config.feature_preprocessing
+            }
+        if resolved["feature_groups"] is not None:
+            resolved["feature_groups"] = [
+                {
+                    "name": group.name,
+                    "columns": list(group.columns),
+                    "representation": config.group_representation_for(group).to_dict(),
+                }
+                for group in config.feature_groups
+            ]
+        return copy.deepcopy(resolved)
 
     def get_feature_names_out(self, input_features=None):
         """
@@ -977,31 +1096,34 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
     @property
     def output_dims_(self) -> dict:
-        """Per-feature expanded output-column counts.
+        """Expanded output-column counts per single feature or group.
 
         Fitted attribute (available only after ``fit``). Maps each input feature
-        (by name) to the number of columns it contributes to the transformed
-        array, complementing the scalar :attr:`total_output_dim_`. The values sum
+        (by name), or each ``group_<name>`` block, to its actual transformed width,
+        complementing the scalar :attr:`total_output_dim_`. Group members do not
+        receive separate widths. The values sum
         to :attr:`total_output_dim_`. Useful when features get different
         ``output_dim`` values (via ``feature_preprocessing``) or expand to a
         non-uniform width (e.g. one-hot encoded categoricals).
         """
         check_is_fitted(self)
         column_transformer = self.column_transformer_
-        output_indices = column_transformer.output_indices_
         input_labels = self._input_labels()
         dims: dict = {}
-        for name, _transformer, columns in column_transformer.transformers_:
-            span = output_indices[name]
+        for block in _iter_fitted_blocks(column_transformer):
+            span = block.span
             width = span.stop - span.start
             if width == 0:
                 continue
-            if name == "remainder":
+            if block.group_id is not None:
+                dims[block.group_id] = width
+            elif block.step_name == "remainder":
                 # Passthrough columns: one output column per untransformed feature.
                 for full in column_transformer.get_feature_names_out()[span]:
                     feature = full.split("__", 1)[-1] if "__" in full else full
                     dims[feature] = dims.get(feature, 0) + 1
             else:
+                columns = block.columns
                 dims[input_labels.get(columns[0], columns[0])] = width
         return dims
 
@@ -1021,7 +1143,8 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         ------
         PretabDataError
             If array-like input matched by position has a different number of
-            columns than seen during ``fit``: it could never be routed correctly.
+            columns than seen during ``fit``, or named input omits a fitted group
+            source. Group errors identify the group and original missing labels.
         """
         # Synthetic labels mark an array fit only when no input feature names were recorded.
         fitted_labels = getattr(self.column_transformer_, "feature_names_in_", None)
@@ -1034,6 +1157,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         is_array = not has_column_labels(X)
         X = to_dataframe(X, copy=True)
         if not (is_array or (fitted_on_array and list(X.columns) != positional_labels)):
+            available = {str(column) for column in X.columns}
+            for block in _iter_fitted_blocks(self.column_transformer_):
+                if block.group_id is None:
+                    continue
+                missing = tuple(column for column in block.columns if str(column) not in available)
+                if missing:
+                    labels = self._input_labels()
+                    sources = tuple(labels.get(column, column) for column in missing)
+                    raise PretabDataError(
+                        f"Feature group {block.group_id!r} is missing sources {sources!r} "
+                        "required by the fitted representation."
+                    )
             return X
         if X.shape[1] != self.n_features_in_:
             raise PretabDataError(
@@ -1135,6 +1270,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         the fold. Column types, target-free blocks and their vocabularies, and
         preprocessing before the representation (imputers and scalers) are
         shared with this all-data fit. Missing-indicator branches are shared too.
+        A feature group is one block: its ordered source columns use the same
+        fitted prefix, and only its target-consuming joint representation is
+        refit for the fold.
         An out-of-fold row is encoded exactly like
         ``transform`` encodes it, except that no target-aware placement has seen
         that row's target. Refitting the whole preprocessor per fold would
@@ -1149,16 +1287,17 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         X_ct = self._column_transformer_input(self._align_input(X))
         column_transformer = copy.copy(self.column_transformer_)
         column_transformer.transformers_ = []
-        for name, transformer, columns in self.column_transformer_.transformers_:
+        for block in _iter_fitted_blocks(self.column_transformer_):
+            name, transformer, columns = block.step_name, block.transformer, block.columns
             fold_transformer = transformer
             if name != "remainder" and block_uses_target(transformer):
                 fold_transformer = refit_block_representation(transformer, X_ct[list(columns)], y)
-                span = self.column_transformer_.output_indices_[name]
+                span = block.span
                 expected_width = span.stop - span.start
                 width = len(fold_transformer.get_feature_names_out(list(columns)))
                 if width != expected_width:
                     raise IncompatibleParamsError(
-                        f"Cross-fitting requires a fixed output width for block {block_name(name, columns)!r}; "
+                        f"Cross-fitting requires a fixed output width for block {block.public_name!r}; "
                         f"expected {expected_width}, got {width}. The block's width depends on the training rows; "
                         "configure the representation to produce the same columns on every fold."
                     )
@@ -1178,40 +1317,56 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             )
 
     def _raise_for_empty_features(self, X, y, empty_features, config) -> None:
-        """Name the empty feature behind a failed ``fit``, if one is to blame.
+        """Name the empty sources behind a failed ``fit``, if they are to blame.
 
-        Called when fitting the ColumnTransformer failed. The block of each feature
-        without an observed value is refitted on its own, and the first that fails
-        raises a :class:`~pretab.exceptions.PretabDataError` naming that feature,
+        Called when fitting the ColumnTransformer failed. Each block containing
+        a source without an observed value is refitted on its own, and the first
+        that fails raises a :class:`~pretab.exceptions.PretabDataError` naming its
+        empty sources and, for a group, the declared group and representation,
         chained to the block's own error: methods that cannot be fitted on a
         constant column (e.g. the B/M/I and cubic splines, Box-Cox) otherwise only
         report "the feature at index 0". A block is only blamed when it fits a
-        stand-in column of distinct observed values with the same ``y``, so a
+        stand-in frame with distinct observed values for all empty sources and the same ``y``, so a
         failure with another cause (e.g. a ``y`` of the wrong length) is not
         attributed to the empty column. Returns without raising when no empty
         column is to blame, so the caller re-raises the original error.
         """
         empty = {str(feature): feature for feature in empty_features}
+        groups = {tuple(str(column) for column in group.columns): group for group in config.feature_groups}
         for _name, transformer, columns in self.column_transformer_.transformers:
-            if columns[0] not in empty:
+            empty_columns = tuple(column for column in columns if column in empty)
+            if not empty_columns:
                 continue
-            feature = empty[columns[0]]
-            is_numerical = feature in self.numerical_features_
             try:
                 cast(TransformerLike, clone(transformer)).fit(X[columns], y)
             except PretabConfigError:
                 continue  # a configuration problem, not one of the empty column
             except ValueError as exc:
                 stand_in = X[columns].copy()
-                stand_in[columns[0]] = (
-                    np.linspace(1.0, 2.0, len(X))
-                    if is_numerical
-                    else np.resize(np.array(["a", "b"], dtype=object), len(X))
-                )
+                for column in empty_columns:
+                    stand_in[column] = (
+                        np.linspace(1.0, 2.0, len(X))
+                        if empty[column] in self.numerical_features_
+                        else np.resize(np.array(["a", "b"], dtype=object), len(X))
+                    )
                 try:
                     cast(TransformerLike, clone(transformer)).fit(stand_in, y)
                 except ValueError:
                     continue  # the block fails with observed values too: not the emptiness
+                group = groups.get(tuple(columns))
+                if group is not None:
+                    labels = self._input_labels()
+                    sources = tuple(labels.get(column, column) for column in columns)
+                    missing = tuple(empty[column] for column in empty_columns)
+                    raise PretabDataError(
+                        f"Feature group {'group_' + group.name!r} with sources {sources!r} has no observed "
+                        f"(non-missing) value at fit for sources {missing!r}, and its {group.representation.method!r} "
+                        f"representation cannot be fitted on such data: {exc}\n"
+                        "Fix: fit on data where these sources are observed, or change the group's columns or "
+                        "representation via feature_groups."
+                    ) from exc
+                feature = empty[empty_columns[0]]
+                is_numerical = feature in self.numerical_features_
                 method = config.method_for(feature, is_numerical=is_numerical)
                 raise PretabDataError(
                     f"Column {feature!r} has no observed (non-missing) value at fit, and its {method!r} "
@@ -1248,10 +1403,21 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             violations.append(f"total output columns ({total}) exceed max_output_features ({self.max_output_features})")
 
         if self.max_features_per_input is not None:
+            input_labels = self._input_labels()
+            group_sources = {
+                block.group_id: tuple(input_labels.get(column, column) for column in block.columns)
+                for block in _iter_fitted_blocks(self.column_transformer_)
+                if block.group_id is not None
+            }
             for feature, width in self.output_dims_.items():
                 if width > self.max_features_per_input:
+                    unit = (
+                        f"group {feature!r} with sources {group_sources[feature]!r}"
+                        if feature in group_sources
+                        else f"feature {feature!r}"
+                    )
                     violations.append(
-                        f"feature {feature!r} expands to {width} columns, "
+                        f"{unit} expands to {width} columns, "
                         f"exceeding max_features_per_input ({self.max_features_per_input})"
                     )
 
@@ -1287,14 +1453,18 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         verbose : bool, default=True
             If True, renders an aligned per-feature table through the ``pretab``
             logger (attaching a stream handler when no host handler receives its
-            records), without lowering a more verbose level set earlier. If False,
-            the info dicts are returned silently.
+            records), without lowering a more verbose level set earlier. The
+            table is followed by the recorded fit-time settings for declared
+            feature overrides and groups, or an explicit notice for older fits
+            without that record. If False, the info dicts are returned silently.
 
         Returns
         -------
         tuple of dicts
             numerical_feature_info : dict
-                Metadata for numerical features.
+                Metadata for numerical singles and groups. Each group appears
+                once under ``group_<name>`` with its actual joint dimension,
+                ``group`` name, and ordered original-label ``source_features``.
             categorical_feature_info : dict
                 Metadata for categorical features.
             embedding_feature_info : dict
@@ -1310,6 +1480,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         )
         input_labels = self._input_labels()
         numerical_feature_info = {input_labels.get(key, key): info for key, info in numerical_feature_info.items()}
+        for info in numerical_feature_info.values():
+            if "group" in info:
+                info["source_features"] = tuple(input_labels.get(column, column) for column in info["source_features"])
         categorical_feature_info = {input_labels.get(key, key): info for key, info in categorical_feature_info.items()}
 
         if verbose:
@@ -1321,14 +1494,16 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 embedding_feature_info,
             ):
                 logger.info(line)
+            for line in _build_effective_settings_summary(getattr(self, "_fit_config_", None)):
+                logger.info(line)
 
         return numerical_feature_info, categorical_feature_info, embedding_feature_info
 
     def _log_internal_decisions(self):
         """Log fitted internal decisions (bins / knots / centers) at DEBUG."""
-        for step_name, transformer, columns in self.column_transformer_.transformers_:
-            name = block_name(step_name, columns)
-            last_step = representation_leaf(transformer)
+        for block in _iter_fitted_blocks(self.column_transformer_):
+            name = block.public_name
+            last_step = representation_leaf(block.transformer)
             for attr in (
                 "thresholds_",
                 "knots_",
@@ -1351,6 +1526,12 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         initialization and pickle hooks, but library imports can execute code.
         Only load specs from trusted sources. Third-party representations and
         pretrained language models are not supported by this serializer.
+
+        ``params`` describes the current constructor request. When recorded at
+        fit, ``resolved_config`` describes the settings used for the fitted
+        graph. Output dimensions and lineage describe fitted output, including
+        indicator columns. Supported fitted penalties are summarized without
+        their matrices; the encoded ``state`` remains the source for replay.
 
         Parameters
         ----------
@@ -1399,6 +1580,15 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         Preprocessor
             A fitted preprocessor equivalent to the one that produced the spec;
             ``transform`` reproduces the original output bit-for-bit.
+
+        Raises
+        ------
+        PretabSerializationError
+            If recorded widths, configuration, or group layout disagree with
+            the stored state or feature names. These checks do not authenticate
+            the spec; only load specs from trusted sources.
+        OptionalDependencyError
+            If the spec explicitly requests Polars output and Polars is unavailable.
         """
         if isinstance(source, dict):
             data = source
@@ -1415,7 +1605,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
     # --- Fingerprint & reproducibility ---
     def _canonical_spec(self) -> dict:
         """Deterministic subset of the spec used for fingerprinting."""
-        spec = preprocessor_to_spec(self)
+        spec = preprocessor_to_spec(self, include_fitted_metadata=False)
         # Runtime reports and advisory lifecycle flags do not change the fitted
         # representation. Keep them in serialization, but out of its identity.
         state = {
@@ -1423,6 +1613,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             for key, value in spec["state"].items()
             if key not in {"output_report_", "_frozen", "_stale_reason"}
         }
+        if not getattr(self, "feature_groups", None):
+            state.pop("feature_groups", None)
+        if state.get("task_validation") == "off":
+            state.pop("task_validation")
+        _canonicalize_feature_fingerprint(state, self.feature_preprocessing)
         return {
             "schema_version": spec["schema_version"],
             "pretab_version": spec["pretab_version"],
@@ -1441,6 +1636,11 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         categories). The digest is deterministic across processes and machines, so
         the same fitted state and configuration produce the same fingerprint.
 
+        A method-only per-feature mapping or :class:`RepresentationConfig` can
+        match its legacy string when the spelling, override order, and fitted
+        settings agree. Named fields within a structured override are unordered;
+        the order of per-feature overrides and of group declarations still matters.
+
         Raises
         ------
         PretabSerializationError
@@ -1457,15 +1657,29 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         -------
         dict
             Fingerprint, schema / library versions, random seed, output dtype and
-            format, input/output widths, and the per-feature representation
-            families -- everything needed to audit or reproduce the fit.
+            format, input/output widths, and representation families keyed by
+            source or public group key. Active groups also have a ``feature_groups``
+            mapping with canonical string ``source_features``, actual full-block
+            ``dimension`` (including raw indicators), and half-open ``output_slice``.
+            Group metadata comes from the fitted graph, not current requests.
         """
         check_is_fitted(self)
-        spec = preprocessor_to_spec(self)
+        spec = preprocessor_to_spec(self, include_fitted_metadata=False)
         representations = {
-            entry["columns"][0]: entry.get("family") for entry in spec["representations"] if entry.get("columns")
+            entry.get("group_id", entry["columns"][0]): entry.get("family")
+            for entry in spec["representations"]
+            if entry.get("columns")
         }
-        return {
+        groups = {
+            entry["group_id"]: {
+                "source_features": entry["columns"],
+                "dimension": entry["dimension"],
+                "output_slice": entry["output_slice"],
+            }
+            for entry in spec["representations"]
+            if "group_id" in entry
+        }
+        report = {
             "fingerprint": self.fingerprint_,
             "schema_version": SCHEMA_VERSION,
             "pretab_version": spec["pretab_version"],
@@ -1477,6 +1691,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             "n_output_features": len(spec["feature_names_out"]),
             "representations": representations,
         }
+        if groups:
+            report["feature_groups"] = groups
+        return report
 
     # --- Immutable lifecycle ---
     @property
@@ -1497,11 +1714,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
         return bool(getattr(self, "_frozen", False))
 
     def freeze(self) -> "Preprocessor":
-        """Freeze the fitted preprocessor, blocking ``fit`` and ``set_params`` mutation.
+        """Freeze the fitted preprocessor against mutation.
+
+        Blocks ``fit``, ``set_params``, and changes through ``set_output``.
+        ``set_output(transform=None)`` and repeating an explicitly configured
+        output format remain no-ops.
 
         Returns ``self`` for chaining. A frozen preprocessor is intended as an
         immutable deployment artifact; use :meth:`clone_unfitted` or :meth:`refit`
         to obtain a fresh, mutable estimator.
+
+        Global sklearn output configuration remains external to the frozen state:
+        it can change the returned container without changing the fingerprint.
+        Call ``set_output(transform="default")`` (or another supported format)
+        before freezing to pin the container independently of global settings.
         """
         check_is_fitted(self)
         self._frozen = True
@@ -1543,3 +1769,20 @@ class Preprocessor(TransformerMixin, BaseEstimator):
                 "Use clone_unfitted() for a mutable copy, or refit() to fit fresh data."
             )
         return super().set_params(**params)
+
+    def set_output(self, *, transform=None):
+        """Set sklearn output wrapping, refusing changes on a frozen preprocessor.
+
+        ``transform`` accepts ``"default"``, ``"pandas"``, ``"polars"``, or
+        ``None`` with sklearn's usual semantics. ``None`` leaves the setting
+        unchanged; repeating an explicit instance setting is also a no-op.
+        """
+        if transform is not None and self.is_frozen():
+            configured = getattr(self, "_sklearn_output_config", {}).get("transform")
+            if transform != configured:
+                raise FrozenRepresentationError(
+                    f"Cannot set_output(transform={transform!r}) on a frozen {type(self).__name__}. "
+                    "Use clone_unfitted() for a mutable copy, or refit() to fit fresh data."
+                )
+            transform = None
+        return super().set_output(transform=transform)

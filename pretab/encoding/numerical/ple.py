@@ -107,10 +107,17 @@ class PLETransformer(
 
     Examples
     --------
+    Inspect the encoding on the data used to fit it. Because PLE uses the target
+    to place breakpoints, this emits :class:`~pretab.LeakageWarning`. Use
+    :class:`~pretab.CrossFittedTransformer` to produce out-of-fold training
+    features for a downstream model.
+
     >>> from sklearn.datasets import make_regression
+    >>> from pretab.transformers import PLETransformer
     >>> X, y = make_regression(n_samples=100, n_features=5, noise=10, random_state=51)
     >>> ple = PLETransformer(output_dim=10, task="regression")
-    >>> X_transformed = ple.fit_transform(X, y)
+    >>> ple.fit_transform(X, y).shape
+    (100, 50)
     """
 
     _param_aliases: ClassVar[dict[str, str]] = {}

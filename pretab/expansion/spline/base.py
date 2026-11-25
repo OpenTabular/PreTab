@@ -30,13 +30,16 @@ from ...core.knots import (
 from ...core.parameters import UNSET, validate_placement, validate_task
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...core.supervised import warn_target_leakage
+from ...core.validation import resolve_input_features
 from ...exceptions import (
     DataWarning,
     InvalidParamError,
     PretabDataError,
+    PretabNotFittedError,
     invalid_param_error,
 )
 from ...placement.adapters import SplinePlacementAdapter
+from .penalty import PenaltySpec
 
 
 class BaseSplineTransformer(BasePreTabTransformer):
@@ -444,3 +447,65 @@ class BaseSplineTransformer(BasePreTabTransformer):
             full[1:, 1:] = penalty
             return full
         return penalty
+
+    def get_penalty_spec(self, feature_index: int = 0, *, diff_order: int | None = None) -> PenaltySpec:
+        """Return the base difference penalty in the selected feature's output coordinates.
+
+        ``diff_order=None`` selects the legacy default of two. An explicit order
+        must be positive and smaller than the selected basis width without bias.
+        Output indices refer to this transformer's full output, including any
+        unpenalized bias column. Subclasses with a different matrix convention
+        must provide their own typed accessor.
+
+        Raises
+        ------
+        PretabNotFittedError
+            If the transformer has not been fitted.
+        InvalidParamError
+            If a feature index or difference order is invalid, or the subclass
+            overrides the legacy matrix without a typed convention.
+        """
+        estimator = type(self).__name__
+        if not hasattr(self, "n_basis_"):
+            raise PretabNotFittedError(f"{estimator} must be fitted before calling get_penalty_spec().")
+        legacy_accessor = self.get_penalty_matrix
+        if getattr(legacy_accessor, "__func__", None) is not BaseSplineTransformer.get_penalty_matrix:
+            raise invalid_param_error(
+                estimator,
+                "get_penalty_spec",
+                None,
+                "this penalty convention is not supported; use get_penalty_matrix() for the legacy matrix",
+            )
+        if (
+            isinstance(feature_index, (bool, np.bool_))
+            or not isinstance(feature_index, (int, np.integer))
+            or not 0 <= feature_index < len(self.n_basis_)
+        ):
+            raise invalid_param_error(
+                estimator, "feature_index", feature_index, f"must be in [0, {len(self.n_basis_)})"
+            )
+        index = int(feature_index)
+        order = 2 if diff_order is None else diff_order
+        if (
+            isinstance(order, (bool, np.bool_))
+            or not isinstance(order, (int, np.integer))
+            or order < 1
+            or (diff_order is not None and order >= self.n_basis_[index])
+        ):
+            raise invalid_param_error(
+                estimator, "diff_order", diff_order, f"must be an integer in [1, {self.n_basis_[index]})"
+            )
+        sizes = self._output_sizes()
+        start = sum(sizes[:index])
+        stop = start + sizes[index]
+        axis = str(resolve_input_features(self, None)[index])
+        return PenaltySpec(
+            matrix=legacy_accessor(feature_index=index, diff_order=int(order)),
+            kind="coefficient_difference",
+            order=int(order),
+            axis=(axis,),
+            coordinate_system="output_coefficients",
+            coefficient_names=tuple(self.get_feature_names_out()[start:stop]),
+            coefficient_indices=range(start, stop),
+            provenance={"transformer": estimator, "include_bias": bool(self.include_bias)},
+        )
