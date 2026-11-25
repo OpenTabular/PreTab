@@ -17,37 +17,40 @@ from pretab.transformers import NumericBinningTransformer
 
 X = np.random.default_rng(0).uniform(size=(100, 1))   # (100, 1)
 onehot = NumericBinningTransformer(output_dim=8, encode="onehot", placement_strategy="quantile")
-onehot.fit_transform(X).shape
-# (100, 8): one column per bin
+assert onehot.fit_transform(X).shape == (100, 8)
 
 ordinal = NumericBinningTransformer(output_dim=8, encode="ordinal", placement_strategy="quantile")
-ordinal.fit_transform(X).shape
-# (100, 1): a single integer column, regardless of output_dim
+assert ordinal.fit_transform(X).shape == (100, 1)
+
+tied = np.repeat([0, 1, 2], 3).reshape(-1, 1)
+for encoding in ("onehot", "soft"):
+  binner = NumericBinningTransformer(output_dim=8, encode=encoding, placement_strategy="quantile")
+  assert binner.fit_transform(tied).shape == (9, 2)
+  assert binner.n_bins_ == [2]
 ```
 
-The `encode` parameter selects the output form, and it changes the output **width**, not just
-the values: `"onehot"` produces `output_dim` columns, while `"ordinal"` and `"soft"` behave
-differently from each other despite both accepting the same `output_dim`.
+`output_dim` requests a bin count per input feature. Quantile placement merges duplicate
+edges, so tied data can yield fewer bins than requested. A constant feature falls back to
+one bin. Inspect `n_bins_` for the fitted counts. The `encode` parameter determines how those
+bins become output columns:
 
 `"ordinal"`
-: A single integer column giving the bin index (output width is always 1, independent of
-`output_dim`).
+: One integer column per input feature, giving the bin index regardless of the bin count.
 
 `"onehot"`
-: One indicator column per bin (output width equals `output_dim`).
+: One indicator column per fitted bin.
 
 `"soft"`
 : A soft assignment that spreads each value across neighbouring bins, so the boundaries are not
-hard (output width equals `output_dim`, same shape as `"onehot"` but with fractional
-membership instead of a single 1).
+hard. It emits one column per fitted bin, like `"onehot"`, but with fractional memberships.
 
 Edge placement follows `placement_strategy`: `"uniform"` for equal-width bins, `"quantile"`
 for equal-frequency bins. See
 [Resolution and placement](../core_concepts/resolution_and_placement.md).
 
 ```{tip}
-Quantile edges give every bin a similar number of samples, which is usually more stable than
-equal-width bins when the feature is skewed.
+When the feature has few ties, quantile edges give bins similar sample counts, which can be
+more stable than equal-width bins on skewed data.
 ```
 
 ## Piecewise-linear encoding
@@ -64,10 +67,8 @@ from pretab.transformers import PLETransformer
 X = np.random.default_rng(0).uniform(size=(100, 1))
 y = np.random.default_rng(0).integers(0, 2, size=100)
 t = PLETransformer(output_dim=12, task="classification")
-t.fit_transform(X, y).shape
-# (100, 12): output_dim is exact here (no adaptive clamping)
-t.total_output_dim_
-# 12
+assert t.fit_transform(X, y).shape == (100, 12)
+assert t.total_output_dim_ == 12
 ```
 
 Constructor highlights: `output_dim`, `placement_strategy="cart"`, `task="regression"`,
@@ -80,10 +81,11 @@ and should be fit leakage-safely, ideally with cross-fitting. See
 ```
 
 ```{warning}
-Because PLE always reads `y` to place its bins, fitting it directly on data you will also train
-on emits a `LeakageWarning`. Fit it inside a scikit-learn `Pipeline` or wrap it in
-`pretab.CrossFittedTransformer` so the bin edges never see the rows they will later transform
-for training.
+The standalone fit above emits `LeakageWarning` because PLE uses `y` to place its bins. For
+evaluation, split before fitting or pass the entire scikit-learn `Pipeline` to
+cross-validation. A plain pipeline suppresses the warning but still uses each training
+row's target when fitting its bins. For out-of-fold training features, wrap PLE in
+`pretab.CrossFittedTransformer` and use `fit_transform(X, y)`.
 ```
 
 ### Why piecewise-linear rather than one-hot
@@ -108,12 +110,18 @@ opposite ends of a number line.
 
 ```python
 import numpy as np
+from pretab.exceptions import PretabDataError
 from pretab.transformers import PeriodicEncodingTransformer
 
 X = np.array([[0], [6], [12], [18], [24]])   # hour-of-day style values
 t = PeriodicEncodingTransformer(period=24, harmonics=2)  # e.g. hour of day
-t.fit_transform(X).shape
-# (5, 4): 2 columns (sin, cos) per harmonic
+encoded = t.fit_transform(X)
+assert encoded.shape == (5, 4)
+np.testing.assert_allclose(encoded[0], encoded[-1], atol=1e-12)
+np.testing.assert_allclose(t.transform([[25], [-1]]), t.transform([[1], [23]]), atol=1e-12)
+
+with np.testing.assert_raises(PretabDataError):
+  PeriodicEncodingTransformer(period=24).fit([[0], [25]])
 ```
 
 Constructor highlights: `period` (required, the cycle length), `harmonics=1`,
@@ -124,25 +132,19 @@ one extra column when `include_original=True`. Higher `harmonics` lets the encod
 finer-grained sub-cycles (for example distinguishing morning from afternoon within a day), at
 the cost of a wider output.
 
-```{warning}
-PreTab has no mechanism to detect the period automatically from the data. `period` is a
-required constructor argument with no default, and `fit` only validates that values fall
-within `[0, period]`, it never infers the cycle length. You must know and supply the period
-yourself (24 for hour of day, 7 for day of week, 12 for month of year, and so on).
-```
-
 ```{important}
-Valid input is the **closed interval** `[0, period]`: both endpoints are accepted, and by
-construction they map to the identical `(sin, cos)` pair, since `x=0` and `x=period` are the
-same point on the cycle. Values outside `[0, period]` raise a `PretabDataError` at fit and
-transform, there is no silent wrap-around or clamping.
+Supply the period explicitly. `fit` does not infer it and raises `PretabDataError` if a
+training value falls outside `[0, period]`. Both endpoints are accepted and their harmonic
+columns agree up to floating-point precision. After fitting, `transform` accepts values
+outside that interval and the sine and cosine terms wrap around the cycle. If
+`include_original=True`, the extra raw column is not wrapped.
 ```
 
 ```{note}
 Periodic encoding is a standalone time-series utility. It is not wired into `Preprocessor`
 because it requires a per-feature `period`, so apply it directly to the relevant cyclical
-column. Use [Fourier features](functional_expansions.md#fourier-features) instead when you want
-the model to search across a set of frequencies rather than commit to one known period.
+column. [Fourier features](functional_expansions.md#fourier-features) instead set their base
+frequency from the fitted range; they do not infer a cycle length from the data.
 ```
 
 ## Binning versus PLE

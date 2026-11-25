@@ -8,6 +8,8 @@ had seen their own targets.
 """
 
 import warnings
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
@@ -19,7 +21,7 @@ from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.preprocessing import MinMaxScaler, TargetEncoder
 
 from pretab import CrossFittedTransformer, Preprocessor, register_representation
-from pretab.compose.inspection import block_uses_target, refit_block_representation
+from pretab.compose.inspection import _locate_block_representation, block_uses_target, refit_block_representation
 from pretab.exceptions import IncompatibleParamsError
 
 
@@ -73,6 +75,86 @@ def noise_target_data():
     rng = np.random.default_rng(0)
     X = pd.DataFrame({"x": rng.normal(size=400), "id": np.repeat([f"id{i}" for i in range(100)], 4)})
     return X, rng.normal(size=400)
+
+
+@pytest.mark.parametrize("feature_kind", ["numerical", "categorical"])
+@pytest.mark.parametrize("supervision", ["unsupervised", "optional", "supervised"])
+@pytest.mark.parametrize("target_aware", [False, True])
+@pytest.mark.parametrize("missing_union", [False, True])
+def test_registered_target_usage_follows_declared_supervision(feature_kind, supervision, target_aware, missing_union):
+    register_representation("contract_encoder", _MeanEncoder, feature_kind=feature_kind, supervision=supervision)
+    pipeline = Pipeline(
+        [
+            ("imputer", SimpleImputer()),
+            ("contract_encoder", _MeanEncoder(target_aware=target_aware)),
+            ("scaler", MinMaxScaler()),
+        ]
+    )
+    block = (
+        FeatureUnion([("representation", pipeline), ("missing", MissingIndicator(features="all"))])
+        if missing_union
+        else pipeline
+    )
+    expected_target = supervision == "supervised" or (supervision == "optional" and target_aware)
+    expected = (
+        (2, ("standardization", "raw", False, False))
+        if supervision == "unsupervised"
+        else (1, ("contract_encoder", "category" if feature_kind == "categorical" else "basis", expected_target, False))
+    )
+
+    assert _locate_block_representation(pipeline, ["value"]) == expected
+    assert block_uses_target(block) is expected_target
+
+
+@pytest.mark.parametrize("cls", [_MeanEncoder, _OffByDefaultMeanEncoder])
+def test_registered_class_identity_accepts_subclasses(cls):
+    register_representation("contract_encoder", _MeanEncoder, feature_kind="categorical", supervision="optional")
+    encoder = cls()
+    pipeline = Pipeline([("contract_encoder", encoder)])
+
+    assert _locate_block_representation(pipeline, ["value"]) == (
+        0,
+        ("contract_encoder", "category", encoder.target_aware, False),
+    )
+    assert block_uses_target(pipeline) is encoder.target_aware
+
+
+@pytest.mark.parametrize("supervision", ["optional", "supervised"])
+@pytest.mark.parametrize("step_name", ["scaler", "to_float"])
+def test_registered_name_without_matching_class_keeps_the_helper_target_free(monkeypatch, supervision, step_name):
+    register_representation(step_name, _MeanEncoder, feature_kind="numerical", supervision=supervision, override=True)
+    helper = MinMaxScaler()
+    monkeypatch.setattr(helper, "target_aware", True, raising=False)
+    pipeline = Pipeline([(step_name, helper)])
+    expected = (
+        (0, ("standardization", "raw", False, False))
+        if step_name == "scaler"
+        else (None, ("passthrough", "raw", False, False))
+    )
+
+    assert _locate_block_representation(pipeline, ["value"]) == expected
+    assert block_uses_target(pipeline) is False
+
+
+@pytest.mark.parametrize("uses_target", [False, True])
+def test_declared_spec_precedes_matching_registry_and_legacy_name(monkeypatch, uses_target):
+    register_representation("scaler", _MeanEncoder, feature_kind="categorical", supervision="supervised", override=True)
+    encoder = _MeanEncoder()
+    spec = SimpleNamespace(
+        family="declared_encoder", component_kind="category", uses_target=uses_target, is_interaction=False
+    )
+    get_spec = Mock(return_value=spec)
+    monkeypatch.setattr(encoder, "get_representation_spec", get_spec, raising=False)
+    pipeline = Pipeline([("imputer", SimpleImputer()), ("scaler", encoder), ("onehot", MinMaxScaler())])
+
+    assert _locate_block_representation(pipeline, ["value"]) == (
+        1,
+        ("declared_encoder", "category", uses_target, False),
+    )
+    get_spec.assert_called_once_with(input_features=["value"])
+    assert block_uses_target(pipeline) is uses_target
+    assert get_spec.call_count == 2
+    assert get_spec.call_args.kwargs == {"input_features": None}
 
 
 @pytest.mark.parametrize(
@@ -227,6 +309,10 @@ def test_refit_representation_shares_only_the_prefix_and_missing_branch(
         else pipeline
     ).fit(X, y)
     assert block_uses_target(fitted)
+    assert _locate_block_representation(pipeline, ["x"]) == (
+        prefix_length,
+        ("pipeline_mean", "basis", True, False),
+    )
     original = fitted.transform(X).copy()
     original_input = X.copy(deep=True)
     train, held_out = X.iloc[40:], X.iloc[:40]

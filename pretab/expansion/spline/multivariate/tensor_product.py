@@ -6,8 +6,9 @@ from ....core.knots import bspline_basis, extrapolate_bspline_rows
 from ....core.parameters import UNSET
 from ....core.policy import RepresentationPolicy, resolve_out_of_range
 from ....core.validation import resolve_input_features
-from ....exceptions import InvalidParamError
+from ....exceptions import InvalidParamError, PretabNotFittedError, invalid_param_error
 from ..mixins import SplineBasisMixin
+from ..penalty import PenaltySpec
 
 
 class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
@@ -186,7 +187,11 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
             D = np.diff(D, n=1, axis=0)
         return D.T @ D
 
+    _penalty_source_axes_: tuple[str, ...]
+
     def fit(self, X, y=None):
+        self.__dict__.pop("_penalty_fit_", None)
+        self.__dict__.pop("_penalty_source_axes_", None)
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=4)
         if self.placement_strategy not in ("uniform", "quantile"):
@@ -234,6 +239,7 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
             self.penalties_.append(penalty)
             self.n_knots_.append(max(0, len(knots) - 2 * (self.degree + 1)))
 
+        self._penalty_fit_ = (int(self.diff_order), bool(self.include_bias), int(self.degree))
         return self
 
     def transform(self, X):
@@ -326,3 +332,59 @@ class TensorProductSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEst
         """
         check_is_fitted(self, "penalties_")
         return self.penalties_[feature_index]
+
+    def get_penalty_specs(self) -> tuple[PenaltySpec, ...]:
+        """Return one full joint penalty per fitted source direction, in source order.
+
+        Every matrix matches the corresponding entry in :meth:`get_penalty_matrices`.
+        Names and indices address this transformer's joint output in C order,
+        with the last input axis varying fastest. Bias, when enabled at fit,
+        belongs to each marginal basis, not to an extra joint intercept.
+
+        Raises
+        ------
+        PretabNotFittedError
+            If no fitted marginal penalties are available.
+        InvalidParamError
+            If the fitted convention is unavailable, the basis settings require
+            a refit, or a subclass overrides the joint matrix convention.
+        """
+        estimator = type(self).__name__
+        if not hasattr(self, "penalties_"):
+            raise PretabNotFittedError(f"{estimator} must be fitted before calling get_penalty_specs().")
+        fitted = getattr(self, "_penalty_fit_", None)
+        if fitted is None:
+            raise invalid_param_error(estimator, "get_penalty_specs", None, "refit to record the fitted penalty order")
+        order, include_bias, degree = fitted
+        if (bool(self.include_bias), self.degree) != (include_bias, degree):
+            raise invalid_param_error(
+                estimator, "get_penalty_specs", None, "refit after changing degree or include_bias"
+            )
+        legacy_accessor = self.get_penalty_matrices
+        if getattr(legacy_accessor, "__func__", None) is not TensorProductSplineTransformer.get_penalty_matrices:
+            raise invalid_param_error(
+                estimator, "get_penalty_specs", None, "the matrix convention is overridden; use get_penalty_matrices()"
+            )
+
+        axes = getattr(self, "_penalty_source_axes_", None)
+        if axes is None:
+            axes = resolve_input_features(self, None)
+        names = tuple(self.get_feature_names_out())
+        return tuple(
+            PenaltySpec(
+                matrix=matrix,
+                kind="coefficient_difference",
+                order=order,
+                axis=(str(axis),),
+                coordinate_system="output_coefficients",
+                coefficient_names=names,
+                coefficient_indices=range(len(names)),
+                provenance={
+                    "transformer": estimator,
+                    "include_bias": include_bias,
+                    "marginal_sizes": self.marginal_sizes_,
+                    "flatten_order": "C",
+                },
+            )
+            for axis, matrix in zip(axes, legacy_accessor(), strict=True)
+        )

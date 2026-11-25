@@ -1,8 +1,8 @@
-"""Build the per-column transformer pipelines and combine them.
+"""Build single-column and grouped transformer pipelines and combine them.
 
-This module turns a resolved method name plus a :class:`PreprocessorConfig` into
-scikit-learn transformer steps, wraps them in a per-column
-:class:`~sklearn.pipeline.Pipeline`, and assembles every column into the final
+This module turns resolved requests plus a :class:`PreprocessorConfig` into
+scikit-learn transformer steps, wraps them in a shared
+:class:`~sklearn.pipeline.Pipeline` construction path, and assembles the blocks into a
 :class:`~sklearn.compose.ColumnTransformer`. The class to instantiate, the
 constructor arguments it accepts, and which placement keyword arguments apply are
 all taken from :data:`~pretab.compose.registry.TRANSFORMER_REGISTRY`.
@@ -19,12 +19,13 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from ..exceptions import ConfigWarning, IncompatibleParamsError, invalid_param_error
 from ..preprocessing.floats import ToFloatTransformer
 from ..preprocessing.missing import MissingStateIndicator, _CategoricalMissingNormalizer
-from .config import PreprocessorConfig
+from .config import PreprocessorConfig, RepresentationConfig, _normalize_representation_config
 from .registry import (
     CATEGORICAL_ALIASES,
     CATEGORICAL_METHODS,
     NUMERICAL_ALIASES,
     NUMERICAL_METHODS,
+    TRANSFORMER_REGISTRY,
     TransformerSpec,
     get_spec,
     resolve_method,
@@ -140,7 +141,28 @@ def get_numerical_transformer_steps(
     **kwargs,
 ):
     """Return the ordered ``(name, transformer)`` steps for a numerical ``method``."""
-    method = resolve_method(method, NUMERICAL_METHODS, NUMERICAL_ALIASES)
+    return _get_numerical_transformer_steps(
+        method, add_imputer, imputer_strategy, imputer_kwargs, add_missing_indicator, scaling, kwargs
+    )
+
+
+def _get_numerical_transformer_steps(
+    method,
+    add_imputer,
+    imputer_strategy,
+    imputer_kwargs,
+    add_missing_indicator,
+    scaling,
+    kwargs,
+    *,
+    is_group=False,
+):
+    methods = (
+        {name for name, spec in TRANSFORMER_REGISTRY.items() if spec.group_compatible and spec.is_numerical}
+        if is_group
+        else NUMERICAL_METHODS
+    )
+    method = resolve_method(method, methods, NUMERICAL_ALIASES)
     steps = []
 
     if add_imputer:
@@ -164,13 +186,13 @@ def get_numerical_transformer_steps(
     if scaling in scalers and scaling != method and method != "none":
         steps.append(scalers[scaling])
 
-    if method not in NUMERICAL_METHODS:
+    if method not in methods:
         raise invalid_param_error(
             "get_numerical_transformer_steps",
             "method",
             method,
             "unrecognized numerical preprocessing method",
-            valid=set(NUMERICAL_METHODS),
+            valid=set(methods),
         )
 
     spec = get_spec(method)
@@ -268,12 +290,20 @@ def get_categorical_transformer_steps(
     return steps
 
 
-def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorConfig) -> Pipeline | FeatureUnion:
+def create_transformer(
+    method: str,
+    *,
+    is_numerical: bool,
+    config: PreprocessorConfig,
+    representation: RepresentationConfig | None = None,
+) -> Pipeline | FeatureUnion:
     """Build the per-column :class:`~sklearn.pipeline.Pipeline` for one feature.
 
     ``method`` is the resolved method name; ``is_numerical`` selects the numerical
-    or categorical construction path. All width / placement / seeding knobs are
-    taken from ``config``.
+    or categorical construction path. When ``representation`` is supplied, its
+    resolved settings replace the run-wide representation controls. Otherwise
+    existing calls use ``config`` unchanged. Imputation, scaling, and indicator
+    policy always come from ``config``.
 
     Raises
     ------
@@ -282,46 +312,86 @@ def create_transformer(method: str, *, is_numerical: bool, config: PreprocessorC
         run is configured with ``target_aware=False``; such a combination cannot be
         satisfied and is rejected instead of silently ignored.
     """
-    known = method in NUMERICAL_METHODS if is_numerical else method in CATEGORICAL_METHODS
+    return _create_transformer(method, is_numerical=is_numerical, config=config, representation=representation)
+
+
+def _create_transformer(
+    method: str,
+    *,
+    is_numerical: bool,
+    config: PreprocessorConfig,
+    representation: RepresentationConfig | None = None,
+    is_group: bool = False,
+) -> Pipeline | FeatureUnion:
+    if representation is None:
+        shared_kwargs = {
+            "task": config.task,
+            "target_aware": config.target_aware,
+            "output_dim": config.output_dim,
+            "adaptive": config.adaptive,
+            "min_output_dim": config.min_output_dim if config.adaptive else None,
+            "max_output_dim": config.max_output_dim if config.adaptive else None,
+            "degree": config.degree,
+            "placement_strategy": config.placement_strategy,
+            **config.seed_kwargs,
+        }
+    else:
+        if not isinstance(representation, RepresentationConfig):
+            raise invalid_param_error(
+                "create_transformer", "representation", representation, "must be a RepresentationConfig or None"
+            )
+        representation = _normalize_representation_config(
+            representation, is_numerical=is_numerical, path="create_transformer.representation", is_group=is_group
+        )
+        resolved_method = config.resolve_numerical(method) if is_numerical else config.resolve_categorical(method)
+        if resolved_method != representation.method:
+            raise invalid_param_error(
+                "create_transformer",
+                "representation.method",
+                representation.method,
+                f"must match the selected method {resolved_method!r}",
+            )
+        method = representation.method
+        settings = representation.to_dict()
+        shared_kwargs = {key: value for key, value in settings.items() if key not in {"method", "params", "name"}}
+        shared_kwargs.update(settings["params"])
+
+    known = (
+        method in TRANSFORMER_REGISTRY
+        if is_group
+        else (method in NUMERICAL_METHODS if is_numerical else method in CATEGORICAL_METHODS)
+    )
     if known:
         spec = get_spec(method)
-        if spec.requires_target and not config.target_aware:
+        if representation is None and spec.requires_target and not config.target_aware:
             raise IncompatibleParamsError(
                 f"method {method!r} is always target-aware and requires target_aware=True "
                 f"with placement_strategy in {{'cart', 'lightgbm'}}; got target_aware=False."
             )
 
     plan = config.imputation_plan(is_numerical=is_numerical)
-    if is_numerical:
+    if is_group:
+        steps = _get_numerical_transformer_steps(
+            method,
+            plan["add_imputer"],
+            plan["strategy"],
+            None,
+            False,
+            config.scaling,
+            shared_kwargs,
+            is_group=True,
+        )
+    elif is_numerical:
         steps = get_numerical_transformer_steps(
             method=method,
-            task=config.task,
-            target_aware=config.target_aware,
             add_imputer=plan["add_imputer"],
             imputer_strategy=plan["strategy"],
-            output_dim=config.output_dim,
-            adaptive=config.adaptive,
-            min_output_dim=config.min_output_dim if config.adaptive else None,
-            max_output_dim=config.max_output_dim if config.adaptive else None,
-            degree=config.degree,
             scaling=config.scaling,
-            placement_strategy=config.placement_strategy,
-            **config.seed_kwargs,
+            **shared_kwargs,
         )
     else:
         constructor_kwargs = {}
         if known:
-            shared_kwargs = {
-                "task": config.task,
-                "target_aware": config.target_aware,
-                "output_dim": config.output_dim,
-                "adaptive": config.adaptive,
-                "min_output_dim": config.min_output_dim if config.adaptive else None,
-                "max_output_dim": config.max_output_dim if config.adaptive else None,
-                "degree": config.degree,
-                "placement_strategy": config.placement_strategy,
-                **config.seed_kwargs,
-            }
             constructor_kwargs = _filter_kwargs(spec.allowed_args, shared_kwargs)
             constructor_kwargs.update(_placement_kwargs(spec, shared_kwargs))
         steps = get_categorical_transformer_steps(
@@ -387,24 +457,57 @@ def build_column_transformer(
     *,
     sparse_threshold: float = 0.3,
 ) -> ColumnTransformer:
-    """Assemble the per-column pipelines into the final ColumnTransformer.
+    """Assemble single-column and declared group pipelines into a ColumnTransformer.
 
     Numerical steps are prefixed ``num_`` and categorical steps ``cat_`` to match
     the block names the Preprocessor exposes (see :func:`_step_names` for labels
     that cannot be embedded in a step name); untransformed columns pass through via
-    ``remainder="passthrough"``. Each step selects its column by
+    ``remainder="passthrough"``. Single-column steps select their column by
     the label's string form: scikit-learn reads an integer selector as a
     *position*, so the Preprocessor fits and transforms the ColumnTransformer on a
     frame whose labels are strings (see
     :func:`~pretab.compose.feature_detection.with_string_labels`).
+    Groups select ordered lists of those internal labels and own their sources
+    exclusively. Blocks are ordered as numerical singles, declared groups, then
+    categorical singles. Group steps use ``group_<name>``; a collision with an
+    input label or single-column block key is rejected before construction.
     """
-    blocks = [("num", feature) for feature in numerical_features]
-    blocks += [("cat", feature) for feature in categorical_features]
+    groups = {group.name: group for group in config.feature_groups}
+    claimed = {label for group in config.feature_groups for label in group.columns}
+    blocks = [("num", feature) for feature in numerical_features if feature not in claimed]
+    blocks += [("group", group.name) for group in config.feature_groups]
+    blocks += [("cat", feature) for feature in categorical_features if feature not in claimed]
+    if groups:
+        raw_labels = {str(label) for label in [*numerical_features, *categorical_features]}
+        single_names = {f"{kind}_{feature}" for kind, feature in blocks if kind != "group"}
+        for group in config.feature_groups:
+            public_name = f"group_{group.name}"
+            if public_name in raw_labels or public_name in single_names:
+                raise invalid_param_error(
+                    f"feature_groups[{group.name!r}]",
+                    "name",
+                    group.name,
+                    f"public block key {public_name!r} conflicts with an input label or single-column block",
+                )
     transformers = []
     for (kind, feature), name in zip(blocks, _step_names(blocks), strict=True):
+        if kind == "group":
+            group = groups[feature]
+            representation = config.group_representation_for(group)
+            pipeline = _create_transformer(
+                representation.method, is_numerical=True, config=config, representation=representation, is_group=True
+            )
+            transformers.append((name, pipeline, [str(label) for label in group.columns]))
+            continue
         is_numerical = kind == "num"
         method = config.method_for(feature, is_numerical=is_numerical)
-        pipeline = create_transformer(method, is_numerical=is_numerical, config=config)
+        if isinstance(config.feature_preprocessing.get(feature, method), str):
+            pipeline = create_transformer(method, is_numerical=is_numerical, config=config)
+        else:
+            representation = config.representation_for(feature, is_numerical=is_numerical)
+            pipeline = create_transformer(
+                method, is_numerical=is_numerical, config=config, representation=representation
+            )
         transformers.append((name, pipeline, [str(feature)]))
     return ColumnTransformer(
         transformers=transformers,

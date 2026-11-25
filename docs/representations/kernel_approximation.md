@@ -47,15 +47,16 @@ them, following Williams and Seeger. It supports several kernels through `kernel
 more accurate than random Fourier features at a given output width because the landmarks adapt
 to the data rather than being drawn at random. For landmarks $z_1, \dots, z_m$ (the sampled
 training rows) and kernel function $K$, let $k_m(x) = \big(K(x, z_1), \dots, K(x, z_m)\big)$ be
-the vector of kernel evaluations between $x$ and every landmark. The output is
+the vector of kernel evaluations between $x$ and every landmark. For a positive-semidefinite
+landmark kernel matrix, the map takes the form
 
 $$
 \phi(x) = K_{mm}^{-1/2}\ k_m(x),
 $$
 
-where $K_{mm}$ is the $m \times m$ kernel matrix between the landmarks themselves, and
-$K_{mm}^{-1/2}$ is computed once at fit time via its eigendecomposition. The inner product
-$\phi(x)^\top \phi(x')$ approximates $K(x, x')$.
+where $K_{mm}$ is the $m \times m$ kernel matrix between the landmarks. Scikit-learn computes
+the normalization at fit time using SVD, flooring small singular values before taking their
+inverse square roots. The inner product $\phi(x)^\top \phi(x')$ approximates $K(x, x')$.
 
 ```python
 import numpy as np
@@ -63,20 +64,19 @@ from pretab.transformers import NystroemFeaturesTransformer
 
 X = np.random.default_rng(0).uniform(size=(200, 3))
 t = NystroemFeaturesTransformer(n_components=100, kernel="rbf")
-t.fit_transform(X).shape
-# (200, 100)
+assert t.fit_transform(X).shape == (200, 100)
 ```
 
 Constructor highlights: `n_components=100`, `kernel="rbf"`, `gamma=None`, `degree=3`,
 `coef0=1`, `random_state`.
 
 ```{warning}
-Nyström samples its landmarks from the training rows, so `n_components` cannot exceed
-`n_samples`. If you fit on fewer rows than `n_components` (for example a small
-cross-validation fold), scikit-learn silently clamps `n_components` down to `n_samples` and
-emits a `UserWarning` rather than raising: the fitted output width is `min(n_components,
-n_samples_seen_in_fit)`. Random Fourier features have no such limit, since they draw a random
-basis instead of sampling training rows.
+Nyström samples its landmarks from the training rows. If a fit has fewer rows than
+`n_components` (for example in a small cross-validation fold), scikit-learn emits a
+`UserWarning` and uses all the available rows as landmarks. The fitted width is
+`min(n_components, n_samples_seen_in_fit)`; the requested `n_components` remains unchanged.
+Random Fourier features have no such limit because they draw a random basis instead of
+sampling training rows.
 ```
 
 ```{note}

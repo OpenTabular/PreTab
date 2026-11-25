@@ -142,11 +142,11 @@ print(f"5-fold ROC AUC: {scores.mean():.3f} +/- {scores.std():.3f}")
 ```
 
 ```{important}
-A supervised transformer fit outside a cross-validation or `Pipeline` context emits a
-`LeakageWarning`. Inside the `Pipeline` here, the warning is suppressed because each fold fits
-the representation on training data only. For the strongest guarantee on training features
-themselves, wrap the transformer in `CrossFittedTransformer`. See
-[Target awareness](../core_concepts/target_awareness.md).
+PreTab suppresses `LeakageWarning` in recognized fitting contexts such as `Pipeline`, even for
+a single fit on the full dataset. Here `cross_val_score`, not warning suppression, keeps
+validation labels out of the fit. A plain pipeline still trains the classifier on features that
+can depend on those same rows' labels. Wrap the preprocessing step in `CrossFittedTransformer`
+to generate out-of-fold training features. See [Target awareness](../core_concepts/target_awareness.md).
 ```
 
 ## Where to go next

@@ -137,6 +137,17 @@ def compute_output_report(array, output_format, *, threshold=_SPARSE_AUTO_THRESH
     return fmt, report
 
 
+def _require_polars():
+    try:
+        import polars as pl  # type: ignore
+    except ImportError as exc:
+        raise OptionalDependencyError(
+            "set_output(transform='polars') requires the optional 'polars' package. "
+            "Install it with `pip install polars`."
+        ) from exc
+    return pl
+
+
 def to_dataframe_output(array, columns, container, *, index=None):
     """Wrap a dense stacked array in a pandas or polars DataFrame.
 
@@ -167,13 +178,7 @@ def to_dataframe_output(array, columns, container, *, index=None):
         import pandas as pd
 
         return pd.DataFrame(array, index=index, columns=pd.Index(columns))
-    try:
-        import polars as pl  # type: ignore
-    except ImportError as exc:  # pragma: no cover - exercised only without polars
-        raise OptionalDependencyError(
-            "set_output(transform='polars') requires the optional 'polars' package. "
-            "Install it with `pip install polars`."
-        ) from exc
+    pl = _require_polars()
     return pl.from_numpy(array, schema=columns)
 
 

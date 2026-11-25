@@ -249,12 +249,13 @@ def test_preprocessor_unknown_numerical_method():
 
 
 @pytest.mark.parametrize("method", ["bspline", "naturalspline", "rbf", "ple", "minmax"])
-def test_preprocessor_unknown_task(method):
+@pytest.mark.parametrize("mode", ["off", "warn", "raise"])
+def test_preprocessor_unknown_task(method, mode):
     """Before, ``task="Regression"`` gave classification knots, or failed deep in scikit-learn."""
     df = pd.DataFrame({"a": np.linspace(0, 10, 200)})
     y = np.sin(df["a"].to_numpy())
     with pytest.raises(InvalidParamError, match=r"Preprocessor\.task = 'Regression' is invalid"):
-        Preprocessor(numerical_method=method, task="Regression").fit(df, y)
+        Preprocessor(numerical_method=method, task="Regression", task_validation=mode).fit(df, y)
 
 
 def test_preprocessor_unknown_categorical_method():

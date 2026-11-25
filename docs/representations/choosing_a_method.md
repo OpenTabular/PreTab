@@ -15,15 +15,16 @@ The right representation depends on what sits downstream.
 
 ## Match the method to the signal
 
-| If the relationship is...         | Reach for...                             |
-| --------------------------------- | ---------------------------------------- |
-| Smooth and curved                 | B-spline, natural cubic spline, P-spline |
-| Monotone (must not reverse)       | I-spline                                 |
-| Sharp, threshold-like             | PLE, numeric binning, ReLU expansion     |
-| Local bumps around centers        | RBF expansion                            |
-| Periodic (known period)           | Periodic encoding, Fourier features      |
-| A smooth surface over two inputs  | Tensor-product or thin-plate spline      |
-| A general kernel over many inputs | Random Fourier features, Nyström         |
+| If the relationship is...          | Reach for...                              |
+| ---------------------------------- | ----------------------------------------- |
+| Smooth and curved                  | B-spline, natural cubic spline, P-spline  |
+| Monotone (must not reverse)        | I-spline                                  |
+| Sharp, threshold-like              | PLE, numeric binning, ReLU expansion      |
+| Local bumps around centers         | RBF expansion                             |
+| Periodic (known period)            | Periodic encoding with an explicit period |
+| Oscillations over the fitted range | Fourier features                          |
+| A smooth surface over two inputs   | Tensor-product or thin-plate spline       |
+| A general kernel over many inputs  | Random Fourier features, Nyström          |
 
 ```{tip}
 When unsure, start with the `"standard"` preset (min-max scaling, integer categoricals, and
@@ -45,8 +46,10 @@ measure the difference instead of guessing.
 ## Control the width
 
 More columns means more flexibility and more overfitting risk. Start narrow and widen only if
-validation improves. Turn on `adaptive=True` to let the data choose a width between
-`min_output_dim` and `max_output_dim`. See
+validation improves. For [methods that support adaptive sizing](comparison_table.md),
+`adaptive=True` lets the data choose a width between `min_output_dim` and `max_output_dim`.
+Inspect the fitted width before sizing a downstream model. Use a fixed width for cross-fitting
+if adaptive sizing changes the width across folds. See
 [Resolution and placement](../core_concepts/resolution_and_placement.md).
 
 ## When basis expansion does not help
@@ -87,11 +90,10 @@ PreTab is explicit about degenerate inputs rather than failing silently.
   tensor-product) raise a typed error rather than fitting a meaningless basis. Numeric
   binning falls back to a single bin instead of raising, and PLE and the feature maps place
   all their bins or centers at the same value, a degenerate but still valid basis.
-- **Discrete or heavily tied column**: target-aware PLE and feature maps still get the
-  requested number of distinct bin edges or centers strictly inside the observed range. When
-  the tree finds fewer splits than requested, the shortfall is filled with spaced quantile
-  points and then evenly spaced points, so the output width does not depend on the data (or
-  on the cross-fitting fold).
+- **Discrete or heavily tied column**: in fixed-width mode, PLE and target-aware feature maps
+  fill in missing tree splits with additional points inside the observed range of a nonconstant
+  feature to keep the requested width. Adaptive mode can choose a narrower width. Unsupervised
+  quantile binning instead merges duplicate edges, so it can produce fewer bins than requested.
 - **Out-of-range input at transform**: B/M/I-spline, P-spline, and tensor-product clip
   values beyond the fitted range by default; natural-cubic and cubic-regression extrapolate
   smoothly by default. Pass `policy=RepresentationPolicy(out_of_range=...)` directly to any

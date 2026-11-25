@@ -7,7 +7,7 @@ name = "pretab-chebyshev"
 version = "0.1.0"
 description = "Example PreTab extension: a Chebyshev polynomial feature representation."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
     "pretab",

@@ -8,13 +8,16 @@ warning registry de-duplicate it instead of re-firing per transformer per
 
 import sys
 import warnings
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Literal, cast
 
 import numpy as np
 import pandas as pd
+from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import _check_feature_names, _check_feature_names_in, check_array
 
-from ..exceptions import DataWarning, IncompatibleParamsError, PretabDataError, invalid_param_error
+from ..exceptions import ConfigWarning, DataWarning, IncompatibleParamsError, PretabDataError, invalid_param_error
 
 __all__ = ["is_polars_frame", "polars_to_pandas", "resolve_input_features", "single_target", "validate_2d_allow_nan"]
 
@@ -78,6 +81,125 @@ def single_target(y, estimator: str, *, fix: str | None = None) -> np.ndarray:
             f"{estimator} places locations against a single target, but y has shape {y.shape}.\nFix: {fix}"
         )
     return y.ravel()
+
+
+_TaskValidationMode = Literal["off", "warn", "raise"]
+
+
+def _validate_task_validation(mode: object, estimator: str) -> _TaskValidationMode:
+    """Validate the requested consistency policy without normalizing it."""
+    if not isinstance(mode, str) or mode not in ("off", "warn", "raise"):
+        raise invalid_param_error(estimator, "task_validation", mode, "must be 'off', 'warn', or 'raise'")
+    return cast(_TaskValidationMode, mode)
+
+
+_TaskTargetContract = tuple[str, _TaskValidationMode, str]
+_task_target_context: ContextVar[tuple[object, set[_TaskTargetContract]] | None] = ContextVar(
+    "_task_target_context", default=None
+)
+
+
+@contextmanager
+def _task_target_scope(y: object, receipts: set[_TaskTargetContract] | None = None):
+    """Bind completed checks only to this target or an explicitly related fold."""
+    active = _task_target_context.get()
+    if receipts is None and active is not None and active[0] is y:
+        yield active[1]
+        return
+    if receipts is None:
+        receipts = set()
+    token = _task_target_context.set((y, receipts))
+    try:
+        yield receipts
+    finally:
+        _task_target_context.reset(token)
+
+
+def _check_task_target_once(
+    y: object,
+    *,
+    task: str,
+    mode: _TaskValidationMode,
+    estimator: str,
+    role: str,
+    n_samples: int,
+) -> None:
+    if mode == "off" or y is None:
+        return
+    active = _task_target_context.get()
+    receipts = active[1] if active is not None and active[0] is y else None
+    contract = (task, mode, role)
+    if receipts is not None and contract in receipts:
+        return
+    _validate_task_target(y, task=task, mode=mode, estimator=estimator, role=role, n_samples=n_samples)
+    if receipts is not None:
+        receipts.add(contract)
+
+
+def _validate_task_target(
+    y: object,
+    *,
+    task: str,
+    mode: _TaskValidationMode,
+    estimator: str,
+    role: str,
+    n_samples: int | None = None,
+) -> None:
+    """Diagnose clear mismatches for a validated task, mode and target-consuming role.
+
+    Inspect only supported single-output targets. The caller retains ownership
+    of target validation and passes the original target on to fitting.
+    """
+    if mode == "off" or not isinstance(y, (np.ndarray, pd.Series, pd.DataFrame, pd.Index, list, tuple)):
+        return
+    try:
+        values = np.asarray(y, dtype=object) if isinstance(y, (list, tuple)) else np.asarray(y)
+    except (TypeError, ValueError, OverflowError):
+        return
+    if (
+        values.size == 0
+        or values.ndim not in (1, 2)
+        or (n_samples is not None and values.shape[0] != n_samples)
+        or (values.ndim == 2 and values.shape[-1] != 1)
+        or values.dtype.kind not in "biufOU"
+        or pd.isna(values).any()
+    ):
+        return
+
+    text_labels = values.dtype.kind == "U" or (
+        values.dtype.kind == "O" and all(isinstance(value, str) for value in values.flat)
+    )
+    if values.dtype.kind == "O" and not text_labels:
+        if not all(isinstance(value, (bool, int, float, np.bool_, np.integer, np.floating)) for value in values.flat):
+            return
+        values = np.asarray(values.tolist())
+        if values.dtype.kind not in "biuf":
+            return
+    integer_limit = -int(np.iinfo(np.int64).min)
+    if values.dtype.kind == "f" and not (-integer_limit <= float(values.min()) and float(values.max()) < integer_limit):
+        return
+
+    try:
+        observed = type_of_target(y)
+    except (TypeError, ValueError, OverflowError):
+        return
+    if task == "classification" and observed == "continuous":
+        suggested = "regression"
+    elif task == "regression" and observed in ("binary", "multiclass") and text_labels:
+        try:
+            np.asarray(values, dtype=np.float64)
+        except ValueError:
+            suggested = "classification"
+        else:
+            return
+    else:
+        return
+
+    detail = f"{role} uses task={task!r}, but y has target type {observed!r}"
+    fix = f"use task={suggested!r} or set task_validation='off' if this is intentional"
+    if mode == "raise":
+        raise invalid_param_error(estimator, "task", task, f"{detail}; {fix}.")
+    warnings.warn(f"{estimator}: {detail}; {fix}.", ConfigWarning, stacklevel=2)
 
 
 def is_polars_frame(X) -> bool:
