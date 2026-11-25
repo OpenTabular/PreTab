@@ -90,7 +90,12 @@ def test_grouped_output_negotiates_format_once_without_changing_values(
         if sp.issparse(matrix):
             assert matrix.format == "csr"
         values = matrix.toarray() if sp.issparse(matrix) else np.asarray(matrix)
-        np.testing.assert_array_equal(values, expected[: len(batch)])
+        if method == "tprs" and batch is not frame:
+            np.testing.assert_array_equal(values, expected_preprocessor.transform(batch))
+            tolerance = 8 * np.finfo(dtype).eps
+            np.testing.assert_allclose(values, expected[: len(batch)], rtol=tolerance, atol=tolerance)
+        else:
+            np.testing.assert_array_equal(values, expected[: len(batch)])
         report = preprocessor.output_report_
         assert report["format"] == resolved
         assert report["shape"] == values.shape

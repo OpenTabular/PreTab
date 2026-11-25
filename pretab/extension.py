@@ -22,8 +22,10 @@ from __future__ import annotations
 import inspect
 import warnings
 from collections.abc import Iterable
+from typing import cast
 
 import numpy as np
+from numpy.typing import ArrayLike
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 
@@ -389,7 +391,7 @@ def _check_typed_penalty(fitted, unfitted, *, joint, names):
         ):
             raise RepresentationConformanceError(f"{label} coefficient names and indices must match fitted output")
         matrix = penalty.matrix
-        if not np.array_equal(matrix, reference):
+        if not np.array_equal(matrix, cast(ArrayLike, reference)):
             raise RepresentationConformanceError(f"{label} matrix must match {legacy_name}")
         if matrix.flags.writeable or np.shares_memory(matrix, reference):
             raise RepresentationConformanceError(f"{label} matrix must be read-only and detached from {legacy_name}")

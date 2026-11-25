@@ -219,6 +219,7 @@ def test_grouped_block_layout_agrees_across_views(layout_data, method, missing, 
         feature_groups={"location": {"columns": ["other", "value"], "representation": representation}},
     ).fit(frame, target)
     matrix = preprocessor.transform(frame, return_array=True)
+    assert not isinstance(matrix, dict)
     blocks = preprocessor.transform(frame)
     assert isinstance(blocks, dict)
     assert list(blocks) == ["num_spare", "group_location", "cat_city"]
@@ -242,7 +243,7 @@ def test_grouped_block_layout_agrees_across_views(layout_data, method, missing, 
         np.testing.assert_array_equal(_dense(blocks[name]), _dense(matrix)[:, start : start + width])
         offset += width
     assert offset == sum(dimensions.values()) == preprocessor.total_output_dim_ == len(names) == len(lineage)
-    assert offset == np.shape(matrix)[1]
+    assert matrix.shape == (len(frame), offset)
     np.testing.assert_array_equal(np.hstack([_dense(block) for block in blocks.values()]), _dense(matrix))
     span = preprocessor.column_transformer_.output_indices_["group_location"]
     records = lineage[span]
@@ -276,7 +277,7 @@ def test_grouped_block_layout_agrees_across_views(layout_data, method, missing, 
     assert entry["output_dim"] == basis_width
     assert entry["output_slice"] == [span.start, span.stop]
     assert json.loads(json.dumps(report, allow_nan=False)) == report
-    assert preprocessor.estimate_output_shape(frame) == np.shape(matrix)
+    assert preprocessor.estimate_output_shape(frame) == matrix.shape
     assert preprocessor.estimate_memory(frame) == _dense(matrix).nbytes
     limits = {
         "max_output_features": offset,

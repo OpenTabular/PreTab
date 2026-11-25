@@ -11,9 +11,10 @@ transformer only has to implement its own basis math.
 """
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from ...core.base import BasePreTabTransformer
 from ...core.knots import generate_internal_knots, select_knots, spanning_knots, supplement_interior_knots
@@ -59,7 +60,7 @@ class SplineBasisMixin(BasePreTabTransformer):
         feature_index: int | np.integer[Any],
         diff_order: int | None,
         *,
-        legacy_method: Callable[..., object],
+        legacy_method: Callable[..., ArrayLike],
         kind: str,
         base_width: int,
         integration: str,
@@ -100,7 +101,7 @@ class SplineBasisMixin(BasePreTabTransformer):
         start = sum(sizes[:index])
         stop = start + sizes[index]
         return PenaltySpec(
-            matrix=legacy_accessor(index),
+            matrix=cast(ArrayLike, legacy_accessor(index)),
             kind=kind,
             order=2,
             axis=(str(resolve_input_features(self, None)[index]),),

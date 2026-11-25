@@ -308,7 +308,8 @@ def test_build_feature_info_uses_fitted_width_without_transform(monkeypatch):
 
     numerical, _, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
 
-    assert numerical["age"]["dimension"] == np.shape(expected)[1] == len(expected_names) == 1
+    assert numerical["age"]["dimension"] == len(expected_names) == 1
+    assert expected.shape == (len(frame), 1)
     assert numerical["age"]["dimension"] == get_output_slices(ct)[0][2]
 
 
@@ -348,9 +349,11 @@ def test_build_feature_info_reports_zero_width_after_dropping_only_category(spar
     _, categorical, _ = build_feature_info(ct, embeddings=False, embedding_dimensions={})
 
     span = ct.output_indices_["cat_city"]
-    assert categorical["city"]["dimension"] == np.shape(ct.transform(frame)[:, span])[1] == 0
+    transformed = ct.transform(frame)
+    assert categorical["city"]["dimension"] == transformed[:, span].shape[1] == 0
     assert categorical["city"]["categories"] == 1
-    assert np.shape(ct.transform(frame))[1] == len(ct.get_feature_names_out()) == 1
+    assert transformed.shape == (len(frame), 1)
+    assert len(ct.get_feature_names_out()) == 1
     assert get_output_slices(ct) == [("num_age", 0, 1)]
 
 
@@ -382,8 +385,9 @@ def test_build_feature_info_separates_vocabulary_from_emitted_width(
 
     assert numerical == {}
     assert categorical["city"]["categories"] == 4
-    assert categorical["city"]["dimension"] == np.shape(expected)[1] == len(expected_names)
-    assert categorical["city"]["dimension"] == get_output_slices(ct)[0][2]
+    width = categorical["city"]["dimension"]
+    assert width == len(expected_names) == get_output_slices(ct)[0][2]
+    assert expected.shape == (len(frame), width)
     reject_transform.assert_not_called()
 
 
@@ -399,7 +403,8 @@ def test_build_feature_info_uses_combined_indicator_span(make_config, missing_op
     assert numerical["age"]["dimension"] == spans["num_age"] == 4
     assert categorical["city"]["dimension"] == spans["cat_city"] == 3
     assert categorical["city"]["categories"] == 2
-    assert sum(spans.values()) == np.shape(ct.transform(frame))[1] == len(ct.get_feature_names_out())
+    assert sum(spans.values()) == len(ct.get_feature_names_out())
+    assert ct.transform(frame).shape == (len(frame), sum(spans.values()))
 
 
 @pytest.mark.parametrize("passthrough", ["direct", "pipeline"])
@@ -412,7 +417,8 @@ def test_build_feature_info_handles_passthrough_and_dropped_blocks(passthrough):
 
     assert list(numerical) == ["age"]
     assert categorical == {}
-    assert numerical["age"]["dimension"] == np.shape(ct.transform(frame))[1] == len(ct.get_feature_names_out()) == 1
+    assert numerical["age"]["dimension"] == len(ct.get_feature_names_out()) == 1
+    assert ct.transform(frame).shape == (len(frame), 1)
 
 
 def test_build_transformer_summary_has_header_and_rows():

@@ -203,7 +203,7 @@ class PenaltySpec:
         matrix = np.array(self.matrix, dtype="<f8", order="C", copy=True)
         matrix[matrix == 0] = 0.0
         digest = sha256(pack("<QQ", *matrix.shape))
-        digest.update(memoryview(matrix).cast("B"))
+        digest.update(matrix.data.cast("B"))
         return {
             "shape": list(matrix.shape),
             "dtype": "float64",
