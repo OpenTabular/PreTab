@@ -382,6 +382,9 @@ assert logged.total_output_dim_ == 8
 This fit logs one numerical feature (`ple`), one categorical feature (`int`), eight output
 columns, and the elapsed time.
 
+Levels are cumulative, and a value above `3` logs like `3` (`set_verbosity` and
+`configure_logging` clamp a level into `0`-`3`).
+
 Each fit applies its own level, so a later `verbose=2` fit in the same process or notebook logs
 the table even after a `verbose=1` fit. PreTab attaches its own stream handler only when no host
 handler receives its records. A handler on the `"pretab"` logger, or on an ancestor such as the

@@ -67,9 +67,11 @@ def set_verbosity(level: int = 1) -> None:
     level : int, default=1
         Verbosity level ``0``-``3`` (``0`` = WARNING, ``1`` = INFO, ``2``/``3`` =
         DEBUG). ``bool`` is accepted and coerced (``True`` -> ``1``, ``False`` ->
-        ``0``).
+        ``0``). A value outside that range is clamped into it, so verbosity never
+        decreases as the level grows: a negative level is as quiet as ``0`` and a
+        level above ``3`` is as verbose as ``3``.
     """
-    _LOGGER.setLevel(_LEVELS.get(int(level), logging.INFO))
+    _LOGGER.setLevel(_LEVELS[min(max(int(level), min(_LEVELS)), max(_LEVELS))])
 
 
 def configure_logging(level: int = 1, handler: "logging.Handler | None" = None) -> None:
