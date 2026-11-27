@@ -75,9 +75,8 @@ class RBFExpansionTransformer(BaseCenterExpansion):
     >>> from pretab.transformers import RBFExpansionTransformer
     >>> X = np.array([[1.0], [2.0], [3.0]])
     >>> transformer = RBFExpansionTransformer(output_dim=3, gamma=0.5, target_aware=False, placement_strategy="uniform")
-    >>> transformer.fit(X)
-    RBFExpansionTransformer(...)
-    >>> transformer.transform(X).shape
+    >>> fitted = transformer.fit(X)
+    >>> fitted.transform(X).shape
     (3, 3)
     """
 

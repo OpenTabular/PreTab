@@ -57,12 +57,12 @@ Pretrained language embeddings for high-cardinality text categories.
 Every family is described with the same terms, introduced in
 [Preprocessing and representation](../core_concepts/feature_representation.md).
 
-| Term          | Meaning                                                                                                                                                                                                                                                          |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scope`       | `univariate` methods transform one column at a time. `multivariate` methods such as tensor-product spline, thin-plate spline, random Fourier features, and Nyström model several columns jointly and are used standalone, not per column through `Preprocessor`. |
-| `supervision` | Whether the method uses the target: `forbidden`, `optional`, or `required`. See [Target awareness](../core_concepts/target_awareness.md).                                                                                                                        |
-| `output_dim`  | The width of the expansion. See [Resolution and placement](../core_concepts/resolution_and_placement.md).                                                                                                                                                        |
-| `placement`   | Where the knots, centers, or edges are placed, chosen via `target_aware` and `placement_strategy`.                                                                                                                                                               |
+| Term          | Meaning                                                                                                                                                                                                                                               |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scope`       | `univariate` methods transform one column at a time. `multivariate` methods model several columns jointly. Tensor-product and thin-plate splines support `Preprocessor(feature_groups=...)`; random Fourier features and Nyström are standalone-only. |
+| `supervision` | Whether the method uses the target: `forbidden`, `optional`, or `required`. See [Target awareness](../core_concepts/target_awareness.md).                                                                                                             |
+| `output_dim`  | The width of the expansion. See [Resolution and placement](../core_concepts/resolution_and_placement.md).                                                                                                                                             |
+| `placement`   | Where the knots, centers, or edges are placed, chosen via `target_aware` and `placement_strategy`.                                                                                                                                                    |
 
 ## How to select a method
 

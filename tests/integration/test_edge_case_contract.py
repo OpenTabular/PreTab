@@ -126,6 +126,60 @@ def test_constant_column_degrades_gracefully(name, rng):
 
 
 # --------------------------------------------------------------------------- #
+# Single observed value
+# --------------------------------------------------------------------------- #
+def _single_value_inputs():
+    """A one-row column, and a column whose only non-missing value sits among NaNs."""
+    mostly_missing = np.full((40, 1), np.nan)
+    mostly_missing[7, 0] = 3.14
+    return {"one_row": np.array([[3.14]]), "one_observed": mostly_missing}
+
+
+@pytest.mark.parametrize("shape", ["one_row", "one_observed"])
+@pytest.mark.parametrize("name", CONSTANT_RAISES)
+def test_single_observed_value_raises_typed_error(name, shape):
+    """One observed value is a zero-range feature, like a constant column.
+
+    It used to pass ``fit``: the B/M/I splines then failed inside SciPy at
+    ``transform``, the P-spline / tensor-product bases were all zero, and the
+    cubic families emitted fewer columns than requested.
+    """
+    X = _single_value_inputs()[shape]
+    if name == "TensorProduct":
+        X = np.hstack([X, X])
+    with pytest.raises(PretabDataError, match=r"only 1 sample with an observed .* zero-range feature"):
+        _factory(name).fit(X)
+
+
+@pytest.mark.parametrize("name", ["BSpline", "MSpline", "ISpline"])
+def test_single_observed_value_error_names_the_feature(name):
+    X = np.column_stack([np.linspace(0.0, 1.0, 40), np.full(40, np.nan)])
+    X[3, 1] = 2.5
+    with pytest.raises(PretabDataError, match="Feature at index 1 has only 1 sample"):
+        _factory(name).fit(X)
+
+
+@pytest.mark.parametrize("name", CONSTANT_RAISES)
+def test_two_distinct_values_still_fit(name):
+    """The smallest feature with spread keeps fitting and gives a finite basis."""
+    X = np.array([[0.0], [1.0]])
+    if name == "TensorProduct":
+        X = np.hstack([X, X])
+    out = _factory(name).fit(X).transform(X)
+    assert out.shape[0] == 2
+    assert np.isfinite(out).all()
+
+
+@pytest.mark.parametrize("method", ["bspline", "pspline", "cubicspline", "naturalspline"])
+def test_preprocessor_single_row_spline_fit_raises_typed_error(method):
+    """A one-row fit reports the zero-range column instead of failing at transform."""
+    df = pd.DataFrame({"x": [1.5]})
+    pre = Preprocessor(numerical_method=method, target_aware=False, placement_strategy="uniform")
+    with pytest.raises(PretabDataError, match="only 1 sample with an observed"):
+        pre.fit(df)
+
+
+# --------------------------------------------------------------------------- #
 # Fully-missing column
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("name", ALL_FAMILIES)
@@ -390,6 +444,10 @@ def test_empty_numerical_column_keeps_its_block(method, target_aware, placement,
     pre = Preprocessor(numerical_method=method, target_aware=target_aware, placement_strategy=placement)
     _fit_empty(pre, X, y)
     _assert_metadata_matches_output(pre, X, _observed(X, "numerical", rng))
+    if method == "minmax":
+        blocks = pre.transform(X, return_array=False)
+        assert isinstance(blocks, dict)
+        np.testing.assert_array_equal(blocks["num_empty"], np.zeros((len(X), 1)))
 
 
 # The methods that cannot be fitted on a constant column (see CONSTANT_RAISES).

@@ -1,15 +1,18 @@
 """Tests for the immutable lifecycle: freeze / stale / clone / refit (P9.3).
 
 Covers the ``lifecycle_state_`` transitions, ``freeze`` / ``is_frozen``,
-``set_params`` rejection on frozen instances, ``clone_unfitted`` and ``refit``
-returning fresh objects, and ``mark_stale``.
+``set_params`` / ``set_output`` rejection on frozen instances, output no-ops
+and global configuration, ``clone_unfitted`` and ``refit`` returning fresh
+objects, and ``mark_stale``.
 """
 
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn import config_context
+from sklearn.pipeline import Pipeline
 
-from pretab import FrozenRepresentationError, OutputBudgetError, Preprocessor
+from pretab import FrozenRepresentationError, OutputBudgetError, Preprocessor, RepresentationConfig
 
 
 @pytest.fixture
@@ -55,6 +58,31 @@ def test_set_params_allowed_before_freeze(frame, target):
     assert p.output_dim == 9
 
 
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("via_pipeline", [False, True], ids=["direct", "pipeline"])
+def test_frozen_structured_feature_settings_cannot_be_replaced(frame, target, typed, via_pipeline):
+    settings = {"method": "rbf", "output_dim": 3, "params": {"gamma": 0.5}}
+    overrides = {"a": RepresentationConfig.from_dict(settings) if typed else settings}
+    processor = _make().set_params(feature_preprocessing=overrides).fit(frame, target).freeze()
+    fingerprint = processor.fingerprint_
+    original = processor.transform(frame, return_array=True)
+    replacement = {"a": RepresentationConfig(method="rbf", output_dim=5)}
+    caller = Pipeline([("pre", processor)]) if via_pipeline else processor
+    parameters = {"pre__feature_preprocessing" if via_pipeline else "feature_preprocessing": replacement}
+
+    with pytest.raises(FrozenRepresentationError, match="frozen"):
+        caller.set_params(**parameters)
+
+    assert processor.get_params()["feature_preprocessing"] is overrides
+    assert processor.fingerprint_ == fingerprint
+    assert processor.set_params() is processor
+    np.testing.assert_array_equal(processor.transform(frame, return_array=True), original)
+    fresh = processor.clone_unfitted()
+    assert fresh.is_frozen() is False
+    assert fresh.set_params(feature_preprocessing=replacement) is fresh
+    assert fresh.get_params()["feature_preprocessing"] is replacement
+
+
 @pytest.mark.parametrize("method", ["fit", "fit_transform"])
 def test_frozen_fit_rejected_without_mutating_state(frame, target, method):
     p = _make().fit(frame, target).freeze()
@@ -65,6 +93,82 @@ def test_frozen_fit_rejected_without_mutating_state(frame, target, method):
         getattr(p, method)(changed, target)
     assert p.fingerprint_ == fingerprint
     np.testing.assert_array_equal(p.transform(frame, return_array=True), original)
+
+
+@pytest.mark.parametrize(
+    ("configured", "transform"),
+    [(None, "default"), (None, "pandas"), (None, "polars"), ("default", "pandas"), ("pandas", "default")],
+)
+@pytest.mark.parametrize("via_pipeline", [False, True])
+def test_frozen_set_output_rejects_changes(frame, target, configured, transform, via_pipeline):
+    processor = _make()
+    processor.set_output(transform=configured)
+    processor.fit(frame, target).freeze()
+    fingerprint = processor.fingerprint_
+    original = processor.transform(frame, return_array=True)
+    output_config = getattr(processor, "_sklearn_output_config", None)
+    caller = Pipeline([("pre", processor)]) if via_pipeline else processor
+
+    with pytest.raises(FrozenRepresentationError, match=r"clone_unfitted\(\).*refit\(\)"):
+        caller.set_output(transform=transform)
+
+    assert getattr(processor, "_sklearn_output_config", None) == output_config
+    assert processor.fingerprint_ == fingerprint
+    np.testing.assert_array_equal(processor.transform(frame, return_array=True), original)
+
+
+@pytest.mark.parametrize("configured", [None, "default", "pandas"])
+@pytest.mark.parametrize("via_pipeline", [False, True])
+def test_frozen_set_output_noops_preserve_state(frame, target, configured, via_pipeline):
+    processor = _make()
+    processor.set_output(transform=configured)
+    processor.fit(frame, target).freeze()
+    fingerprint = processor.fingerprint_
+    original = processor.transform(frame, return_array=True)
+    caller = Pipeline([("pre", processor)]) if via_pipeline else processor
+
+    assert caller.set_output() is caller
+    assert caller.set_output(transform=configured) is caller
+
+    assert processor.fingerprint_ == fingerprint
+    np.testing.assert_array_equal(processor.transform(frame, return_array=True), original)
+
+
+@pytest.mark.parametrize("already_fitted", [False, True])
+def test_unfrozen_set_output_keeps_sklearn_behavior(frame, target, already_fitted):
+    processor = _make()
+    if already_fitted:
+        processor.fit(frame, target)
+    assert processor.set_output(transform="pandas") is processor
+    if not already_fitted:
+        processor.fit(frame, target)
+
+    wrapped = processor.transform(frame, return_array=True)
+    assert isinstance(wrapped, pd.DataFrame)
+    assert list(wrapped.columns) == list(processor.get_feature_names_out())
+    assert processor.set_output(transform="default") is processor
+    unwrapped = processor.transform(frame, return_array=True)
+    assert isinstance(unwrapped, np.ndarray)
+    np.testing.assert_array_equal(unwrapped, wrapped.to_numpy())
+
+
+@pytest.mark.parametrize("pin_output", [False, True])
+def test_frozen_global_output_config_preserves_state(frame, target, pin_output):
+    processor = _make()
+    if pin_output:
+        processor.set_output(transform="default")
+    processor.fit(frame, target).freeze()
+    fingerprint = processor.fingerprint_
+    original = processor.transform(frame, return_array=True)
+
+    with config_context(transform_output="pandas"):
+        transformed = processor.transform(frame, return_array=True)
+        assert isinstance(transformed, np.ndarray if pin_output else pd.DataFrame)
+        np.testing.assert_array_equal(transformed, original)
+        assert processor.fingerprint_ == fingerprint
+
+    assert isinstance(processor.transform(frame, return_array=True), np.ndarray)
+    assert processor.fingerprint_ == fingerprint
 
 
 def test_clone_unfitted_returns_fresh_unfrozen(frame, target):

@@ -9,7 +9,7 @@ authors = [
 ]
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 dynamic = ["dependencies"]
 
 [project.optional-dependencies]
@@ -41,6 +41,7 @@ scipy = ">=1.10,<2.0"
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0"
 pytest-cov = "^4.1"
+jsonschema = "^4.26"
 ruff = "0.15.12"       # keep in sync with .pre-commit-config.yaml ruff rev
 pre-commit = "^3.6"
 commitizen = "^3.29.1"
@@ -95,7 +96,7 @@ exclude = [
   "examples",
 ]
 
-pythonVersion = "3.10"
+pythonVersion = "3.11"
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
@@ -111,7 +112,7 @@ reportUnsupportedDunderAll = false
 # Configure code linting
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 exclude = ["*.ipynb"]
 
 [tool.ruff.lint]

@@ -173,6 +173,8 @@ class FeatureLineage:
         Whether the producing transformer consumed ``y``.
     is_interaction : bool
         Whether the column mixes multiple input features.
+    group_id : str or None, default=None
+        Public block key of an explicit feature group, or ``None`` for singles.
     """
 
     output_feature: str
@@ -183,6 +185,7 @@ class FeatureLineage:
     component_index: int
     uses_target: bool
     is_interaction: bool
+    group_id: str | None = None
 
     def to_dict(self) -> dict:
         """Return a JSON-serializable dictionary representation."""
@@ -195,6 +198,7 @@ class FeatureLineage:
             "component_index": self.component_index,
             "uses_target": self.uses_target,
             "is_interaction": self.is_interaction,
+            **({"group_id": self.group_id} if self.group_id is not None else {}),
         }
 
 

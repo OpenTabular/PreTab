@@ -10,6 +10,7 @@ supervised selectors and the language-embedding transformer.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 from types import ModuleType
 
 from ..exceptions import OptionalDependencyError
@@ -19,6 +20,15 @@ __all__ = [
     "require_module",
     "require_sentence_transformers",
 ]
+
+
+def _check_optional_dependency(extra: str, purpose: str) -> None:
+    """Check top-level discovery without importing an optional model package."""
+    module_name = "sentence_transformers" if extra == "embeddings" else extra
+    if importlib.util.find_spec(module_name.partition(".")[0]) is None:
+        raise OptionalDependencyError(
+            f"{purpose} requires the optional '{module_name}' dependency. Install it with: pip install pretab[{extra}]"
+        )
 
 
 def require_module(module_name: str, extra: str, purpose: str) -> ModuleType:

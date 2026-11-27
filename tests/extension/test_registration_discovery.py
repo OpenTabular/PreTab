@@ -5,6 +5,7 @@ Covers P10.2 (``register_representation`` + entry points) and P10.4
 """
 
 import importlib.metadata as importlib_metadata
+from dataclasses import fields
 
 import numpy as np
 import pandas as pd
@@ -19,7 +20,9 @@ from pretab import (
     register_representation,
 )
 from pretab.compose import registry
-from pretab.exceptions import ConfigWarning
+from pretab.compose.config import PreprocessorConfig
+from pretab.compose.factory import create_transformer
+from pretab.exceptions import ConfigWarning, PretabSerializationError
 
 
 class _Square(BaseRepresentation):
@@ -36,6 +39,16 @@ class _Square(BaseRepresentation):
 
     def _output_sizes(self):
         return [1] * self.n_features_in_
+
+
+class _PositiveOnly(_Square):
+    representation_name = "positive_only_reg"
+
+    def transform(self, X):
+        values = self._validate(X, reset=False)
+        if np.any(values <= 0):
+            raise ValueError("Positive input required")
+        return np.log(values)
 
 
 class _CatStringLength(BaseRepresentation):
@@ -139,6 +152,45 @@ def test_register_end_to_end_through_preprocessor():
     assert out.max() <= 1 + 1e-9
 
 
+def test_registered_external_estimator_is_rejected_at_save_time():
+    register_representation("square_reg", _Square)
+    frame = pd.DataFrame({"value": np.linspace(0.0, 1.0, 12)})
+    processor = Preprocessor(numerical_method="square_reg", target_aware=False, placement_strategy="uniform").fit(frame)
+    expected = processor.transform(frame, return_array=True)
+
+    with pytest.raises(PretabSerializationError, match=r"_Square.*Registration does not enable spec persistence"):
+        processor.to_spec()
+
+    np.testing.assert_array_equal(processor.transform(frame, return_array=True), expected)
+
+
+def test_registered_positive_only_feature_info_matches_fitted_layout(monkeypatch):
+    register_representation("positive_only_reg", _PositiveOnly)
+    frame = pd.DataFrame({"value": [1.0, 2.0, 4.0, 8.0]})
+    pre = Preprocessor(
+        numerical_method="positive_only_reg",
+        numerical_imputation=None,
+        target_aware=False,
+        placement_strategy="uniform",
+    )
+    pre.set_params(scaling=None)
+    pre.fit(frame)
+    expected = np.asarray(pre.transform(frame, return_array=True))
+    expected_names = pre.get_feature_names_out()
+
+    def reject_transform(*_args, **_kwargs):
+        raise AssertionError("Feature inspection must not invoke transform")
+
+    step = pre.column_transformer_.named_transformers_["num_value"].named_steps["positive_only_reg"]
+    monkeypatch.setattr(step, "transform", reject_transform)
+
+    numerical, categorical, embeddings = pre.get_feature_info(verbose=False)
+
+    assert categorical == embeddings == {}
+    assert numerical["value"]["dimension"] == pre.output_dims_["value"] == 1
+    assert pre.total_output_dim_ == expected.shape[1] == len(expected_names) == 1
+
+
 def test_register_categorical_updates_categorical_view():
     register_representation("cat_reg", _CatStringLength)
     assert "cat_reg" in registry.CATEGORICAL_METHODS
@@ -162,6 +214,21 @@ def test_register_categorical_end_to_end_through_preprocessor():
     pipeline = pre.column_transformer_.named_transformers_["cat_city"]
     assert isinstance(pipeline.named_steps["cat_reg"], _CatStringLength)
     assert pipeline.named_steps["cat_reg"].degree == 2
+
+
+def test_registered_categorical_factory_accepts_resolved_family_options():
+    register_representation("cat_reg", _CatStringLength, allowed_args=("degree",))
+    parameters = Preprocessor(
+        degree=2,
+        feature_preprocessing={"city": {"method": "cat_reg", "degree": 5}},
+    ).get_resolved_config()
+    config = PreprocessorConfig.from_params(**{item.name: parameters[item.name] for item in fields(PreprocessorConfig)})
+    resolved = config.representation_for("city", is_numerical=False)
+    block = create_transformer("cat_reg", is_numerical=False, config=config, representation=resolved)
+    result = block.fit_transform(np.array([["Rome"], ["Berlin"], ["Oslo"]], dtype=object))
+    np.testing.assert_array_equal(result[:, 0], [20.0, 30.0, 20.0])
+    assert resolved.params["degree"] == 5
+    assert config.degree == 2
 
 
 def test_duplicate_registration_requires_override():

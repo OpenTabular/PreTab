@@ -7,6 +7,7 @@ from .multivariate.tensor_product import TensorProductSplineTransformer
 from .multivariate.thin_plate import ThinPlateSplineTransformer
 from .natural_cubic import NaturalCubicSplineTransformer
 from .p_spline import PSplineTransformer
+from .penalty import PenaltySpec
 
 __all__ = [
     "BSplineTransformer",
@@ -16,6 +17,7 @@ __all__ = [
     "MSplineTransformer",
     "NaturalCubicSplineTransformer",
     "PSplineTransformer",
+    "PenaltySpec",
     "TensorProductSplineTransformer",
     "ThinPlateSplineTransformer",
 ]
