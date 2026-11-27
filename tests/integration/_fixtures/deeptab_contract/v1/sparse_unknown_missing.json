@@ -1,0 +1,113 @@
+{
+  "block_widths": [
+    {
+      "name": "num_level",
+      "width": 2
+    },
+    {
+      "name": "cat_city",
+      "width": 3
+    }
+  ],
+  "case_id": "sparse_unknown_missing",
+  "constructor_config": {
+    "categorical_method": "one-hot",
+    "missing_policy": "separate_state",
+    "numerical_method": "minmax",
+    "output_format": "sparse",
+    "output_structure": "matrix"
+  },
+  "feature_info_dimensions": {
+    "categorical": {
+      "city": 3
+    },
+    "embedding": {},
+    "numerical": {
+      "level": 2
+    }
+  },
+  "fingerprint": "14164e900a40b231002e29d6d2e583ce831149c4d1869b58a780bc732d6e406d",
+  "input_schema": {
+    "columns": [
+      {
+        "dtype": "float64",
+        "name": "level"
+      },
+      {
+        "dtype": "object",
+        "name": "city"
+      }
+    ],
+    "container": "pandas"
+  },
+  "library_versions": {
+    "numpy": "2.5.3",
+    "pandas": "2.3.3",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "polars": "1.44.1",
+    "pretab": "0+unknown",
+    "pretab_source_sha256": "c6f97dedd6c7a00097198a9b94b5c3bcfebcbe4e5d9657896c3d265733e39642",
+    "pyarrow": null,
+    "python": "3.13.2",
+    "scikit_learn": "1.9.1",
+    "scipy": "1.18.1"
+  },
+  "output_feature_names": [
+    "num_level__representation__level",
+    "num_level__missing__level__missing",
+    "cat_city__representation__city_a",
+    "cat_city__representation__city_b",
+    "cat_city__missing__city__missing"
+  ],
+  "resolved_config": {
+    "adaptive": false,
+    "add_missing_indicator": false,
+    "cat_cutoff": 0.03,
+    "categorical_imputation": "most_frequent",
+    "categorical_method": "one-hot",
+    "degree": 3,
+    "dtype": null,
+    "feature_groups": null,
+    "feature_preprocessing": null,
+    "max_dense_memory": null,
+    "max_features_per_input": null,
+    "max_output_dim": 10,
+    "max_output_features": null,
+    "min_output_dim": 7,
+    "missing_policy": "separate_state",
+    "numerical_imputation": "median",
+    "numerical_method": "minmax",
+    "output_dim": 7,
+    "output_format": "sparse",
+    "output_structure": "matrix",
+    "overflow_policy": "error",
+    "placement_strategy": "cart",
+    "policy": null,
+    "random_state": null,
+    "scaling": "minmax",
+    "target_aware": true,
+    "task": "regression",
+    "task_validation": "off",
+    "treat_all_integers_as_numerical": false,
+    "verbose": 0
+  },
+  "schema_version": 1,
+  "tolerances": {
+    "atol": 1e-9,
+    "rtol": 1e-7
+  },
+  "transformed_rows": [
+    {
+      "row_index": 0,
+      "values": [0.16666666666666666, 0.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "row_index": 1,
+      "values": [0.5, 1.0, 1.0, 0.0, 1.0]
+    },
+    {
+      "row_index": 2,
+      "values": [0.8333333333333333, 0.0, 1.0, 0.0, 0.0]
+    }
+  ]
+}

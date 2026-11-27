@@ -10,11 +10,23 @@ feature names, lineage, and the output budget.
 `fit_transform` and `transform` return a single stacked `numpy.ndarray` by default. Pass
 `output_structure="blocks"` (or `return_array=False` for a single call) to receive a
 dictionary that maps each feature to its transformed block instead, with keys prefixed
-`num_` or `cat_`.
+`num_` or `cat_`. A [feature group](configuration.md#feature-groups) has one block
+with a `group_` prefix.
 
 ```python
-X_array = pre.fit_transform(df, y)                                   # one stacked ndarray
-X_dict = Preprocessor(output_structure="blocks").fit_transform(df, y)  # {"num_age": ..., "cat_city": ...}
+import numpy as np
+import pandas as pd
+from pretab import Preprocessor
+
+df = pd.DataFrame({"age": [25, 40, 63], "city": ["A", "B", "A"]})
+y = [0.1, 0.9, 0.3]
+
+pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot")
+X_array = pre.fit_transform(df)
+X_dict = pre.transform(df, return_array=False)
+
+assert X_array.shape == (3, 3)
+assert set(X_dict) == {"num_age", "cat_city"}
 ```
 
 ```{note}
@@ -26,24 +38,29 @@ for feeding blocks to different model heads; pass `return_array` explicitly to o
 
 ### Example: one column expands into several
 
-A single input column rarely maps to a single output column. Most numerical methods (splines,
-feature maps, PLE) expand one feature into `output_dim` basis columns, so the matrix width
-grows well beyond the number of input columns. A B-spline makes this concrete: `output_dim=6`
-turns the one `age` column into 6 local basis functions, each capturing a different region of
-its range.
+Many numerical representations expand one input into several columns. A B-spline with
+`output_dim=6` turns the `age` column into six local basis functions, each covering a
+different part of its range.
 
 ```python
-df = pd.DataFrame({"age": [25, 40, 63, 51]})
-y = [0.1, 0.9, 0.3, 0.6]
+ages = pd.DataFrame({"age": [25, 40, 63, 51]})
 
-pre = Preprocessor(numerical_method="bspline", output_dim=6,
-                    target_aware=False, placement_strategy="quantile").fit(df, y)
-out = pre.transform(df)
+pre_spline = Preprocessor(
+    numerical_method="bspline", output_dim=6,
+    target_aware=False, placement_strategy="quantile",
+).fit(ages)
+out = pre_spline.transform(ages)
+assert out.shape == (4, 6)
+np.testing.assert_allclose(out.sum(axis=1), 1.0)
 out.shape
 ```
 
 ```text
 (4, 6)
+```
+
+```python
+out.round(3)
 ```
 
 ```text
@@ -59,22 +76,18 @@ basis is a partition of unity). `get_feature_names_out()` shows exactly where ea
 from:
 
 ```python
-list(pre.get_feature_names_out())
+list(pre_spline.get_feature_names_out())
 ```
 
 ```text
 ['num_age_bs0', 'num_age_bs1', 'num_age_bs2', 'num_age_bs3', 'num_age_bs4', 'num_age_bs5']
 ```
 
-All six still trace back to the single `age` input, which is exactly what `output_structure=
-"blocks"` reflects: one dict entry per **input** feature, holding its full expanded block, not
-one entry per output column.
+All six still trace back to the single `age` input. In block output, `num_age` holds all
+six columns together.
 
 ```python
-pre_blocks = Preprocessor(numerical_method="bspline", output_dim=6,
-                           target_aware=False, placement_strategy="quantile",
-                           output_structure="blocks").fit(df, y)
-pre_blocks.transform(df)["num_age"].shape
+pre_spline.transform(ages, return_array=False)["num_age"].shape
 ```
 
 ```text
@@ -82,10 +95,8 @@ pre_blocks.transform(df)["num_age"].shape
 ```
 
 ```{tip}
-This is why a wide expansion (a spline or feature map with a large `output_dim`, or several
-expanded columns) can produce a much wider matrix than the input `DataFrame` had columns.
-Use `get_feature_info(verbose=True)` (below) or `estimate_output_shape(df)` to see the total
-width before committing, especially with several expanded columns at once.
+After fitting, use `get_feature_info(verbose=True)` to see the width of each block or
+`estimate_output_shape(X)` to estimate the shape for a new batch without transforming it.
 ```
 
 ## Output format and dtype
@@ -102,14 +113,16 @@ even for a single row. Default `"dense"`.
 : The floating-point precision of the output, for example `numpy.float32` to halve memory.
 
 ```python
-pre = Preprocessor(output_format="auto", dtype="float32")
+pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
+                   output_format="auto", dtype="float32").fit(df)
 ```
 
-After fitting, `output_report_` summarizes what was produced: the chosen format, dimensions,
-density, and memory saved.
+After a call to `transform`, `output_report_` summarizes that batch's format, dimensions,
+density, and memory use. Calling `fit_transform` also populates the report.
 
 ```python
-pre.fit(df, y)
+out = pre.transform(df)
+assert out.dtype == np.float32
 pre.output_report_
 ```
 
@@ -140,17 +153,7 @@ sparse), and `set_output` (scikit-learn's own DataFrame protocol). This section 
 decision guide: what each one controls, how they interact, and which combination fits a given
 use case, with the literal output shown for each rather than just a description of it.
 
-The examples below all share the same tiny, fixed input so the printed output is directly
-comparable:
-
-```python
-import numpy as np
-import pandas as pd
-from pretab import Preprocessor
-
-df = pd.DataFrame({"age": [25, 40, 63], "city": ["A", "B", "A"]})
-y = [0.1, 0.9, 0.3]
-```
+The examples below reuse the three-row `df` from [Output shapes](#output-shapes).
 
 ### Parameter impact at a glance
 
@@ -239,14 +242,18 @@ independently of `output_structure`: a sparse `"matrix"` is a single stacked
 `scipy.sparse.csr_matrix`, and a sparse `"blocks"` dict holds a CSR matrix per feature.
 
 ```python
+from scipy.sparse import isspmatrix_csr
+
 pre = Preprocessor(numerical_method="minmax", categorical_method="one-hot",
                     output_format="sparse").fit(df, y)
-pre.transform(df)
+out = pre.transform(df)
+assert isspmatrix_csr(out)
+assert (out.shape, out.nnz) == ((3, 3), 5)
+out.shape, out.nnz
 ```
 
 ```text
-<Compressed Sparse Row sparse matrix of dtype 'float64'
-        with 5 stored elements and shape (3, 3)>
+((3, 3), 5)
 ```
 
 Halving memory on a large dataset
@@ -320,48 +327,39 @@ list(pipe.fit(X, [0.0, 1.0, 1.0, 0.0]).get_feature_names_out())
 ['num_age', 'num_income']
 ```
 
-Use `get_feature_info(verbose=True)` for a human-readable table of the resolved per-feature
-pipeline, output width, and category count.
-
-```text
-feature  kind         pipeline                        dim   cats
-----------------------------------------------------------------
-age      numerical    imputer -> minmax -> bspline     13      -
-income   numerical    imputer -> minmax -> ple         12      -
-city     categorical  imputer -> onehot -> to_float     4      4
-```
-
-`verbose=True` is the default, so `get_feature_info()` both logs that table and returns the
-same data as a tuple of dicts, one per feature kind, keyed by input column name:
+`get_feature_info()` logs a table with the fitted pipelines, widths, and category counts.
+It also returns three dictionaries for numerical, categorical, and embedding blocks.
+Pass `verbose=False` to return the same data without logging the table.
 
 ```python
-pre.get_feature_info()
+numerical, categorical, embeddings = pre.get_feature_info()
+
+assert numerical["age"]["dimension"] == 1
+assert categorical["city"]["dimension"] == 2
+assert categorical["city"]["categories"] == 2
+assert embeddings == {}
 ```
 
-```text
-feature  kind         pipeline                        dim   cats
-----------------------------------------------------------------
-age      numerical    imputer -> minmax -> bspline      7      -
-income   numerical    imputer -> minmax -> rbf           7      -
-city     categorical  imputer -> onehot -> to_float      3      3
-```
-
-```python
-(
-    {"age": {"preprocessing": "imputer -> minmax -> bspline", "dimension": 7, "categories": None},
-     "income": {"preprocessing": "imputer -> minmax -> rbf", "dimension": 7, "categories": None}},
-    {"city": {"preprocessing": "imputer -> onehot -> to_float", "dimension": 3, "categories": 3}},
-    {},
-)
-```
+After the table, `get_feature_info()` logs the effective settings recorded at fit time
+for declared feature overrides and groups, with group sources in their declared order.
+This section does not enumerate every pipeline step. Its `output_dim`, when present, is
+a configuration setting; the table's `dim` is the actual fitted width. Edits after fit
+do not change the recorded settings. Use `get_resolved_config()` for current settings.
+Older fits without a settings record report that it is unavailable.
 
 ```{tip}
-`get_feature_info()` is a handy, no-setup way to check exactly what happened to each feature:
-which pipeline it went through, how many output columns it produced, and (for categoricals)
-how many categories were seen. Pass `verbose=False` to get just the returned dicts, silently.
-For other fitted details (total output width, per-feature output counts, the last
-`transform`'s memory report), see the `Preprocessor` **Attributes** in the
+For programmatic checks, compare the returned dimensions with `output_dims_` or use
+`total_output_dim_` to size a downstream model. See the `Preprocessor` attributes in the
 [API reference](../api/preprocessor.rst).
+```
+
+```{note}
+`dimension` is the actual width of the fitted feature block, including any
+missing-indicator columns. Inspection reads the fitted output spans without
+evaluating dummy inputs, so it also works for representations restricted to a
+particular input domain. `categories` records vocabulary size separately: dropped
+or grouped one-hot categories can produce fewer columns than the vocabulary
+contains, while additional representation or indicator columns can increase width.
 ```
 
 ## Fit-time logging
@@ -377,12 +375,12 @@ running PreTab inside a larger training script or notebook.
 | `3`             | Also logs internal fitted decisions (bins, knots, centers).                                  |
 
 ```python
-Preprocessor(numerical_method="ple", verbose=1).fit(df, y)
+logged = Preprocessor(numerical_method="ple", task="regression", verbose=1).fit(df, y)
+assert logged.total_output_dim_ == 8
 ```
 
-```text
-fit complete: 2 numerical (ple) + 1 categorical (int) feature(s) -> 15 output columns in 0.02s
-```
+This fit logs one numerical feature (`ple`), one categorical feature (`int`), eight output
+columns, and the elapsed time.
 
 Each fit applies its own level, so a later `verbose=2` fit in the same process or notebook logs
 the table even after a `verbose=1` fit. PreTab attaches its own stream handler only when no host
@@ -431,8 +429,8 @@ model fit on top of the expansion.
 
 ## Output budget
 
-Expansions can multiply columns quickly, especially wide splines or high-cardinality one-hot.
-The output budget lets you cap the blast radius and estimate cost before committing.
+Wide splines and high-cardinality one-hot encodings can produce many columns. Set a budget
+before fitting, then use the fitted width to estimate the size of future batches.
 
 | Parameter                | Effect                                         |
 | ------------------------ | ---------------------------------------------- |
@@ -442,16 +440,19 @@ The output budget lets you cap the blast radius and estimate cost before committ
 | `overflow_policy`        | What to do on overflow, default `"error"`.     |
 
 ```python
-pre = Preprocessor(max_output_features=500, overflow_policy="error")
+budgeted = Preprocessor(
+    numerical_method="minmax", categorical_method="one-hot", dtype="float32",
+    max_output_features=500, overflow_policy="error",
+).fit(df)
 
-pre.estimate_output_shape(df)   # predicted (n_rows, n_cols) without transforming
-pre.estimate_memory(df)         # predicted dense memory in bytes
+assert budgeted.estimate_output_shape(df) == (3, 3)
+assert budgeted.estimate_memory(df) == 36  # 3 rows * 3 columns * 4 bytes
 ```
 
 ```{warning}
-With `overflow_policy="error"`, exceeding a budget raises `OutputBudgetError` at `fit`. Use
-`estimate_output_shape` and `estimate_memory` first when you work with wide expansions or
-large data.
+With `overflow_policy="error"`, exceeding a budget at fit time raises `OutputBudgetError`.
+`estimate_output_shape` and `estimate_memory` require a fitted preprocessor. They do not
+materialize transformed output or predict what an unfitted configuration will learn.
 ```
 
 ## Where to go next

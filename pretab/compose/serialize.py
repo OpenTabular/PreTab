@@ -23,20 +23,28 @@ import dataclasses
 import importlib
 import math
 from collections import UserList
+from itertools import pairwise
 from typing import Any, cast
 
 import numpy as np
 from sklearn.base import BaseEstimator
+from sklearn.pipeline import FeatureUnion, Pipeline
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.utils.validation import check_is_fitted
 
 from .._version import __version__ as _PRETAB_VERSION
 from ..core.parameters import UNSET
 from ..core.policy import RepresentationPolicy
 from ..core.representation import FeatureLineage, RepresentationSpec
-from ..exceptions import PretabSerializationError
+from ..exceptions import PretabConfigError, PretabSerializationError
+from ..expansion.spline.p_spline import PSplineTransformer
+from ..expansion.spline.penalty import PenaltySpec, _copy_provenance
 from ..placement.base import PlacementResult
-from .inspection import representation_leaf
-from .registry import TransformerSpec
+from ..preprocessing.floats import NoTransformer, ToFloatTransformer
+from .config import FeatureGroup, RepresentationConfig
+from .inspection import _iter_fitted_blocks, representation_leaf
+from .output import _require_polars
+from .registry import TRANSFORMER_REGISTRY, TransformerSpec
 
 SCHEMA_VERSION = 1
 
@@ -55,7 +63,16 @@ _ALLOWED_TOP_LEVEL = frozenset({"pretab", "sklearn", "numpy", "scipy"})
 # let a spec construct an arbitrary sklearn/numpy/scipy dataclass with
 # attacker-controlled fields.
 _ALLOWED_DATACLASSES = frozenset(
-    {RepresentationPolicy, RepresentationSpec, FeatureLineage, PlacementResult, TransformerSpec}
+    {
+        RepresentationPolicy,
+        RepresentationSpec,
+        FeatureLineage,
+        PlacementResult,
+        TransformerSpec,
+        RepresentationConfig,
+        FeatureGroup,
+        PenaltySpec,
+    }
 )
 
 
@@ -149,7 +166,33 @@ def _encode(obj):
     if isinstance(obj, list):
         return [_encode(v) for v in obj]
     if isinstance(obj, BaseEstimator):
+        cls = type(obj)
+        if not _module_allowed(cls.__module__):
+            raise PretabSerializationError(
+                f"Cannot serialize estimator {cls.__module__}.{cls.__qualname__} in a schema-v1 spec. "
+                "Registration does not enable spec persistence. Use a supported built-in representation for JSON "
+                "replay, or a trusted pickle or joblib checkpoint in a matching environment if all components support it."
+            )
         return {"__estimator__": {"class": _qualname(obj), "state": _encode_mapping(vars(obj))}}
+    if type(obj) is RepresentationConfig:
+        fields = {key: _encode(value) for key, value in obj.to_dict().items()}
+        return {"__dataclass__": {"class": _qualname(obj), "fields": fields}}
+    if type(obj) is PenaltySpec:
+        fields = _encode_mapping(
+            {
+                "matrix": obj.matrix,
+                "kind": obj.kind,
+                "order": obj.order,
+                "axis": obj.axis,
+                "coordinate_system": obj.coordinate_system,
+                "coefficient_names": obj.coefficient_names,
+                "coefficient_indices": obj.coefficient_indices,
+                "atol": obj.atol,
+                "rtol": obj.rtol,
+                "provenance": _copy_provenance(obj.provenance),
+            }
+        )
+        return {"__dataclass__": {"class": _qualname(obj), "fields": fields}}
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         fields = {f.name: _encode(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
         return {"__dataclass__": {"class": _qualname(obj), "fields": fields}}
@@ -161,6 +204,55 @@ def _encode(obj):
 def _encode_mapping(mapping: dict) -> dict:
     """Encode a ``str``-keyed attribute mapping (an estimator/object ``__dict__``)."""
     return {str(k): _encode(v) for k, v in mapping.items()}
+
+
+def _canonicalize_feature_block(transformer: dict, *, structured: bool) -> None:
+    """Keep the encoded representation leaf compatible with the legacy fingerprint."""
+    pipeline = transformer["__estimator__"]["state"]
+    if "transformer_list" in pipeline:
+        branches = dict(item["__tuple__"] for item in pipeline["transformer_list"])
+        pipeline = branches["representation"]["__estimator__"]["state"]
+    method, leaf = pipeline["steps"][-1]["__tuple__"]
+    state = leaf["__estimator__"]["state"]
+    if method == "pspline":
+        fitted = state.get("_penalty_fit_")
+        if fitted == {"__tuple__": [state.get("diff_order"), state.get("include_bias")]}:
+            state.pop("_penalty_fit_")
+    if not structured:
+        return
+    spec = TRANSFORMER_REGISTRY.get(method)
+    if spec is None or not spec.supports_adaptive_resolution:
+        return
+    if state.get("adaptive") is False:
+        for field in ("min_output_dim", "max_output_dim"):
+            if field in spec.allowed_args and state.get(field) == {"__unset__": True}:
+                state[field] = None
+
+
+def _canonicalize_feature_fingerprint(state: dict, requests) -> None:
+    """Normalize single-feature requests and blocks without changing replay state."""
+    structured = set()
+    if isinstance(requests, dict):
+        for (feature, request), pair in zip(requests.items(), state["feature_preprocessing"]["__dict__"], strict=True):
+            if isinstance(request, dict):
+                try:
+                    request = RepresentationConfig.from_dict(request)
+                except PretabConfigError:
+                    continue
+            if type(request) is RepresentationConfig:
+                settings = request.to_dict()
+                method_only = (
+                    settings.keys() == {"method", "params", "name"} and not request.params and request.name is None
+                )
+                pair[1] = request.method if method_only else settings
+                structured.add(str(feature))
+    graph = state.get("column_transformer_")
+    if isinstance(graph, dict):
+        for field in ("transformers", "transformers_"):
+            for block in graph["__estimator__"]["state"][field]:
+                name, transformer, columns = block["__tuple__"]
+                if name.startswith(("num_", "cat_")) and len(columns) == 1 and isinstance(transformer, dict):
+                    _canonicalize_feature_block(transformer, structured=columns[0] in structured)
 
 
 def _json_safe(obj):
@@ -286,7 +378,37 @@ def _library_versions() -> dict:
     }
 
 
-def _representation_summary(preprocessor) -> list:
+def _penalty_summaries(leaf) -> list[dict]:
+    scope = next(
+        (
+            spec.arity
+            for spec in TRANSFORMER_REGISTRY.values()
+            if spec.typed_penalty and spec.transformer_cls is type(leaf)
+        ),
+        None,
+    )
+    if scope is None:
+        return []
+    if scope == "multivariate":
+        penalties = leaf.get_penalty_specs()
+    else:
+        if isinstance(leaf, PSplineTransformer) and leaf._has_legacy_only_penalty():
+            return []
+        penalties = (leaf.get_penalty_spec(feature_index=index) for index in range(leaf.n_features_in_))
+    return [penalty.to_summary() for penalty in penalties]
+
+
+def _group_layout(block, columns: list[str]) -> dict:
+    span = block.span
+    return {
+        "columns": columns,
+        "group_id": block.group_id,
+        "dimension": span.stop - span.start,
+        "output_slice": [span.start, span.stop],
+    }
+
+
+def _representation_summary(preprocessor, *, include_penalties: bool = False) -> list:
     """Declarative per-representation summary (family/columns/locations).
 
     One entry per block whose representation ends in a PreTab transformer, built from its
@@ -296,43 +418,60 @@ def _representation_summary(preprocessor) -> list:
     :func:`~pretab.compose.inspection.representation_leaf`), not the union itself.
     Blocks whose representation ends in a step without
     ``get_representation_spec`` (scikit-learn scalers and encoders, embeddings)
-    have no entry. The steps are fitted, so a spec that fails to build is a bug:
+    have no entry. Explicit groups also carry their public identity, actual full
+    block dimension and half-open fitted output slice, including raw indicators.
+    The steps are fitted, so a spec that fails to build is a bug:
     its error propagates instead of silently dropping the entry.
     """
     summary: list = []
     column_transformer = getattr(preprocessor, "column_transformer_", None)
     if column_transformer is None:
         return summary
-    for name, transformer, columns in column_transformer.transformers_:
-        if name == "remainder":
+    for block in _iter_fitted_blocks(column_transformer):
+        if block.step_name == "remainder":
             continue
-        leaf = representation_leaf(transformer)
+        leaf = representation_leaf(block.transformer)
         spec_fn = getattr(leaf, "get_representation_spec", None)
         if spec_fn is None:
             continue
-        block_columns = [str(col) for col in columns]
+        block_columns = [str(col) for col in block.columns]
         # A leaf with more inputs than its block has columns (one fitted behind
         # the imputer's built-in missing indicator, add_missing_indicator=True)
         # names its own inputs.
         fits_block = getattr(leaf, "n_features_in_", len(block_columns)) == len(block_columns)
         entry = spec_fn(input_features=block_columns if fits_block else None).to_dict()
         entry["columns"] = block_columns
+        if block.group_id is not None:
+            entry.update(_group_layout(block, block_columns))
+        if include_penalties and (penalties := _penalty_summaries(leaf)):
+            entry["penalties"] = penalties
         summary.append(entry)
     return summary
 
 
-def preprocessor_to_spec(preprocessor) -> dict:
+def preprocessor_to_spec(preprocessor, *, include_fitted_metadata: bool = True) -> dict:
     """Serialize a fitted preprocessor into a portable, versioned spec dictionary."""
     check_is_fitted(preprocessor)
-    return {
+    state = vars(preprocessor)
+    if not include_fitted_metadata:
+        state = {key: value for key, value in state.items() if key != "_fit_config_"}
+    has_fit_config = "_fit_config_" in state
+    spec = {
         "schema_version": SCHEMA_VERSION,
         "pretab_version": _PRETAB_VERSION,
         "library_versions": _library_versions(),
         "params": _json_safe(preprocessor.get_params(deep=False)),
         "feature_names_out": [str(name) for name in preprocessor.get_feature_names_out()],
-        "representations": _representation_summary(preprocessor),
-        "state": _encode_mapping(vars(preprocessor)),
+        "representations": _representation_summary(preprocessor, include_penalties=has_fit_config),
+        "state": _encode_mapping(state),
     }
+    if include_fitted_metadata:
+        if has_fit_config:
+            spec["resolved_config"] = _json_safe(state["_fit_config_"])
+        spec["output_dims"] = _json_safe(preprocessor.output_dims_)
+        spec["total_output_dim"] = preprocessor.total_output_dim_
+        spec["feature_lineage"] = _json_safe([item.to_dict() for item in preprocessor.get_feature_lineage()])
+    return spec
 
 
 def check_spec_schema(data: dict) -> None:
@@ -346,6 +485,69 @@ def check_spec_schema(data: dict) -> None:
         )
 
 
+def _validate_group_layout(representations, column_transformer) -> None:
+    if not isinstance(representations, list) or not all(isinstance(entry, dict) for entry in representations):
+        raise PretabSerializationError("Spec 'representations' must be a list of mappings.")
+    fields = ("columns", "group_id", "dimension", "output_slice")
+    declared = [{field: entry.get(field) for field in fields} for entry in representations if "group_id" in entry]
+    fitted = [
+        _group_layout(block, [str(column) for column in block.columns])
+        for block in _iter_fitted_blocks(column_transformer)
+        if block.group_id is not None
+        and getattr(representation_leaf(block.transformer), "get_representation_spec", None) is not None
+    ]
+    if declared != fitted:
+        raise PretabSerializationError("Spec 'representations' group layout does not match stored preprocessor state.")
+
+
+def _validate_spec_metadata(data: dict, preprocessor) -> None:
+    """Check descriptive fields against their source in restored state, when available."""
+    state = vars(preprocessor)
+    has_fit_config = "_fit_config_" in state
+    has_fitted_metadata = has_fit_config or "output_dims" in data or "total_output_dim" in data
+    expected = {}
+    if "params" in data and has_fitted_metadata:
+        expected["params"] = _json_safe(preprocessor.get_params(deep=False))
+    if "resolved_config" in data and has_fit_config:
+        expected["resolved_config"] = _json_safe(state["_fit_config_"])
+    if "output_dims" in data:
+        expected["output_dims"] = _json_safe(preprocessor.output_dims_)
+    if "total_output_dim" in data:
+        names = data.get("feature_names_out")
+        if isinstance(names, list):
+            expected["total_output_dim"] = len(names)
+        else:
+            spans = preprocessor.column_transformer_.output_indices_.values()
+            expected["total_output_dim"] = max((span.stop for span in spans), default=0)
+    for field, value in expected.items():
+        if data[field] != value:
+            raise PretabSerializationError(f"Spec {field!r} does not match stored preprocessor state.")
+    if "representations" in data and has_fitted_metadata:
+        _validate_group_layout(data["representations"], preprocessor.column_transformer_)
+
+
+def _repair_legacy_sparse_feature_counts(preprocessor) -> None:
+    """Repair the sparse-input helper width stored by PreTab 1.0.0."""
+    column_transformer = getattr(preprocessor, "column_transformer_", None)
+    if column_transformer is None:
+        return
+    for _, transformer, _ in column_transformer.transformers_:
+        if isinstance(transformer, FeatureUnion):
+            transformer = dict(vars(transformer)["transformer_list"]).get("representation")
+        if not isinstance(transformer, Pipeline):
+            continue
+        for (_, encoder), (_, helper) in pairwise(transformer.steps):
+            if (
+                type(encoder) is OneHotEncoder
+                and vars(encoder)["sparse_output"]
+                and hasattr(encoder, "categories_")
+                and type(helper) in (NoTransformer, ToFloatTransformer)
+                and getattr(helper, "n_features_in_", None) == 1
+                and not hasattr(helper, "feature_names_in_")
+            ):
+                helper.n_features_in_ = len(encoder.get_feature_names_out())
+
+
 def preprocessor_from_spec(data: dict):
     """Reconstruct a fitted preprocessor from a spec produced by :func:`preprocessor_to_spec`."""
     check_spec_schema(data)
@@ -353,4 +555,11 @@ def preprocessor_from_spec(data: dict):
 
     obj = Preprocessor.__new__(Preprocessor)
     obj.__dict__.update(_decode_mapping(data["state"]))
+    obj.__dict__.setdefault("feature_groups", None)
+    obj.__dict__.setdefault("task_validation", "off")
+    output_config = getattr(obj, "_sklearn_output_config", None)
+    if isinstance(output_config, dict) and output_config.get("transform") == "polars":
+        _require_polars()
+    _repair_legacy_sparse_feature_counts(obj)
+    _validate_spec_metadata(data, obj)
     return obj
