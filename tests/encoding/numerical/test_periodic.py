@@ -33,6 +33,34 @@ def test_cyclic_rejects_out_of_range_input():
         transformer.fit(np.array([[-1]]))
 
 
+@pytest.mark.parametrize(
+    "period",
+    [0, -1, "24", None, np.nan, np.inf, -np.inf, True, False, np.bool_(True), 24 + 0j, [24], np.array([24])],
+)
+def test_cyclic_rejects_invalid_period_before_fitting(period):
+    transformer = PeriodicEncodingTransformer(period=period)
+    with pytest.raises(InvalidParamError, match=r"period.*finite.*positive") as error:
+        transformer.fit(np.array([[0.0]]))
+
+    assert repr(period) in str(error.value)
+    assert not hasattr(transformer, "n_features_in_")
+
+
+@pytest.mark.parametrize("period", [24, 24.0, 7.5, np.int64(7), np.float32(7.5), np.float64(24)])
+def test_cyclic_accepts_positive_finite_period(period):
+    values = np.array([[0.0], [period / 4], [period / 2], [period]])
+    transformer = PeriodicEncodingTransformer(period=period)
+    transformed = transformer.fit_transform(values)
+    angles = 2 * np.pi * values[:, 0] / period
+
+    assert transformer.period is period
+    assert transformed.shape == (4, 2)
+    assert np.isfinite(transformed).all()
+    np.testing.assert_allclose(transformed[:, 0], np.sin(angles), atol=1e-12)
+    np.testing.assert_allclose(transformed[:, 1], np.cos(angles), atol=1e-12)
+    assert transformer.get_representation_spec().period == float(period)
+
+
 def test_cyclic_requires_period():
     with pytest.raises(TypeError):
         PeriodicEncodingTransformer()  # type: ignore[call-arg]

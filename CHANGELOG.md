@@ -7,6 +7,15 @@ This project adheres to [Semantic Versioning](https://semver.org/) and uses
 
 Going forward, this file is updated automatically by `cz bump` on each release.
 
+## Unreleased
+
+### Removed
+
+- Python 3.10 support. PreTab 1.1 requires Python 3.11 to 3.13
+  (`>=3.11,<3.14`), matching DeepTab 2.1. PreTab 1.0.0 is the final release
+  for Python 3.10; install `pretab<1.1` if you cannot upgrade Python. See the
+  [migration guidance](docs/getting_started/installation.md#python-310-migration).
+
 ## v1.0.0 (2026-09-06)
 
 First stable release, consolidating the release-candidate cycle (`rc1`-`rc5`) below into one

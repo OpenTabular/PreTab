@@ -35,6 +35,15 @@ Multivariate splines
 
 Canonical import: ``pretab.expansion.spline.multivariate``.
 
+Typed spline penalties
+----------------------
+
+.. autoclass:: pretab.PenaltySpec
+   :members: matrix, to_summary
+
+The :doc:`spline guide <../representations/spline_expansions>` lists the supported
+accessors and shows how to add a penalty to a downstream loss.
+
 Functional expansions
 ----------------------
 

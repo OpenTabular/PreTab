@@ -8,12 +8,23 @@ contents.
 import subprocess
 import sys
 import textwrap
+from contextlib import nullcontext
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.base import clone
 
-from pretab import Preprocessor
+from pretab import FeatureGroup, Preprocessor, RepresentationConfig
+from pretab.compose.inspection import representation_leaf
+from pretab.compose.registry import (
+    CATEGORICAL_ALIASES,
+    CATEGORICAL_METHODS,
+    NUMERICAL_ALIASES,
+    NUMERICAL_METHODS,
+    TRANSFORMER_REGISTRY,
+)
 
 
 @pytest.fixture
@@ -43,6 +54,212 @@ def test_fingerprint_is_hex_sha256(frame, target):
 
 def test_fingerprint_deterministic_same_fit(frame, target):
     assert _fit(frame, target).fingerprint_ == _fit(frame, target).fingerprint_
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("order", [("a", "b"), ("b", "a")], ids=["forward", "reversed"])
+@pytest.mark.parametrize(("method", "missing_policy"), [("rbf", None), ("rbf", "separate_state"), ("pspline", None)])
+def test_fingerprint_matches_equivalent_per_feature_syntax(frame, target, typed, order, method, missing_policy):
+    methods = {"a": method, "b": "minmax"}
+    legacy = {feature: methods[feature] for feature in order}
+    structured = {
+        feature: RepresentationConfig(method) if typed else {"method": method} for feature, method in legacy.items()
+    }
+    params = {
+        "numerical_method": "none",
+        "placement_strategy": "uniform",
+        "random_state": 17,
+        "missing_policy": missing_policy,
+    }
+    reference = _fit(frame, target, feature_preprocessing=legacy, **params)
+    opposite = _fit(frame, target, feature_preprocessing=dict(reversed(legacy.items())), **params)
+    candidate = _fit(frame, target, feature_preprocessing=structured, **params)
+    restored = Preprocessor.from_spec(candidate.to_spec())
+    expected = np.asarray(reference.transform(frame, return_array=True))
+
+    assert reference.fingerprint_ != opposite.fingerprint_
+    for processor in (candidate, restored):
+        request = processor.feature_preprocessing
+        assert request is not None
+        assert list(request.items()) == list(structured.items())
+        assert processor.fingerprint_ == reference.fingerprint_
+        np.testing.assert_array_equal(processor.get_feature_names_out(), reference.get_feature_names_out())
+        output = np.asarray(processor.transform(frame, return_array=True))
+        assert output.tobytes() == expected.tobytes()
+
+
+def test_fingerprint_canonicalizes_structured_setting_order(frame, target):
+    typed = RepresentationConfig(
+        "rbf", adaptive=True, min_output_dim=5, max_output_dim=9, params={"gamma": 1.0, "random_state": 17}
+    )
+    mapping = typed.to_dict()
+    reordered = dict(reversed(mapping.items()))
+    reordered["params"] = dict(reversed(mapping["params"].items()))
+
+    def fingerprint(request):
+        return _fit(frame, target, placement_strategy="uniform", feature_preprocessing={"a": request}).fingerprint_
+
+    expected = fingerprint(typed)
+    assert fingerprint(mapping) == fingerprint(reordered) == expected
+    assert fingerprint(mapping | {"max_output_dim": 10}) != expected
+    assert fingerprint(mapping | {"params": mapping["params"] | {"gamma": 2.0}}) != expected
+
+
+def test_fingerprint_omits_only_redundant_pspline_penalty_snapshot(frame, target):
+    processor = _fit(frame, target, feature_preprocessing={"a": "pspline"}, placement_strategy="uniform")
+    restored = Preprocessor.from_spec(processor.to_spec())
+    current_leaf = representation_leaf(processor.column_transformer_.named_transformers_["num_a"])
+    legacy_leaf = representation_leaf(restored.column_transformer_.named_transformers_["num_a"])
+
+    del legacy_leaf._penalty_fit_
+    assert processor.fingerprint_ == restored.fingerprint_
+    assert current_leaf._penalty_fit_ == (2, False)
+
+    current_leaf.diff_order = legacy_leaf.diff_order = 1
+    assert processor.fingerprint_ != restored.fingerprint_
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("change", ["group_order", "source_order", "family", "width", "params", "seed", "state"])
+def test_group_fingerprint_tracks_order_settings_and_fitted_state(frame, typed, change):
+    frame = frame.assign(d=frame["a"] ** 2, e=np.sin(frame["b"]))
+
+    def make_groups():
+        return {
+            "location": {
+                "columns": ["b", "a"],
+                "representation": {
+                    "method": "tprs",
+                    "n_components": 4,
+                    "landmark_strategy": "subsample",
+                    "random_state": 17,
+                },
+            },
+            "shape": {
+                "columns": ["d", "e"],
+                "representation": {"method": "tensorspline", "output_dim": 3, "degree": 2},
+            },
+        }
+
+    def fit(groups):
+        declarations = (
+            [FeatureGroup(name, entry["columns"], entry["representation"]) for name, entry in groups.items()]
+            if typed
+            else groups
+        )
+        return Preprocessor(
+            numerical_method="none",
+            target_aware=False,
+            placement_strategy="uniform",
+            feature_groups=declarations,
+        ).fit(frame)
+
+    reference = fit(make_groups())
+    original = reference.fingerprint_
+    repeated = fit(make_groups())
+    assert repeated.fingerprint_ == original
+    report = reference.reproducibility_report()
+    assert list(report["representations"]) == ["group_location", "group_shape", "c"]
+    assert list(report["feature_groups"]) == ["group_location", "group_shape"]
+    assert [entry["dimension"] for entry in report["feature_groups"].values()] == [4, 9]
+    reference.transform(frame)
+    reference.mark_stale("metadata only").freeze()
+    assert reference.fingerprint_ == original
+
+    groups = make_groups()
+    if change == "group_order":
+        groups = dict(reversed(list(groups.items())))
+    elif change == "source_order":
+        groups["location"]["columns"] = ["a", "b"]
+    elif change == "family":
+        groups["location"]["representation"] = {
+            "method": "tensorspline",
+            "output_dim": 2,
+            "degree": 1,
+            "diff_order": 1,
+        }
+    elif change == "width":
+        groups["location"]["representation"]["n_components"] = 5
+    elif change == "params":
+        groups["shape"]["representation"]["degree"] = 1
+    elif change == "seed":
+        groups["location"]["representation"]["random_state"] = 18
+    candidate = fit(groups)
+    if change == "state":
+        leaf = representation_leaf(candidate.column_transformer_.named_transformers_["group_location"])
+        leaf.landmarks_[0, 0] += 0.125
+    assert candidate.fingerprint_ != original
+    if change == "width":
+        assert candidate.output_dims_["group_location"] == 5
+    else:
+        assert candidate.total_output_dim_ == reference.total_output_dim_
+
+
+@pytest.mark.parametrize("per_feature", [False, True], ids=["global", "override"])
+@pytest.mark.parametrize(
+    ("feature", "method", "canonical"),
+    [
+        pytest.param(feature, method, canonical, id=f"{feature}-{method}")
+        for feature, methods, aliases in (
+            ("a", NUMERICAL_METHODS, NUMERICAL_ALIASES),
+            ("c", CATEGORICAL_METHODS, CATEGORICAL_ALIASES),
+        )
+        for method, canonical in [
+            *((name, name) for name in sorted(methods)),
+            *((alias, name) for alias, name in sorted(aliases.items()) if name in methods),
+        ]
+        if TRANSFORMER_REGISTRY[canonical].optional_dependency is None
+    ],
+)
+def test_legacy_strings_keep_fitted_artifact_through_report_and_clone(
+    frame, target, feature, method, canonical, per_feature
+):
+    frame = pd.concat([frame.assign(c=pd.Categorical(frame["c"]).codes)] * 20, ignore_index=True)
+    target = np.tile(target, 20)
+    supervised = TRANSFORMER_REGISTRY[canonical].requires_target
+    parameters: dict[str, Any] = {
+        "numerical_method": "none",
+        "categorical_method": "none",
+        "target_aware": supervised,
+        "placement_strategy": "cart" if supervised else "uniform",
+        "random_state": 17,
+        "scaling": "none",
+    }
+    if per_feature:
+        parameters["feature_preprocessing"] = {feature: method}
+    else:
+        parameters["numerical_method" if feature == "a" else "categorical_method"] = method
+    with (
+        pytest.warns(DeprecationWarning, match="OneHotFromOrdinalTransformer is deprecated")
+        if canonical == "onehot_from_ordinal"
+        else nullcontext()
+    ):
+        processor = Preprocessor(**parameters).fit(frame, target)
+    original = np.asarray(processor.transform(frame, return_array=True))
+    names = processor.get_feature_names_out()
+    widths = dict(processor.output_dims_)
+    fingerprint = processor.fingerprint_
+    requested = processor.get_params()
+
+    processor.get_resolved_config()
+    fresh = clone(processor)
+    assert isinstance(fresh, Preprocessor)
+    with (
+        pytest.warns(DeprecationWarning, match="OneHotFromOrdinalTransformer is deprecated")
+        if canonical == "onehot_from_ordinal"
+        else nullcontext()
+    ):
+        fresh.fit(frame, target)
+    for candidate in (processor, fresh):
+        actual = np.asarray(candidate.transform(frame, return_array=True))
+        assert actual.dtype == original.dtype
+        assert actual.shape == original.shape
+        assert actual.tobytes() == original.tobytes()
+        np.testing.assert_array_equal(candidate.get_feature_names_out(), names)
+        assert candidate.output_dims_ == widths
+        assert candidate.total_output_dim_ == original.shape[1]
+        assert candidate.fingerprint_ == fingerprint
+        assert candidate.get_params() == requested
 
 
 def test_fingerprint_survives_round_trip(frame, target):
@@ -123,3 +340,4 @@ def test_reproducibility_report_contents(frame, target):
     assert report["n_output_features"] == len(p.get_feature_names_out())
     assert report["output_format"] == "dense"
     assert "a" in report["representations"]
+    assert "feature_groups" not in report

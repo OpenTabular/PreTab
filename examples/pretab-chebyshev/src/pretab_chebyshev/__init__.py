@@ -24,6 +24,9 @@ class ChebyshevRepresentation(BaseRepresentation):
     ``T_0`` term is dropped to avoid a redundant bias column). This yields
     ``degree`` output columns per input feature.
 
+    Inputs must be finite. Impute missing values before calling the transformer
+    directly, or use it in a ``Preprocessor`` numerical pipeline.
+
     Parameters
     ----------
     degree : int, default=5
@@ -34,6 +37,7 @@ class ChebyshevRepresentation(BaseRepresentation):
     feature_kind = "numerical"
     scope = "univariate"
     supervision = "unsupervised"
+    _allow_nan = False
 
     def __init__(self, degree=5):
         self.degree = degree
@@ -50,7 +54,7 @@ class ChebyshevRepresentation(BaseRepresentation):
         return np.clip(2.0 * (X - self.data_min_) / span - 1.0, -1.0, 1.0)
 
     def transform(self, X):
-        check_is_fitted(self, "n_features_in_")
+        check_is_fitted(self, ("data_min_", "data_max_"))
         z = self._rescale(np.asarray(self._validate(X, reset=False), dtype=float))
         theta = np.arccos(z)
         blocks = [

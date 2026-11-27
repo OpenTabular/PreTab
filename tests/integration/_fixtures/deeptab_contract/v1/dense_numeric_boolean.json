@@ -1,0 +1,102 @@
+{
+  "block_widths": [
+    {
+      "name": "num_level",
+      "width": 1
+    },
+    {
+      "name": "cat_flag",
+      "width": 2
+    }
+  ],
+  "case_id": "dense_numeric_boolean",
+  "constructor_config": {
+    "categorical_method": "one-hot",
+    "numerical_method": "minmax",
+    "output_format": "dense",
+    "output_structure": "matrix"
+  },
+  "feature_info_dimensions": {
+    "categorical": {
+      "flag": 2
+    },
+    "embedding": {},
+    "numerical": {
+      "level": 1
+    }
+  },
+  "fingerprint": "839863e13e2b2b8a5da62c73fc1f6e9e78ef4fb24d5cf9922eb81eed9c75efc2",
+  "input_schema": {
+    "columns": [
+      {
+        "dtype": "float64",
+        "name": "level"
+      },
+      {
+        "dtype": "bool",
+        "name": "flag"
+      }
+    ],
+    "container": "pandas"
+  },
+  "library_versions": {
+    "numpy": "2.5.3",
+    "pandas": "2.3.3",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "polars": "1.44.1",
+    "pretab": "0+unknown",
+    "pretab_source_sha256": "c6f97dedd6c7a00097198a9b94b5c3bcfebcbe4e5d9657896c3d265733e39642",
+    "pyarrow": null,
+    "python": "3.13.2",
+    "scikit_learn": "1.9.1",
+    "scipy": "1.18.1"
+  },
+  "output_feature_names": ["num_level", "cat_flag_False", "cat_flag_True"],
+  "resolved_config": {
+    "adaptive": false,
+    "add_missing_indicator": false,
+    "cat_cutoff": 0.03,
+    "categorical_imputation": "most_frequent",
+    "categorical_method": "one-hot",
+    "degree": 3,
+    "dtype": null,
+    "feature_groups": null,
+    "feature_preprocessing": null,
+    "max_dense_memory": null,
+    "max_features_per_input": null,
+    "max_output_dim": 10,
+    "max_output_features": null,
+    "min_output_dim": 7,
+    "missing_policy": null,
+    "numerical_imputation": "median",
+    "numerical_method": "minmax",
+    "output_dim": 7,
+    "output_format": "dense",
+    "output_structure": "matrix",
+    "overflow_policy": "error",
+    "placement_strategy": "cart",
+    "policy": null,
+    "random_state": null,
+    "scaling": "minmax",
+    "target_aware": true,
+    "task": "regression",
+    "task_validation": "off",
+    "treat_all_integers_as_numerical": false,
+    "verbose": 0
+  },
+  "schema_version": 1,
+  "tolerances": {
+    "atol": 1e-9,
+    "rtol": 1e-7
+  },
+  "transformed_rows": [
+    {
+      "row_index": 0,
+      "values": [0.16666666666666666, 1.0, 0.0]
+    },
+    {
+      "row_index": 1,
+      "values": [0.8333333333333333, 0.0, 1.0]
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
@@ -5,8 +7,10 @@ from sklearn.utils.validation import check_is_fitted
 from ...core.knots import bspline_basis, extrapolate_bspline_rows
 from ...core.parameters import UNSET
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
-from ...exceptions import InvalidParamError
+from ...core.validation import resolve_input_features
+from ...exceptions import InvalidParamError, PretabNotFittedError, invalid_param_error
 from .mixins import SplineBasisMixin
+from .penalty import PenaltySpec
 
 
 class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
@@ -155,6 +159,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         self.policy = policy
 
     def fit(self, X, y=None):
+        self.__dict__.pop("_penalty_fit_", None)
         X = self._validate_allow_nan(X, reset=True)
         output_dim = self._resolve_param("output_dim", default=6)
         if self.placement_strategy != "uniform":
@@ -204,6 +209,7 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
             self.n_knots_.append(max(0, len(knots) - 2 * (self.degree + 1)))
             self.penalty_.append(penalty)
 
+        self._penalty_fit_ = (int(self.diff_order), bool(self.include_bias))
         return self
 
     def transform(self, X):
@@ -241,3 +247,68 @@ class PSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
         """
         check_is_fitted(self, "penalty_")
         return self.penalty_[feature_index]
+
+    def _has_legacy_only_penalty(self) -> bool:
+        fitted = getattr(self, "_penalty_fit_", None)
+        return fitted is not None and fitted[0] not in (1, 2)
+
+    def get_penalty_spec(
+        self, feature_index: int | np.integer[Any] = 0, *, diff_order: int | np.integer[Any] | None = None
+    ) -> PenaltySpec:
+        """Return the fitted difference penalty for the selected feature.
+
+        Typed penalties support fitted orders one and two. Omit ``diff_order``
+        to use the fitted order, or specify that same order explicitly. The
+        coefficient positions refer to the full transformer output, including
+        the leading unpenalized bias column for each feature if fitted with bias.
+
+        Raises
+        ------
+        PretabNotFittedError
+            If no fitted penalty matrices are available.
+        InvalidParamError
+            If the fitted convention is unavailable or unsupported, or the
+            feature index or explicit order is invalid.
+        """
+        estimator = type(self).__name__
+        if not hasattr(self, "penalty_"):
+            raise PretabNotFittedError(f"{estimator} must be fitted before calling get_penalty_spec().")
+        fitted = getattr(self, "_penalty_fit_", None)
+        if fitted is None:
+            raise invalid_param_error(estimator, "get_penalty_spec", None, "refit to record the fitted penalty order")
+        order, include_bias = fitted
+        if self._has_legacy_only_penalty():
+            raise invalid_param_error(
+                estimator,
+                "diff_order",
+                order,
+                "typed P-spline penalties support fitted orders 1 and 2; "
+                "use get_penalty_matrix() for the legacy matrix",
+            )
+        if diff_order is not None and (
+            isinstance(diff_order, (bool, np.bool_))
+            or not isinstance(diff_order, (int, np.integer))
+            or diff_order != order
+        ):
+            raise invalid_param_error(estimator, "diff_order", diff_order, f"must match the fitted order ({order})")
+        sizes = self._output_sizes()
+        if (
+            isinstance(feature_index, (bool, np.bool_))
+            or not isinstance(feature_index, (int, np.integer))
+            or not 0 <= feature_index < len(sizes)
+        ):
+            raise invalid_param_error(estimator, "feature_index", feature_index, f"must be in [0, {len(sizes)})")
+        index = int(feature_index)
+        start = sum(sizes[:index])
+        stop = start + sizes[index]
+        axis = str(resolve_input_features(self, None)[index])
+        return PenaltySpec(
+            matrix=self.get_penalty_matrix(index),
+            kind="coefficient_difference",
+            order=order,
+            axis=(axis,),
+            coordinate_system="output_coefficients",
+            coefficient_names=tuple(self.get_feature_names_out()[start:stop]),
+            coefficient_indices=range(start, stop),
+            provenance={"transformer": estimator, "include_bias": include_bias},
+        )

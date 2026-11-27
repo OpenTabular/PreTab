@@ -1,4 +1,5 @@
 import itertools
+from typing import Any
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -10,6 +11,7 @@ from ...core.supervised import warn_target_leakage
 from ...exceptions import InvalidParamError
 from ...placement.adapters import SplinePlacementAdapter
 from .mixins import SplineBasisMixin
+from .penalty import PenaltySpec
 
 
 class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseEstimator):
@@ -275,6 +277,25 @@ class CubicRegressionSplineTransformer(SplineBasisMixin, TransformerMixin, BaseE
             D = np.column_stack([self._second_derivative(xs, i, knots) for i in range(n_basis)])
             P += (D * weights[:, None]).T @ D
         return P
+
+    def get_penalty_spec(
+        self, feature_index: int | np.integer[Any] = 0, *, diff_order: int | None = None
+    ) -> PenaltySpec:
+        """Return the integrated squared curvature penalty in fitted output coordinates.
+
+        The integral is over the fitted feature range, in fitted input units.
+        Its derivative order is two; ``diff_order`` must be omitted or ``None``.
+        The linear column and optional leading bias are unpenalized; the quadratic,
+        cubic, and truncated cubic columns contribute to the penalty.
+        """
+        return self._curvature_penalty_spec(
+            feature_index,
+            diff_order,
+            legacy_method=CubicRegressionSplineTransformer.get_penalty_matrix,
+            kind="integrated_squared_second_derivative",
+            base_width=3,
+            integration="piecewise_simpson",
+        )
 
     def _second_derivative(self, x, basis_index, knots):
         """Second derivative of one basis column, evaluated at ``x``."""

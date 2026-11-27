@@ -77,9 +77,8 @@ class ReLUExpansionTransformer(BaseCenterExpansion):
     >>> from pretab.transformers import ReLUExpansionTransformer
     >>> X = np.array([[1.0], [2.0], [3.0]])
     >>> transformer = ReLUExpansionTransformer(output_dim=3, target_aware=False, placement_strategy="uniform")
-    >>> transformer.fit(X)
-    ReLUExpansionTransformer(...)
-    >>> transformer.transform(X).shape
+    >>> fitted = transformer.fit(X)
+    >>> fitted.transform(X).shape
     (3, 3)
     """
 

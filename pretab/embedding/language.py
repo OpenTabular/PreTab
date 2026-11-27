@@ -38,8 +38,9 @@ class LanguageEmbeddingTransformer(TransformerMixin, BaseEstimator):
 
     Notes
     -----
-    Requires the optional ``sentence-transformers`` dependency. Install it with
-    ``pip install sentence-transformers`` or pass a preloaded ``model``.
+    Install ``pretab[embeddings]`` to use the default model. The first call to
+    ``fit`` may download the model weights if they are not cached. Pass a
+    preloaded ``model`` to skip model loading.
 
     Examples
     --------
