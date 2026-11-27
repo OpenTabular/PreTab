@@ -17,18 +17,18 @@ t.fit_transform(X).shape
 # model's own dimensionality once fitted, e.g. via t.embedding_dim_
 ```
 
-Constructor highlights: `model_name="paraphrase-MiniLM-L3-v2"`, or pass a preloaded `model`
-(useful for tests or a custom embedding backend without pulling in `sentence-transformers`).
-Any object with a `.encode(X)` method works for the `transform` step; `embedding_dim_` is
-read from `get_sentence_embedding_dimension()` when the model exposes it (as a real
-`SentenceTransformer` does), falling back to a `dim` attribute, or, if neither is present,
-probed by calling `.encode()` once on a placeholder input during `fit`. The registry key is
-`pretrained`.
+Use `model_name` to load a pretrained model, or pass a preloaded `model` to the standalone
+transformer. A custom model must accept `encode(texts, convert_to_numpy=True)`, where `texts`
+is a list of strings, and return a two-dimensional numeric array with one row per string.
+During `fit`, PreTab obtains `embedding_dim_` from `get_sentence_embedding_dimension()` or
+the model's `dim` attribute. If neither is available, it calls `encode` with the same keyword
+on a placeholder string to determine the width.
 
 ```{important}
-Language embeddings require the optional `embeddings` extra, which pulls in
-`sentence-transformers`. Install it with `pip install "pretab[embeddings]"`. Without it,
-requesting `pretrained` raises a clear `OptionalDependencyError`.
+Loading a model by name or selecting the `pretrained` registry method requires the optional
+`embeddings` extra. Install it with `pip install "pretab[embeddings]"`; otherwise these paths
+raise `OptionalDependencyError`. A preloaded `model` passed to the standalone transformer
+does not require `sentence-transformers`.
 ```
 
 ```{note}

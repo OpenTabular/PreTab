@@ -1,8 +1,7 @@
 # Comparing representations
 
-Choosing a representation should be an experiment, not a guess. This tutorial evaluates several
-numerical methods on the same task with the same model, so the only thing that varies is the
-basis. The pattern generalizes to any dataset you have.
+Compare numerical representations on the same task, with the same folds and downstream model.
+This tutorial measures both validation scores and fitted widths for each candidate.
 
 ## The setup
 
@@ -15,7 +14,7 @@ import pandas as pd
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import Ridge
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_validate
 
 rng = np.random.default_rng(0)
 n = 3000
@@ -48,18 +47,18 @@ results = {}
 for name, transformer in candidates.items():
     features = ColumnTransformer([("x", transformer, ["x"])])
     model = Pipeline([("features", features), ("ridge", Ridge(alpha=1.0))])
-    scores = cross_val_score(model, df, y, cv=5, scoring="r2")
-    results[name] = (scores.mean(), scores.std())
+    results[name] = cross_validate(model, df, y, cv=5, scoring="r2", return_estimator=True)
 
-for name, (mean, std) in results.items():
-    print(f"{name:20s} R2 = {mean:.3f} +/- {std:.3f}")
+for name, result in results.items():
+    scores = result["test_score"]
+    print(f"{name:20s} R2 = {scores.mean():.3f} +/- {scores.std():.3f}")
 ```
 
 ```text
 minmax (baseline)    R2 = 0.111 +/- 0.030
 bspline              R2 = 0.966 +/- 0.002
 rbf                  R2 = 0.965 +/- 0.003
-ple                  R2 = 0.955 +/- 0.005
+ple                  R2 = 0.942 +/- 0.004
 ```
 
 The scaled baseline fits a straight line and cannot follow the sine. Every expansion captures
@@ -72,22 +71,24 @@ That isolates the effect of the basis so the comparison is fair.
 
 ## Weigh width against accuracy
 
-More columns can buy accuracy, but they also cost memory and overfitting headroom. Estimate the
-output width before you commit, using the `Preprocessor` budget tools.
+Wider representations use more memory and can overfit. Count the output features of the same
+fitted pipelines that produced the validation scores. Widths can differ across folds, so check
+each one rather than assuming the requested `output_dim` was realized.
 
 ```python
-from pretab import Preprocessor
-
-for method in ["bspline", "rbf", "ple"]:
-    pre = Preprocessor(numerical_method=method, output_dim=12).fit(df, y)
-    shape = pre.estimate_output_shape(df)
-    print(f"{method:8s} -> {shape[1]} columns")
+for name, result in results.items():
+    widths = [
+        len(fold.named_steps["features"].get_feature_names_out())
+        for fold in result["estimator"]
+    ]
+    print(f"{name:20s} fitted widths: {widths}")
 ```
 
 ```{note}
-A method that wins by a hair but doubles the column count may not be worth it. Read the width
-from `estimate_output_shape` and factor it into the decision. See
-[Outputs and inspection](../core_concepts/outputs_and_inspection.md).
+Here the baseline has one column and every expansion has 12 in each fold. When comparing
+`Preprocessor` candidates, you can read `total_output_dim_` after fitting or call
+`estimate_output_shape(X)` on a fitted instance to include the row count for new input. See
+[Outputs and inspection](../core_concepts/outputs_and_inspection.md) for output budgets.
 ```
 
 ## When nothing beats the baseline

@@ -1,4 +1,5 @@
 from ._version import __version__
+from .compose import FeatureGroup, RepresentationConfig
 from .compose.search import RepresentationSearchCV
 from .core.logging import configure_logging, set_verbosity
 from .core.policy import RepresentationPolicy
@@ -12,6 +13,7 @@ from .exceptions import (
     PretabWarning,
     RepresentationConformanceError,
 )
+from .expansion.spline import PenaltySpec
 from .extension import (
     BaseRepresentation,
     check_representation,
@@ -24,13 +26,16 @@ from .preprocessor import Preprocessor
 __all__ = [
     "BaseRepresentation",
     "CrossFittedTransformer",
+    "FeatureGroup",
     "FeatureLineage",
     "FrozenRepresentationError",
     "LeakageWarning",
     "OutputBudgetError",
+    "PenaltySpec",
     "Preprocessor",
     "PretabSerializationError",
     "PretabWarning",
+    "RepresentationConfig",
     "RepresentationConformanceError",
     "RepresentationPolicy",
     "RepresentationSearchCV",

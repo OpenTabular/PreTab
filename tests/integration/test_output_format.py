@@ -5,7 +5,7 @@ Covers ``output_format`` (dense/sparse/auto), ``dtype`` casting, the
 wrapping.
 """
 
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -48,6 +48,120 @@ def _bspline(**kwargs):
 
 
 # --- default (dense) behaviour -------------------------------------------------
+
+
+def _grouped_format_processor(method, **kwargs):
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    return Preprocessor(
+        numerical_method="none",
+        categorical_method="one-hot",
+        target_aware=False,
+        placement_strategy="uniform",
+        feature_groups={"location": {"columns": ["b", "a"], "representation": representation}},
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse", "auto"])
+@pytest.mark.parametrize("many_categories", [False, True])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_grouped_output_negotiates_format_once_without_changing_values(
+    frame, method, output_format, many_categories, dtype
+):
+    frame = frame.assign(city=[f"city_{index}" for index in range(len(frame))] if many_categories else "same")
+    expected_preprocessor = _grouped_format_processor(method, dtype=dtype).fit(frame)
+    expected = expected_preprocessor.transform(frame)
+    preprocessor = _grouped_format_processor(method, output_format=output_format, dtype=dtype).fit(frame)
+    resolved = ("sparse" if many_categories else "dense") if output_format == "auto" else output_format
+    assert preprocessor.output_format_ == resolved
+    fingerprint = preprocessor.fingerprint_
+    native_group = preprocessor.column_transformer_.named_transformers_["group_location"].transform(frame[["b", "a"]])
+    assert isinstance(native_group, np.ndarray)
+    for batch in (frame, frame.iloc[:1]):
+        matrix = preprocessor.transform(batch)
+        assert not isinstance(matrix, dict)
+        assert sp.issparse(matrix) == (resolved == "sparse")
+        assert matrix.dtype == dtype
+        if sp.issparse(matrix):
+            assert matrix.format == "csr"
+        values = matrix.toarray() if sp.issparse(matrix) else np.asarray(matrix)
+        if method == "tprs" and batch is not frame:
+            np.testing.assert_array_equal(values, expected_preprocessor.transform(batch))
+            tolerance = 8 * np.finfo(dtype).eps
+            np.testing.assert_allclose(values, expected[: len(batch)], rtol=tolerance, atol=tolerance)
+        else:
+            np.testing.assert_array_equal(values, expected[: len(batch)])
+        report = preprocessor.output_report_
+        assert report["format"] == resolved
+        assert report["shape"] == values.shape
+        assert report["dense_bytes"] == values.nbytes
+        blocks = preprocessor.transform(batch, return_array=False)
+        assert isinstance(blocks, dict)
+        assert list(blocks) == ["group_location", "cat_city"]
+        assert all(sp.issparse(block) == (resolved == "sparse") for block in blocks.values())
+        stacked = np.hstack([block.toarray() if sp.issparse(block) else np.asarray(block) for block in blocks.values()])
+        np.testing.assert_array_equal(stacked, values)
+    assert preprocessor.fingerprint_ == fingerprint
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse", "auto"])
+@pytest.mark.parametrize("container", ["pandas", "polars"])
+@pytest.mark.parametrize("configuration", ["local", "global"])
+def test_grouped_dataframe_output_keeps_names_dtype_and_index(frame, method, output_format, container, configuration):
+    from sklearn import config_context
+
+    polars = pytest.importorskip("polars") if container == "polars" else None
+    frame = frame.assign(city=[f"city_{index}" for index in range(len(frame))])
+    frame.index = pd.Index(np.arange(len(frame)) % 7, name="row")
+    expected_preprocessor = _grouped_format_processor(method, dtype=np.float32).fit(frame)
+    expected = expected_preprocessor.transform(frame)
+    assert isinstance(expected, np.ndarray)
+    preprocessor = _grouped_format_processor(method, output_format=output_format, dtype=np.float32)
+    if configuration == "local":
+        actual = preprocessor.set_output(transform=container).fit_transform(frame)
+    else:
+        with config_context(transform_output=container):
+            actual = preprocessor.fit_transform(frame)
+    if container == "pandas":
+        assert isinstance(actual, pd.DataFrame)
+        pd.testing.assert_index_equal(actual.index, frame.index)
+        assert all(column_dtype == np.float32 for column_dtype in actual.dtypes)
+    else:
+        assert polars is not None
+        assert isinstance(actual, polars.DataFrame)
+        actual = cast(Any, actual)
+        assert actual.dtypes == [polars.Float32] * expected.shape[1]
+    assert list(actual.columns) == list(preprocessor.get_feature_names_out())
+    np.testing.assert_array_equal(actual.to_numpy(), expected)
+    assert preprocessor.output_format_ == ("dense" if output_format == "dense" else "sparse")
+    assert preprocessor.output_report_["format"] == preprocessor.output_format_
+    assert preprocessor.output_dims_ == expected_preprocessor.output_dims_
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+def test_grouped_sparse_intermediate_is_not_densified(frame, monkeypatch, method):
+    frame = frame.assign(city=[f"city_{index}" for index in range(len(frame))])
+    preprocessor = _grouped_format_processor(method, output_format="sparse").fit(frame)
+    raw = preprocessor.column_transformer_.transform(frame)
+    assert sp.issparse(raw)
+
+    class NoDensifyCSR(sp.csr_matrix):
+        def toarray(self, *args, **kwargs):
+            pytest.fail("Grouped sparse intermediate must not be densified")
+
+    monkeypatch.setattr(preprocessor.column_transformer_, "transform", lambda X: NoDensifyCSR(raw))
+    actual = preprocessor.transform(frame)
+    assert isinstance(actual, sp.csr_matrix)
+    blocks = preprocessor.transform(frame, return_array=False)
+    assert isinstance(blocks, dict)
+    assert all(sp.issparse(block) for block in blocks.values())
+    assert actual.shape == (len(frame), preprocessor.total_output_dim_)
 
 
 def test_default_output_format_is_dense(frame, y):
@@ -219,11 +333,24 @@ def test_set_output_pandas_fit_transform(frame, y):
     assert out.shape[1] == p.total_output_dim_
 
 
-def test_set_output_pandas_preserves_input_index(indexed_frame, y):
+@pytest.mark.parametrize("index_name", [None, "row_id"])
+@pytest.mark.parametrize("duplicate_index", [False, True])
+def test_set_output_pandas_preserves_input_index(indexed_frame, y, index_name, duplicate_index):
     """Regression guard for issue #60: the DataFrame keeps X's index, as sklearn's transformers do."""
-    p = _bspline().set_output(transform="pandas")
-    pd.testing.assert_index_equal(p.fit_transform(indexed_frame, y).index, indexed_frame.index)
-    pd.testing.assert_index_equal(p.transform(indexed_frame).index, indexed_frame.index)
+    labels = indexed_frame.index.to_numpy()
+    if duplicate_index:
+        labels = labels // 2
+    indexed_frame = indexed_frame.set_axis(pd.Index(labels, name=index_name))
+    expected_index = indexed_frame.index.copy(deep=True)
+    expected = np.asarray(_bspline().fit_transform(indexed_frame, y))
+    fitted = _bspline()
+    fitted.set_output(transform="pandas")
+    for output in (fitted.fit_transform(indexed_frame, y), fitted.transform(indexed_frame)):
+        assert isinstance(output, pd.DataFrame)
+        pd.testing.assert_index_equal(output.index, expected_index)
+        assert output.shape == expected.shape
+        assert list(output.columns) == list(fitted.get_feature_names_out())
+        np.testing.assert_array_equal(output.to_numpy(), expected)
 
 
 def test_set_output_pandas_inside_column_transformer(indexed_frame):

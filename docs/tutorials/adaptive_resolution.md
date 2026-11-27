@@ -1,31 +1,21 @@
 # Adaptive resolution
 
-Picking the width of an expansion by hand is guesswork. Adaptive resolution lets the data
-choose it for you, within bounds you set. This tutorial shows how to turn it on and how to read
-the width that was selected.
+Adaptive resolution lets supported representations adjust their width at fit time. This tutorial
+shows how to set a search window and how to read the fitted width.
 
 ## The idea
 
-Every adaptive-capable method accepts three parameters that turn a fixed width into a searched
-one.
+Adaptive-capable methods accept three settings:
 
 `adaptive=True`
-: Enables data-driven width selection.
+: Enables width adaptation on supported placement paths.
 
 `min_output_dim` and `max_output_dim`
-: The lower and upper bounds of the search. The method picks a width in this range.
+: The requested lower and upper bounds. The final width also depends on the method and data.
 
-When adaptive is on and both bounds are set, `output_dim` is ignored completely: the fitted
-width comes only from `[min_output_dim, max_output_dim]` and the data. If you leave one bound
-unset, `output_dim` fills in for it (as the missing lower or upper edge of the search), so it
-still matters in that case. See
-[Resolution and placement](../core_concepts/resolution_and_placement.md) for the mechanics.
-
-```{warning}
-Setting `output_dim` alongside `adaptive=True` with both `min_output_dim` and `max_output_dim`
-is harmless but silently has no effect. It is easy to assume it caps or anchors the search; it
-does not. Drop it, or drop one of the two bounds if you meant `output_dim` to anchor the window.
-```
+When a supervised search runs, two explicit bounds define its search window. If a bound is
+omitted, `output_dim` helps determine the missing edge. The requested `output_dim` must still
+be valid for the method, even when both bounds are set.
 
 ## A worked example
 
@@ -34,8 +24,10 @@ one chose.
 
 ```python
 import warnings
+
 import numpy as np
-import pandas as pd
+
+from pretab.exceptions import LeakageWarning
 from pretab.transformers import BSplineTransformer
 
 rng = np.random.default_rng(0)
@@ -51,7 +43,7 @@ for name, y in [("simple", simple), ("wiggly", wiggly)]:
         target_aware=True, placement_strategy="cart", task="regression",
     )
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")  # one-off fit, not reused to train a model
+        warnings.simplefilter("ignore", LeakageWarning)
         t.fit(x.reshape(-1, 1), y)
     print(f"{name:8s} -> selected width {t.total_output_dim_}")
 ```
@@ -61,12 +53,9 @@ simple   -> selected width 20
 wiggly   -> selected width 20
 ```
 
-Both widths land inside the `[5, 20]` window without you having to guess a number up front.
-Here both reach the upper bound: with 3000 samples the CART selector finds more informative
-splits than the window admits, so it keeps the most informative ones. Its split count is governed
-more by its own tree depth and minimum-samples settings than by how wiggly the signal looks; with
-smaller data or a wider window the two searches can land on different widths. The bound is what
-you control directly, the exact count inside it is data-driven.
+Both fits reach the upper bound in this example. Adaptive width reflects the splits the CART
+selector finds under its tree settings. A more irregular signal does not necessarily get more
+columns.
 
 ```{note}
 Fitting a target-aware transformer directly like this, outside a `Pipeline`, normally emits a
@@ -75,53 +64,59 @@ output is never used to train a downstream model. See
 [Target awareness](../core_concepts/target_awareness.md) for when the warning matters.
 ```
 
-```{note}
-Adaptive resolution only takes effect on the target-aware placement path
-(`target_aware=True`, paired with `placement_strategy="cart"` or `"lightgbm"`). With the
-default `target_aware=False`, `adaptive=True` is a silent no-op and the transformer keeps its
-ordinary fixed `output_dim` width.
-```
+## Adaptation without a target
 
-```{tip}
-Set `min_output_dim` and `max_output_dim` to a range you consider reasonable, then let the data
-place the width inside it. This is more robust than committing to a single `output_dim` across
-features of different complexity.
+B-, M-, and I-splines can also adapt without a target. They start from `output_dim` and adjust
+the unsupervised knots toward the requested bounds. For example, a target-free B-spline with
+bounds `[4, 6]` can keep a requested width of 5 or reduce a requested width of 12 to 6.
+By contrast, natural cubic splines and maps such as RBF and ReLU keep their ordinary fixed
+sizing on the target-free path. PLE always uses the target and does not require a
+`target_aware` flag.
+
+```{note}
+B-, M-, and I-splines cap the number of interior knots by the number of distinct input
+values. A column with few distinct values can produce fewer columns than `min_output_dim`.
+Use the fitted width for any downstream model or size check.
 ```
 
 ## Adaptive across a whole preprocessor
 
-The same switch works at the `Preprocessor` level, so every eligible column adapts
-independently.
+`Preprocessor` passes the global settings to eligible features, which are fitted independently.
+This example applies the target-free B-spline settings to two columns with enough distinct values.
 
 ```python
 import pandas as pd
 from pretab import Preprocessor
 
-df = pd.DataFrame({"simple": simple, "wiggly": wiggly})
+df = pd.DataFrame({"value": x, "squared": x**2})
 
 pre = Preprocessor(
     numerical_method="bspline",
+    output_dim=12,
     adaptive=True,
-    min_output_dim=5,
-    max_output_dim=15,
+    min_output_dim=4,
+    max_output_dim=6,
+    target_aware=False,
+    placement_strategy="quantile",
 )
-pre.fit(df, wiggly)
-pre.get_feature_info()
+pre.fit(df)
+assert pre.output_dims_ == {"value": 6, "squared": 6}
+assert pre.total_output_dim_ == 12
 ```
 
-Each numerical column receives a width suited to its own complexity, visible in the resolved
-feature info.
+`output_dims_` and `total_output_dim_` describe the fitted output, not the requested width
+or bounds. For a per-feature breakdown, call `pre.get_feature_info()` after fitting.
 
 ```{note}
-Adaptive resolution is available for B/M/I splines, the freely-placed cubic and natural cubic
-splines, PLE, and the RBF, ReLU, sigmoid, and tanh feature maps. The penalized P-spline and the
-tensor-product and thin-plate splines have a fixed structure and ignore the adaptive flag. The
-[comparison table](../representations/comparison_table.md) marks which methods adapt.
+The [comparison table](../representations/comparison_table.md) marks which methods support
+adaptive resolution. An unsupported method such as P-spline ignores the global adaptive
+setting. An explicit per-feature `RepresentationConfig("pspline", adaptive=True)` is
+rejected when `Preprocessor` validates its configuration.
 ```
 
 ## Where to go next
 
-- [Resolution and placement](../core_concepts/resolution_and_placement.md) for how width and
-  placement interact.
+- [Placement strategies](../core_concepts/resolution_and_placement.md#placement-where-the-units-go)
+  for how the locations of knots and centers are chosen.
 - [Comparing representations](comparing_representations.md) to measure adaptive against fixed.
 - [Choosing a method](../representations/choosing_a_method.md) for width guidance.

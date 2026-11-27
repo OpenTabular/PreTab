@@ -30,13 +30,16 @@ from ...core.knots import (
 from ...core.parameters import UNSET, validate_placement, validate_task
 from ...core.policy import RepresentationPolicy, resolve_out_of_range
 from ...core.supervised import warn_target_leakage
+from ...core.validation import resolve_input_features
 from ...exceptions import (
     DataWarning,
     InvalidParamError,
     PretabDataError,
+    PretabNotFittedError,
     invalid_param_error,
 )
 from ...placement.adapters import SplinePlacementAdapter
+from .penalty import PenaltySpec
 
 
 class BaseSplineTransformer(BasePreTabTransformer):
@@ -157,6 +160,11 @@ class BaseSplineTransformer(BasePreTabTransformer):
     Missing values are ignored for knot placement; at transform time a missing value
     expands to a row of NaN in its feature's basis block (an optional bias column
     stays 1), as in the other spline families.
+
+    A feature needs at least two distinct observed values: ``fit`` raises a
+    :class:`~pretab.exceptions.PretabDataError` for a constant feature and for a
+    feature with a single observed value (a one-row ``X``, or one non-missing
+    value), since no knot can be placed on a zero-range feature.
 
     Examples
     --------
@@ -361,7 +369,15 @@ class BaseSplineTransformer(BasePreTabTransformer):
             xi_valid = xi[valid_mask]
             if xi_valid.size == 0:
                 raise PretabDataError(f"Feature at index {i} has only NaN values")
-            if xi_valid.size > 1 and np.ptp(xi_valid) == 0:
+            if xi_valid.size == 1:
+                # One observed value has no range either: no interior knot fits
+                # between the coinciding boundary knots, and evaluating the basis
+                # at transform would fail inside SciPy.
+                raise PretabDataError(
+                    f"Feature at index {i} has only 1 sample with an observed (non-missing) value "
+                    f"({float(xi_valid[0])!r}); a spline basis cannot be constructed on a zero-range feature."
+                )
+            if np.ptp(xi_valid) == 0:
                 raise PretabDataError(
                     f"Feature at index {i} is constant (all values equal {float(xi_valid[0])!r}); "
                     "a spline basis cannot be constructed on a zero-range feature."
@@ -444,3 +460,65 @@ class BaseSplineTransformer(BasePreTabTransformer):
             full[1:, 1:] = penalty
             return full
         return penalty
+
+    def get_penalty_spec(self, feature_index: int = 0, *, diff_order: int | None = None) -> PenaltySpec:
+        """Return the base difference penalty in the selected feature's output coordinates.
+
+        ``diff_order=None`` selects the legacy default of two. An explicit order
+        must be positive and smaller than the selected basis width without bias.
+        Output indices refer to this transformer's full output, including any
+        unpenalized bias column. Subclasses with a different matrix convention
+        must provide their own typed accessor.
+
+        Raises
+        ------
+        PretabNotFittedError
+            If the transformer has not been fitted.
+        InvalidParamError
+            If a feature index or difference order is invalid, or the subclass
+            overrides the legacy matrix without a typed convention.
+        """
+        estimator = type(self).__name__
+        if not hasattr(self, "n_basis_"):
+            raise PretabNotFittedError(f"{estimator} must be fitted before calling get_penalty_spec().")
+        legacy_accessor = self.get_penalty_matrix
+        if getattr(legacy_accessor, "__func__", None) is not BaseSplineTransformer.get_penalty_matrix:
+            raise invalid_param_error(
+                estimator,
+                "get_penalty_spec",
+                None,
+                "this penalty convention is not supported; use get_penalty_matrix() for the legacy matrix",
+            )
+        if (
+            isinstance(feature_index, (bool, np.bool_))
+            or not isinstance(feature_index, (int, np.integer))
+            or not 0 <= feature_index < len(self.n_basis_)
+        ):
+            raise invalid_param_error(
+                estimator, "feature_index", feature_index, f"must be in [0, {len(self.n_basis_)})"
+            )
+        index = int(feature_index)
+        order = 2 if diff_order is None else diff_order
+        if (
+            isinstance(order, (bool, np.bool_))
+            or not isinstance(order, (int, np.integer))
+            or order < 1
+            or (diff_order is not None and order >= self.n_basis_[index])
+        ):
+            raise invalid_param_error(
+                estimator, "diff_order", diff_order, f"must be an integer in [1, {self.n_basis_[index]})"
+            )
+        sizes = self._output_sizes()
+        start = sum(sizes[:index])
+        stop = start + sizes[index]
+        axis = str(resolve_input_features(self, None)[index])
+        return PenaltySpec(
+            matrix=legacy_accessor(feature_index=index, diff_order=int(order)),
+            kind="coefficient_difference",
+            order=int(order),
+            axis=(axis,),
+            coordinate_system="output_coefficients",
+            coefficient_names=tuple(self.get_feature_names_out()[start:stop]),
+            coefficient_indices=range(start, stop),
+            provenance={"transformer": estimator, "include_bias": bool(self.include_bias)},
+        )

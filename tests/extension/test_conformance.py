@@ -4,8 +4,10 @@ import numpy as np
 import pytest
 from sklearn.utils.validation import check_is_fitted
 
-from pretab import BaseRepresentation, check_representation
+from pretab import BaseRepresentation, PenaltySpec, check_representation, register_representation
+from pretab.compose.registry import TRANSFORMER_REGISTRY
 from pretab.exceptions import RepresentationConformanceError
+from pretab.transformers import BSplineTransformer
 
 
 class _Good(BaseRepresentation):
@@ -54,6 +56,83 @@ def test_good_representation_passes():
 def test_good_supervised_representation_passes():
     passed = check_representation(_GoodSupervised)
     assert "supervised_requires_y" in passed
+
+
+_TYPED_PENALTY_METHODS = ("bspline", "cubicspline", "ispline", "mspline", "naturalspline", "pspline", "tensorspline")
+
+
+def test_typed_penalty_registry_is_explicit():
+    actual = {name for name, spec in TRANSFORMER_REGISTRY.items() if spec.typed_penalty}
+    assert actual == set(_TYPED_PENALTY_METHODS)
+    assert not TRANSFORMER_REGISTRY["tprs"].typed_penalty
+
+
+@pytest.mark.parametrize("name", _TYPED_PENALTY_METHODS)
+def test_typed_penalty_builtin_conformance(name):
+    spec = TRANSFORMER_REGISTRY[name]
+    assert "typed_penalty_consistent" in check_representation(spec.transformer_cls)
+    if spec.arity == "univariate":
+        source = np.linspace(-1, 1, 40)
+        X = np.column_stack((source, 2 * source + 1))
+        assert "typed_penalty_consistent" in check_representation(spec.transformer_cls, X=X)
+
+
+def test_legacy_matrix_does_not_opt_in_to_typed_penalties():
+    class _LegacyOnly(_Good):
+        def get_penalty_matrix(self, feature_index=0):
+            return np.eye(1)
+
+    record = register_representation("legacy_only", _LegacyOnly)
+    assert not record.typed_penalty
+    assert "typed_penalty_consistent" not in check_representation(_LegacyOnly)
+    register_representation("legacy_only", _LegacyOnly, override=True, typed_penalty=True)
+    with pytest.raises(RepresentationConformanceError, match=r"get_penalty_spec.*required by typed_penalty"):
+        check_representation(_LegacyOnly)
+
+
+def test_multivariate_claim_requires_the_plural_accessor():
+    class _MarginalOnly(_Good):
+        scope = "multivariate"
+
+        def get_penalty_spec(self, feature_index=0):
+            raise AssertionError("must not try to qualify a marginal penalty")
+
+        def get_penalty_matrix(self, feature_index=0):
+            return np.eye(1)
+
+    register_representation("marginal_only", _MarginalOnly, typed_penalty=True)
+    with pytest.raises(RepresentationConformanceError, match=r"get_penalty_specs.*required by typed_penalty"):
+        check_representation(_MarginalOnly)
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [
+        ("unfitted", "before fit must raise PretabNotFittedError"),
+        ("axis", "must identify fitted axis"),
+        ("names", "coefficient names and indices must match fitted output"),
+        ("matrix", "matrix must match get_penalty_matrix"),
+    ],
+)
+def test_typed_penalty_conformance_rejects_mismatched_metadata(fault, message):
+    class _IncorrectPenalty(BSplineTransformer):
+        def get_penalty_spec(self, feature_index=0, *, diff_order=None):
+            if fault == "unfitted" and not hasattr(self, "n_basis_"):
+                raise ValueError("unexpected unfitted error")
+            penalty = super().get_penalty_spec(feature_index, diff_order=diff_order)
+            return PenaltySpec(
+                matrix=2 * penalty.matrix if fault == "matrix" else penalty.matrix,
+                kind=penalty.kind,
+                order=penalty.order,
+                axis=("wrong",) if fault == "axis" else penalty.axis,
+                coordinate_system=penalty.coordinate_system,
+                coefficient_names=penalty.coefficient_names[::-1] if fault == "names" else penalty.coefficient_names,
+                coefficient_indices=penalty.coefficient_indices,
+            )
+
+    register_representation("incorrect_penalty", _IncorrectPenalty, typed_penalty=True)
+    with pytest.raises(RepresentationConformanceError, match=message):
+        check_representation(_IncorrectPenalty)
 
 
 def test_fit_not_returning_self_fails():
