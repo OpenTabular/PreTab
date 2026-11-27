@@ -740,6 +740,7 @@ class Preprocessor(TransformerMixin, BaseEstimator):
             self._log_internal_decisions()
 
         self._fit_config_ = fit_summary
+        self.__dict__.pop("_stale_reason", None)
         return self
 
     def transform(self, X, embeddings=None, return_array=None):
@@ -1741,7 +1742,9 @@ class Preprocessor(TransformerMixin, BaseEstimator):
 
         Records ``reason`` and flips :attr:`lifecycle_state_` to ``STALE`` (unless
         already ``FROZEN``). Purely advisory: it does not alter the fitted state.
-        Returns ``self`` for chaining.
+        A later successful :meth:`fit` of this object replaces that state, so it
+        clears the mark and the state returns to ``FITTED``; a ``fit`` that raises
+        leaves the mark in place. Returns ``self`` for chaining.
         """
         check_is_fitted(self)
         self._stale_reason = reason
