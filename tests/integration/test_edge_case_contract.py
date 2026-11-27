@@ -444,6 +444,10 @@ def test_empty_numerical_column_keeps_its_block(method, target_aware, placement,
     pre = Preprocessor(numerical_method=method, target_aware=target_aware, placement_strategy=placement)
     _fit_empty(pre, X, y)
     _assert_metadata_matches_output(pre, X, _observed(X, "numerical", rng))
+    if method == "minmax":
+        blocks = pre.transform(X, return_array=False)
+        assert isinstance(blocks, dict)
+        np.testing.assert_array_equal(blocks["num_empty"], np.zeros((len(X), 1)))
 
 
 # The methods that cannot be fitted on a constant column (see CONSTANT_RAISES).

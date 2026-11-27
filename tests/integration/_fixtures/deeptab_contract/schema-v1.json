@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PreTab DeepTab compatibility fixture v1",
+  "description": "One reproducible, small synthetic case. The case ID identifies the recipe for fit and probe data; the fixture contains no training rows, estimator state, or checkpoint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "input_schema",
+    "constructor_config",
+    "resolved_config",
+    "output_feature_names",
+    "block_widths",
+    "feature_info_dimensions",
+    "fingerprint",
+    "transformed_rows",
+    "tolerances",
+    "library_versions"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "case_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "input_schema": {
+      "type": "object",
+      "description": "Input container and ordered columns used for fit. Names and dtype strings describe the synthetic input before preprocessing.",
+      "additionalProperties": false,
+      "required": ["container", "columns"],
+      "properties": {
+        "container": { "enum": ["pandas", "polars", "numpy"] },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "dtype"],
+            "properties": {
+              "name": { "type": "string" },
+              "dtype": { "$ref": "#/$defs/nonempty_string" }
+            }
+          }
+        }
+      }
+    },
+    "constructor_config": {
+      "$ref": "#/$defs/config",
+      "description": "Explicit arguments used to construct PreTab, retaining the requested values and omitted defaults. Decode ordered feature overrides before passing the arguments to PreTab."
+    },
+    "resolved_config": {
+      "$ref": "#/$defs/config",
+      "description": "Public get_resolved_config() for the unmodified constructor request, with tuples represented as arrays and ordered feature overrides encoded as entries. This is not fitted state."
+    },
+    "output_feature_names": {
+      "description": "Exact fitted get_feature_names_out() sequence, also the column order for transformed row values.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "block_widths": {
+      "description": "Block keys and realized column counts from transform(..., return_array=False), in returned order, even for a matrix-output case. Keys are block names, not source labels. Their widths sum to the number of output feature names. Cases do not supply external embeddings.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "width"],
+        "properties": {
+          "name": { "type": "string" },
+          "width": { "$ref": "#/$defs/dimension" }
+        }
+      }
+    },
+    "feature_info_dimensions": {
+      "description": "Only the dimension entries of the three get_feature_info(verbose=False) mappings, keyed by public feature or group name. Display text is not a contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["numerical", "categorical", "embedding"],
+      "properties": {
+        "numerical": { "$ref": "#/$defs/dimensions" },
+        "categorical": { "$ref": "#/$defs/dimensions" },
+        "embedding": { "$ref": "#/$defs/dimensions" }
+      }
+    },
+    "fingerprint": {
+      "description": "Fitted fingerprint_. Compare exactly only when reproducing the recorded qualification environment, including the PreTab revision and library versions; do not require equality across environments.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "transformed_rows": {
+      "description": "Samples from transform on synthetic probe inputs. Row indices are zero-based, unique, and ascending. Flatten blocks in output order and materialize only sampled sparse rows. Each values array has one finite number per output feature name in that order.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["row_index", "values"],
+        "properties": {
+          "row_index": { "$ref": "#/$defs/dimension" },
+          "values": { "type": "array", "items": { "type": "number" } }
+        }
+      }
+    },
+    "tolerances": {
+      "description": "Metadata and ordering are exact. Only transformed values use abs(actual - expected) <= atol + rtol * abs(expected), with fixture values as expected and both sides finite.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["atol", "rtol"],
+      "properties": {
+        "atol": { "type": "number", "minimum": 0 },
+        "rtol": { "type": "number", "minimum": 0 }
+      }
+    },
+    "library_versions": {
+      "description": "Exact generating versions, not supported ranges. Record optional packages as null when absent. The qualification record identifies the tested code revisions and platform.",
+      "type": "object",
+      "required": [
+        "python",
+        "pretab",
+        "numpy",
+        "pandas",
+        "scipy",
+        "scikit_learn",
+        "polars",
+        "pyarrow"
+      ],
+      "properties": {
+        "python": { "$ref": "#/$defs/nonempty_string" },
+        "pretab": { "$ref": "#/$defs/nonempty_string" },
+        "numpy": { "$ref": "#/$defs/nonempty_string" },
+        "pandas": { "$ref": "#/$defs/nonempty_string" },
+        "scipy": { "$ref": "#/$defs/nonempty_string" },
+        "scikit_learn": { "$ref": "#/$defs/nonempty_string" },
+        "polars": { "$ref": "#/$defs/optional_version" },
+        "pyarrow": { "$ref": "#/$defs/optional_version" }
+      },
+      "additionalProperties": { "$ref": "#/$defs/optional_version" }
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "description": "JSON-native settings only. Object member order is not significant. Feature group and source arrays retain their declared order.",
+      "properties": {
+        "feature_preprocessing": {
+          "description": "Encode a non-null label-to-override mapping as ordered entries so JSON member order cannot change reconstruction or the fingerprint.",
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["feature", "settings"],
+            "properties": {
+              "feature": { "type": "string" },
+              "settings": { "type": ["string", "object"] }
+            }
+          }
+        },
+        "feature_groups": {
+          "type": ["array", "null"],
+          "items": { "type": "object" }
+        }
+      }
+    },
+    "dimension": { "type": "integer", "minimum": 0 },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/dimension" }
+    },
+    "nonempty_string": { "type": "string", "minLength": 1 },
+    "optional_version": { "type": ["string", "null"], "minLength": 1 }
+  }
+}

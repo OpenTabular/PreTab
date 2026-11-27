@@ -8,19 +8,18 @@ collects per-feature preprocessing / dimension / category metadata, and
 """
 
 import copy
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any, cast
+from urllib.parse import quote
 
 import numpy as np
-import pandas as pd
 from sklearn.base import clone
 from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..core._typing import TransformerLike
-from ..core.logging import get_logger
 from ..core.representation import FeatureLineage
 from .registry import TRANSFORMER_REGISTRY
-
-logger = get_logger(__name__)
 
 __all__ = [
     "block_name",
@@ -58,6 +57,34 @@ def block_name(step_name, columns):
     return step_name if block is None else f"{block[0]}_{block[1]}"
 
 
+@dataclass(frozen=True)
+class _FittedBlock:
+    """Read-only block metadata retaining the fitted transformer and selector references."""
+
+    step_name: str
+    transformer: Any
+    columns: Any
+    _column_transformer: Any
+
+    @property
+    def public_name(self) -> str:
+        return block_name(self.step_name, self.columns)
+
+    @property
+    def group_id(self) -> str | None:
+        return self.step_name if self.step_name.startswith("group_") else None
+
+    @property
+    def span(self) -> slice:
+        return self._column_transformer.output_indices_[self.step_name]
+
+
+def _iter_fitted_blocks(column_transformer) -> Iterator[_FittedBlock]:
+    """Yield every fitted block in order, leaving filtering and span access to callers."""
+    for name, transformer, columns in column_transformer.transformers_:
+        yield _FittedBlock(name, transformer, columns, column_transformer)
+
+
 def get_output_slices(column_transformer):
     """Return ordered ``(name, start, width)`` spans for each output block.
 
@@ -67,16 +94,16 @@ def get_output_slices(column_transformer):
     """
     indices = column_transformer.output_indices_
     slices = []
-    for name, transformer, columns in column_transformer.transformers_:
-        if transformer == "drop":
+    for block in _iter_fitted_blocks(column_transformer):
+        if block.transformer == "drop" or block.step_name not in indices:
             continue
-        span = indices.get(name)
+        span = block.span
         if span is None:
             continue
         width = span.stop - span.start
         if width == 0:
             continue
-        slices.append((block_name(name, columns), span.start, width))
+        slices.append((block.public_name, span.start, width))
     return slices
 
 
@@ -97,7 +124,8 @@ def feature_names_out(column_transformer, input_features=None):
 
     rename = {str(label): str(name) for label, name in zip(fitted_labels, input_features, strict=True)}
     raw_names = []
-    for name, transformer, columns in column_transformer.transformers_:
+    for block in _iter_fitted_blocks(column_transformer):
+        name, transformer, columns = block.step_name, block.transformer, block.columns
         if transformer == "drop" or len(columns) == 0:
             continue
         labels = [rename[str(column)] for column in columns]
@@ -145,13 +173,20 @@ def clean_feature_names(column_transformer, names, *, rename=None):
     column labels to the input feature names ``names`` were built from (see
     :func:`feature_names_out`); a step of a renamed column is then reported under
     the new name, e.g. ``num_feature_0`` as ``num_age``.
+    Group names retain their public block key and prepend percent-escaped source
+    labels in declared order to the leaf output name.
     """
     rename = rename or {}
-    step_to_columns = {
-        name: [rename.get(str(column), column) for column in columns]
-        for name, _transformer, columns in column_transformer.transformers_
-        if name != "remainder" and len(columns) == 1
-    }
+    step_to_columns = {}
+    group_ids = set()
+    for block in _iter_fitted_blocks(column_transformer):
+        if block.step_name == "remainder":
+            continue
+        if block.group_id is not None:
+            group_ids.add(block.group_id)
+        elif len(block.columns) != 1:
+            continue
+        step_to_columns[block.step_name] = [rename.get(str(column), column) for column in block.columns]
     cleaned = []
     for raw in names:
         raw = str(raw)
@@ -159,6 +194,10 @@ def clean_feature_names(column_transformer, names, *, rename=None):
         columns = step_to_columns.get(step_name)
         if not sep or columns is None:
             cleaned.append(raw)
+            continue
+        if step_name in group_ids:
+            sources = "+".join(quote(str(column), safe="") for column in columns)
+            cleaned.append(f"{step_name}__{sources}__{inner_name}")
             continue
         block = _block(step_name, columns)
         if block is not None:
@@ -185,19 +224,6 @@ def _separate_state_branches(transformer):
     return branches["representation"], branches["missing"]
 
 
-def _probe_input(step, value):
-    """Return a one-row probe input for measuring a fitted step's output width.
-
-    A step fitted directly on the ColumnTransformer's DataFrame column records
-    ``feature_names_in_`` and, like scikit-learn, warns on input without feature
-    names, so its probe is a DataFrame carrying the fitted names.
-    """
-    names = getattr(step, "feature_names_in_", None)
-    if names is None:
-        return np.full((1, 1), value)
-    return pd.DataFrame(np.full((1, len(names)), value), columns=names)
-
-
 def representation_leaf(transformer):
     """Return the last step of a fitted per-column block's representation.
 
@@ -214,6 +240,8 @@ def representation_leaf(transformer):
 def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
     """Collect per-feature metadata (preprocessing, dimension, categories).
 
+    Dimensions come from the fitted output spans without evaluating transformers.
+    Category counts describe fitted vocabularies, not emitted widths.
     Returns a ``(numerical_info, categorical_info, embedding_info)`` tuple of
     dicts keyed by feature name.
     """
@@ -229,114 +257,58 @@ def build_feature_info(column_transformer, *, embeddings, embedding_dimensions):
         else {}
     )
 
-    for (
-        name,
-        transformer_pipeline,
-        columns,
-    ) in column_transformer.transformers_:
+    for block in _iter_fitted_blocks(column_transformer):
+        name, transformer_pipeline, columns = block.step_name, block.transformer, block.columns
+        if transformer_pipeline == "drop" or len(columns) == 0:
+            continue
+        span = block.span
+        dimension = span.stop - span.start
         separate_state = _separate_state_branches(transformer_pipeline)
         if separate_state is not None:
             representation_pipeline, _missing_indicator = separate_state
             steps = [step[0] for step in representation_pipeline.steps]
             preprocessing_type = f"representation({' -> '.join(steps)}) + missing"
-            span = column_transformer.output_indices_.get(name)
-            separate_state_dimension = None if span is None else span.stop - span.start
         else:
             representation_pipeline = transformer_pipeline
-            steps = [step[0] for step in representation_pipeline.steps]
+            steps = (
+                [step[0] for step in representation_pipeline.steps]
+                if isinstance(representation_pipeline, Pipeline)
+                else [type(representation_pipeline).__name__]
+            )
             preprocessing_type = " -> ".join(steps)
-            separate_state_dimension = None
 
+        group_id = block.group_id
+        if group_id is not None:
+            numerical_feature_info[group_id] = {
+                "preprocessing": preprocessing_type,
+                "dimension": dimension,
+                "categories": None,
+                "group": group_id.removeprefix("group_"),
+                "source_features": tuple(columns),
+            }
+            continue
         for feature_name in columns:
-            dimension = None
             categories = None
-
-            if "discretizer" in steps or any(
-                step in steps
-                for step in [
-                    "standardization",
-                    "minmax",
-                    "quantile",
-                    "polynomial",
-                    "splines",
-                    "box-cox",
-                ]
-            ):
-                last_step = representation_pipeline.steps[-1][1]
-                if hasattr(last_step, "transform"):
-                    dummy_input = _probe_input(last_step, 1e-05)
-                    try:
-                        transformed_feature = last_step.transform(dummy_input)
-                        dimension = transformed_feature.shape[1]
-                    except (ValueError, TypeError, AttributeError, IndexError) as exc:
-                        logger.debug(
-                            "Could not introspect output width of %r: %s",
-                            feature_name,
-                            exc,
-                        )
-                        dimension = None
-                if separate_state_dimension is not None:
-                    dimension = separate_state_dimension
-                numerical_feature_info[feature_name] = {
-                    "preprocessing": preprocessing_type,
-                    "dimension": dimension,
-                    "categories": None,
-                }
-
-            elif "continuous_ordinal" in steps:
+            if "continuous_ordinal" in steps:
                 step = representation_pipeline.named_steps["continuous_ordinal"]
                 position = columns.index(feature_name)
                 # An encoder that received no column (a 0-width block) has no mapping.
                 has_mapping = position < len(step.mapping_)
                 categories = len(step.mapping_[position]) if has_mapping else None
-                dimension = separate_state_dimension if separate_state_dimension is not None else int(has_mapping)
-                categorical_feature_info[feature_name] = {
-                    "preprocessing": preprocessing_type,
-                    "dimension": dimension,
-                    "categories": categories,
-                }
-
             elif "onehot" in steps:
                 step = representation_pipeline.named_steps["onehot"]
                 if hasattr(step, "categories_"):
                     categories = sum(len(cat) for cat in step.categories_)
-                    dimension = categories
-                if separate_state_dimension is not None:
-                    dimension = separate_state_dimension
-                categorical_feature_info[feature_name] = {
-                    "preprocessing": preprocessing_type,
-                    "dimension": dimension,
-                    "categories": categories,
-                }
-
-            else:
-                last_step = representation_pipeline.steps[-1][1]
-                if hasattr(last_step, "transform"):
-                    dummy_input = _probe_input(last_step, 0.0)
-                    try:
-                        transformed_feature = last_step.transform(dummy_input)
-                        dimension = transformed_feature.shape[1]
-                    except (ValueError, TypeError, AttributeError, IndexError) as exc:
-                        logger.debug(
-                            "Could not introspect output width of %r: %s",
-                            feature_name,
-                            exc,
-                        )
-                        dimension = None
-                if separate_state_dimension is not None:
-                    dimension = separate_state_dimension
-                if name.startswith("cat_"):
-                    categorical_feature_info[feature_name] = {
-                        "preprocessing": preprocessing_type,
-                        "dimension": dimension,
-                        "categories": None,
-                    }
-                else:
-                    numerical_feature_info[feature_name] = {
-                        "preprocessing": preprocessing_type,
-                        "dimension": dimension,
-                        "categories": None,
-                    }
+            feature_info = (
+                categorical_feature_info
+                if name.startswith("cat_") or "continuous_ordinal" in steps or "onehot" in steps
+                else numerical_feature_info
+            )
+            feature_info[feature_name] = {
+                "preprocessing": preprocessing_type,
+                "dimension": dimension,
+                "categories": categories,
+            }
 
     return numerical_feature_info, categorical_feature_info, embedding_feature_info
 
@@ -363,6 +335,33 @@ def build_transformer_summary(numerical_info, categorical_info, embedding_info):
         cats_s = "-" if cats is None else str(cats)
         lines.append(f"{feat:<{feat_w}}  {kind:<{kind_w}}  {pipe:<{pipe_w}}  {dim_s:>4}  {cats_s:>5}")
     return lines
+
+
+def _build_effective_settings_summary(fit_config: dict | None) -> list[str]:
+    """Render settings recorded for declared overrides and groups at fit time."""
+    if fit_config is None:
+        return ["Fit-time effective settings unavailable (not recorded)."]
+
+    def format_settings(settings):
+        fields = [
+            f"{key}={value!r}"
+            for key, value in settings.items()
+            if key != "params" and not (key == "name" and value is None)
+        ]
+        fields.extend(f"{key}={value!r}" for key, value in settings.get("params", {}).items())
+        return ", ".join(fields)
+
+    rows = [
+        f"feature {feature!r}: {format_settings(settings)}"
+        for feature, settings in (fit_config["feature_preprocessing"] or {}).items()
+    ]
+    rows.extend(
+        f"group_{group['name']} (sources={group['columns']!r}): {format_settings(group['representation'])}"
+        for group in fit_config["feature_groups"] or []
+    )
+    if not rows:
+        return ["Fit-time effective settings: no per-feature overrides or groups recorded."]
+    return ["Fit-time effective settings (declared overrides and groups; fitted dimensions are shown above):", *rows]
 
 
 # Mapping from pipeline step name to (family, component) for representation-bearing
@@ -429,8 +428,23 @@ def _resolve_block_representation(pipeline, columns):
     return _locate_block_representation(pipeline, columns)[1]
 
 
+def _block_uses_task(transformer) -> bool:
+    """Check a constructed block for a target consumer configured with a task."""
+    separate_state = _separate_state_branches(transformer)
+    representation = separate_state[0] if separate_state is not None else transformer
+    for name, step in representation.steps:
+        spec = TRANSFORMER_REGISTRY.get(name)
+        if spec is None or not isinstance(step, spec.transformer_cls) or getattr(step, "task", None) is None:
+            continue
+        if spec.target_usage == "required" or (
+            spec.target_usage == "optional" and getattr(step, "target_aware", False)
+        ):
+            return True
+    return False
+
+
 def block_uses_target(transformer) -> bool:
-    """Whether a fitted per-column block's representation consumed the target ``y``.
+    """Whether a fitted single-feature or joint block's representation consumed ``y``.
 
     For a separate-state / missing-indicator union the representation branch decides; helper steps
     such as imputers and scalers never use the target. The spec is read without
@@ -442,7 +456,7 @@ def block_uses_target(transformer) -> bool:
 
 
 def refit_block_representation(transformer, X, y) -> TransformerLike:
-    """Return a copy of a fitted per-column block whose representation is refit on ``(X, y)``.
+    """Copy a fitted block and refit its representation on its ordered inputs and ``y``.
 
     Only the representation step and the steps after it are refit. The steps
     before it (the imputer with its missing indicator, scalers) never use the
@@ -494,13 +508,17 @@ def build_feature_lineage(column_transformer):
     output_indices = column_transformer.output_indices_
     feature_names_in = getattr(column_transformer, "feature_names_in_", None)
     records = []
-    for name, transformer, columns in column_transformer.transformers_:
-        span = output_indices.get(name)
+    for block in _iter_fitted_blocks(column_transformer):
+        name, transformer, columns = block.step_name, block.transformer, block.columns
+        if name not in output_indices:
+            continue
+        span = block.span
         if span is None:
             continue
         width = span.stop - span.start
         if width == 0:
             continue
+        group_id = block.group_id
         if transformer == "passthrough" or name == "remainder":
             for offset in range(width):
                 index = span.start + offset
@@ -543,20 +561,26 @@ def build_feature_lineage(column_transformer):
                         component_index=offset,
                         uses_target=uses_target,
                         is_interaction=is_interaction,
+                        group_id=group_id,
                     )
                 )
+            indicator = missing_indicator.steps[-1][1] if isinstance(missing_indicator, Pipeline) else missing_indicator
+            missing_sources = getattr(indicator, "features_", range(len(columns)))
             for offset in range(missing_width):
                 index = span.start + representation_width + offset
                 records.append(
                     FeatureLineage(
                         output_feature=output_names[index],
                         output_index=index,
-                        source_features=source_features,
+                        source_features=(str(columns[missing_sources[offset]]),)
+                        if group_id is not None
+                        else source_features,
                         family="missing_state",
                         component="indicator",
                         component_index=offset,
                         uses_target=False,
                         is_interaction=False,
+                        group_id=group_id,
                     )
                 )
             continue
@@ -574,6 +598,7 @@ def build_feature_lineage(column_transformer):
                     component_index=offset,
                     uses_target=uses_target,
                     is_interaction=is_interaction,
+                    group_id=group_id,
                 )
             )
     records.sort(key=lambda record: record.output_index)

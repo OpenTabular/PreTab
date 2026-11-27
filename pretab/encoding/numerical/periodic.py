@@ -1,3 +1,5 @@
+from numbers import Real
+
 import numpy as np
 from sklearn.utils.validation import check_is_fitted
 
@@ -15,8 +17,9 @@ class PeriodicEncodingTransformer(BasePreTabTransformer):
 
     Parameters
     ----------
-    period : int
-        The full cycle length (e.g., 24 for hours, 7 for weekdays).
+    period : int or float, > 0
+        The finite, positive full cycle length (e.g., 24 for hours, 7 for
+        weekdays). Boolean values are not accepted.
     harmonics : int, default=1
         The number of sine/cosine harmonic pairs to emit. Harmonic ``h`` uses the
         angle :math:`2\pi h x / p`, so ``harmonics`` pairs contribute
@@ -69,7 +72,7 @@ class PeriodicEncodingTransformer(BasePreTabTransformer):
     _representation_family = "periodic"
     _representation_component_kind = "frequency"
 
-    def __init__(self, period: int, harmonics: int = 1, include_original: bool = False):
+    def __init__(self, period: int | float, harmonics: int = 1, include_original: bool = False):
         self.period = period
         self.harmonics = harmonics
         self.include_original = include_original
@@ -79,6 +82,13 @@ class PeriodicEncodingTransformer(BasePreTabTransformer):
         return True, float(self.period)
 
     def fit(self, X, y=None):
+        if (
+            isinstance(self.period, (bool, np.bool_))
+            or not isinstance(self.period, Real)
+            or not np.isfinite(self.period)
+            or self.period <= 0
+        ):
+            raise InvalidParamError(f"period must be a finite, positive real number; got {self.period!r}.")
         X = self._validate(X, reset=True)
         if not isinstance(self.harmonics, (int, np.integer)) or self.harmonics < 1:
             raise InvalidParamError(f"harmonics must be a positive integer; got {self.harmonics!r}.")

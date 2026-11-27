@@ -8,6 +8,29 @@ from pretab import Preprocessor
 from pretab.core.representation import FeatureLineage
 
 
+def test_legacy_positional_lineage_keeps_default_group_and_dict_shape():
+    record = FeatureLineage("num_age", 0, ("age",), "passthrough", "raw", 0, False, False)
+    assert record.group_id is None
+    assert record.to_dict() == {
+        "output_feature": "num_age",
+        "output_index": 0,
+        "source_features": ["age"],
+        "family": "passthrough",
+        "component": "raw",
+        "component_index": 0,
+        "uses_target": False,
+        "is_interaction": False,
+    }
+
+
+def test_group_lineage_round_trips_through_dict():
+    record = FeatureLineage("joint", 2, ("east", "west"), "tensor_product", "basis", 0, False, True, "group_location")
+    data = record.to_dict()
+    assert data["group_id"] == "group_location"
+    data["source_features"] = tuple(data["source_features"])
+    assert FeatureLineage(**data) == record
+
+
 @pytest.fixture
 def mixed_frame():
     rng = np.random.default_rng(0)

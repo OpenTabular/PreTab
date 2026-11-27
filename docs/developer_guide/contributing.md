@@ -3,6 +3,9 @@
 Thanks for contributing to pretab. This page covers environment setup, the local
 workflow, and what a pull request needs to pass review.
 
+Read the [architecture contract](architecture.md) before changing how methods are
+registered, how fitted state is interpreted, or how modules depend on one another.
+
 ## Code of Conduct
 
 All contributors are expected to follow the project
@@ -22,8 +25,8 @@ git clone https://github.com/OpenTabular/PreTab
 cd PreTab
 ```
 
-2. Install the prerequisites: `pip install poetry` and `just` (see the
-   [just install guide](https://just.systems/man/en/packages.html), e.g. `brew install just`).
+2. Use Python 3.11, 3.12, or 3.13. Install Poetry (`pip install poetry`) and `just`
+   (see the [just install guide](https://just.systems/man/en/packages.html), e.g. `brew install just`).
 
 3. Install dependencies and register the pre-commit hooks:
 
@@ -63,29 +66,28 @@ This project uses [pre-commit](https://pre-commit.com/) to enforce code quality
 automatically. `just install` registers all three hook types so each fires at the right
 time:
 
-| Stage        | Hook                                                                    |
-| ------------ | ----------------------------------------------------------------------- |
-| `commit-msg` | Validates the message against Conventional Commits.                     |
-| `pre-commit` | `ruff` format and lint, plus file hygiene (whitespace, EOF, conflicts). |
-| `pre-push`   | `pyright` type checking (slower, so deferred to push). Also runs in CI. |
+| Stage        | Hook                                                                            |
+| ------------ | ------------------------------------------------------------------------------- |
+| `commit-msg` | Validates the message against Conventional Commits.                             |
+| `pre-commit` | Ruff format and lint, Prettier for Markdown, YAML, and JSON, plus file hygiene. |
+| `pre-push`   | The same checks, plus Pyright type checking. Pyright also runs in CI.           |
 
 ```{important}
-Run `just check` before opening a PR. It runs every `pre-commit`- and `pre-push`-stage hook
-(ruff format, ruff lint, pyright, and file hygiene checks) against every file. It does not
-validate the commit message itself, that is the `commit-msg` hook, checked when you actually
-run `git commit` or `just commit`.
+Run `just check` before opening a PR. It runs the `pre-push` stage against all tracked files,
+including the checks shared with `pre-commit`. The `commit-msg` hook checks the message
+separately when you run `git commit` or `just commit`.
 ```
 
 Individual recipes are available when you want to run one step:
 
-| Command       | Action                                          |
-| ------------- | ----------------------------------------------- |
-| `just lint`   | Lint and auto-fix with ruff.                    |
-| `just format` | Run the ruff formatter.                         |
-| `just types`  | Run the pyright type checker.                   |
-| `just test`   | Run the test suite with coverage.               |
-| `just docs`   | Build the HTML documentation.                   |
-| `just check`  | Run all hooks across all files (commit + push). |
+| Command       | Action                                           |
+| ------------- | ------------------------------------------------ |
+| `just lint`   | Lint and auto-fix with ruff.                     |
+| `just format` | Run the ruff formatter.                          |
+| `just types`  | Run the pyright type checker.                    |
+| `just test`   | Run the test suite with coverage.                |
+| `just docs`   | Build the HTML documentation.                    |
+| `just check`  | Run the pre-push hooks across all tracked files. |
 
 ## Testing
 
@@ -122,7 +124,7 @@ directory.
 | `tests/extension/`                                                                       | The public extensibility surface and conformance.                                                                                                           |
 | `tests/integration/`                                                                     | End-to-end `Preprocessor` and pipeline behaviour.                                                                                                           |
 | `tests/regression/`                                                                      | Pinned outputs that guard against silent numerical drift.                                                                                                   |
-| `tests/doc_snippets/`                                                                    | Executes the `docs/tutorials/*.md` code fences, so the tutorials cannot silently rot.                                                                       |
+| `tests/doc_snippets/`                                                                    | Runs Python examples in the tutorials, core concepts pages, and selected other guides.                                                                      |
 
 ```{note}
 Regression tests pin known-good output. If one fails after a deliberate change to a
@@ -187,6 +189,9 @@ poetry run pytest --cov=pretab --cov-report=term-missing tests/
 If you extend PreTab, run the conformance suite in your own tests. It verifies your class obeys
 the representation contract, the same one the built-ins satisfy.
 
+Adapt this template to import your own class. For an example you can run as written, see the
+[custom representation tutorial](../tutorials/custom_representation.md).
+
 ```python
 from pretab import check_representation
 from my_package import MyRepresentation
@@ -203,7 +208,7 @@ your test suite keeps a future refactor from silently breaking compatibility wit
 ### Before you push
 
 Run `just check` and `just test` locally; together they cover most of what CI checks, though
-CI additionally runs across the full Python 3.10-3.13 matrix, builds the package, and
+CI additionally runs across the full Python 3.11-3.13 matrix, builds the package, and
 enforces a branch-coverage threshold.
 
 ```bash
@@ -389,7 +394,7 @@ commits format and rejects non-conforming messages.
 
 Version bumps are driven by commitizen, wrapped in `just` recipes. Preview first with the
 `-preview` (dry-run) variant, then apply. Each apply recipe updates `version` in
-`pyproject.toml`, appends to `CHANGELOG.md`, and creates the bump commit and tag.
+`pyproject.toml` and updates `CHANGELOG.md` before creating the bump commit and tag.
 
 | Goal              | Preview                | Apply          |
 | ----------------- | ---------------------- | -------------- |

@@ -8,6 +8,7 @@ import pytest
 from sklearn.base import clone
 
 from pretab import Preprocessor
+from pretab.compose.inspection import get_output_slices
 from pretab.exceptions import InvalidParamError, PretabDataError
 
 
@@ -312,14 +313,37 @@ def test_imputer_indicator_adds_exactly_one_column_per_feature_with_missing(fram
 
 
 @pytest.mark.parametrize("method", ["bspline", "rbf", "pspline", "fourier", "cubicspline"])
-def test_imputer_indicator_lineage_and_feature_info(frame_with_nan, y, method):
-    pre = Preprocessor(numerical_method=method, output_dim=5, add_missing_indicator=True).fit(frame_with_nan, y)
+@pytest.mark.parametrize("output_dim", [5, 7])
+def test_imputer_indicator_lineage_and_feature_info(frame_with_nan, y, method, output_dim):
+    pre = Preprocessor(numerical_method=method, output_dim=output_dim, add_missing_indicator=True).fit(
+        frame_with_nan, y
+    )
+    output = np.asarray(pre.transform(frame_with_nan, return_array=True))
+    blocks = pre.transform(frame_with_nan, return_array=False)
+    assert isinstance(blocks, dict)
+    names = list(pre.get_feature_names_out())
     lineage = pre.get_feature_lineage()
-    assert [record.output_feature for record in lineage] == list(pre.get_feature_names_out())
+    assert [record.output_feature for record in lineage] == names
     missing = [record for record in lineage if record.family == "missing_state"]
     assert [record.output_feature for record in missing] == ["num_a__missingindicator_a", "num_b__missingindicator_b"]
-    numerical, _, _ = pre.get_feature_info(verbose=False)
+    numerical, categorical, embeddings = pre.get_feature_info(verbose=False)
+    assert categorical == embeddings == {}
     assert {feature: info["dimension"] for feature, info in numerical.items()} == pre.output_dims_
+    slices = get_output_slices(pre.column_transformer_)
+    assert output.shape[1] == len(names) == len(lineage) == pre.total_output_dim_
+    assert sum(width for _, _, width in slices) == output.shape[1]
+    for block, start, width in slices:
+        feature = block.removeprefix("num_")
+        records = [record for record in lineage if record.source_features == (feature,)]
+        assert width == len(records) == pre.output_dims_[feature] == numerical[feature]["dimension"]
+        assert [record.output_index for record in records] == list(range(start, start + width))
+        assert [record.output_feature for record in records] == names[start : start + width]
+        np.testing.assert_array_equal(output[:, start : start + width], blocks[block])
+        indicator = next(record for record in records if record.family == "missing_state")
+        np.testing.assert_array_equal(output[:, indicator.output_index], frame_with_nan[feature].isna().astype(float))
+        if method == "bspline" and output_dim == 7:
+            assert width == 8
+            assert sum(record.family != "missing_state" for record in records) == 7
 
 
 def test_imputer_indicator_on_categorical_integer_codes(y):

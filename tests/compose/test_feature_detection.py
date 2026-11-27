@@ -10,7 +10,7 @@ from pretab.compose.feature_detection import (
     to_dataframe,
     with_string_labels,
 )
-from pretab.exceptions import InvalidParamError, PretabDataError
+from pretab.exceptions import EmptyDataError, InvalidParamError, PretabDataError
 
 
 def test_to_dataframe_wraps_ndarray_with_feature_names():
@@ -193,6 +193,21 @@ def test_invalid_cat_cutoff_type_raises():
     df = pd.DataFrame({"x": [1, 2, 3]})
     with pytest.raises(InvalidParamError):
         detect_column_types(df, cat_cutoff="bad", treat_all_integers_as_numerical=False)
+
+
+@pytest.mark.parametrize("cat_cutoff", [0.03, 5])
+def test_detect_column_types_rejects_input_without_rows(cat_cutoff):
+    """The unique-ratio cutoff divides by the row count; 0 rows raised ZeroDivisionError."""
+    df = pd.DataFrame({"x": pd.Series([], dtype=float), "c": pd.Series([], dtype=object)})
+    with pytest.raises(EmptyDataError, match=r"MyEstimator needs at least one sample.*0 rows \(shape \(0, 2\)\)"):
+        detect_column_types(
+            df, cat_cutoff=cat_cutoff, treat_all_integers_as_numerical=False, estimator_name="MyEstimator"
+        )
+
+
+def test_detect_column_types_keeps_accepting_input_without_columns():
+    df = pd.DataFrame(index=range(3))
+    assert detect_column_types(df, cat_cutoff=0.03, treat_all_integers_as_numerical=False) == ([], [])
 
 
 def test_with_string_labels_relabels_without_touching_the_input():

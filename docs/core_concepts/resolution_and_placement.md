@@ -7,19 +7,19 @@ they combine.
 
 ## Resolution: the `output_dim` width
 
-`output_dim` is the main capacity control. It sets the number of non-bias output columns per
-input feature: basis functions for the splines, centers for the feature maps, and bins for
-PLE. A larger value captures finer structure at the cost of more columns and a higher chance
-of overfitting. A smaller value is more compact and regularizes the representation.
+`output_dim` controls capacity for methods that support it. With fixed sizing it requests
+the number of basis functions or centers per input feature, excluding any optional bias
+column. For PLE it sets a maximum number of bins; the fitted width can be smaller. A wider
+representation can capture finer structure but uses more columns and can increase overfitting.
 
 ```{note}
-When you configure through the `Preprocessor`, its single `output_dim` (default `7`) is
-forwarded to **every** numerical method. Per-transformer defaults only apply when you build a
-transformer directly, for example `RBFExpansionTransformer()`.
+`Preprocessor` inherits its global `output_dim` (default `7`) for methods that accept it,
+unless a per-feature request supplies a width. Methods without a width parameter, such as
+`minmax`, ignore it. A standalone transformer uses its own default when no width is supplied.
 ```
 
 ```{warning}
-Numeric binning (`custombin`) is the one exception: `output_dim` sets the number of *bins*,
+For numeric binning (`custombin`), `output_dim` sets the number of *bins*,
 but with the default `encode="ordinal"` each input feature still emits a single output
 column holding the bin index. Pass `encode="onehot"` or `encode="soft"` if you want
 `output_dim` to also control the output width.
@@ -46,23 +46,22 @@ steps and watch the total column count.
 
 ## Adaptive sizing
 
-Some features are simple and some are complex, and one fixed width rarely suits all of them.
-PLE, the feature maps, and the freely-placed knot splines can size each feature from the data
-instead.
+For supported methods, `adaptive=True` lets fitting adjust the per-feature width. The
+`min_output_dim` and `max_output_dim` settings specify the requested bounds. How they are used
+depends on the method and placement path:
 
-`adaptive`
-: When `True`, the width for each feature is chosen from the data and kept inside
-`[min_output_dim, max_output_dim]`. Fixed-width methods such as the plain scalers ignore
-this flag.
-
-`min_output_dim`, `max_output_dim`
-: The lower and upper bounds that apply only when `adaptive=True` (defaults `5` and `10`).
-They are ignored otherwise.
+- **Supervised search.** Two explicit bounds define the search window. An unset bound can
+  fall back to `output_dim`, which must still be valid for the method even when both bounds
+  are set. PLE always uses the target and does not take a `target_aware` flag.
+- **Target-free placement.** B-, M-, and I-splines start from `output_dim` and adjust the
+  unsupervised knots toward the bounds. With bounds `[4, 6]`, a target-free B-spline can
+  keep a requested width of 5 or reduce a requested width of 12 to 6. Other methods, such
+  as RBF and natural cubic splines, keep their ordinary sizing on the target-free path.
 
 ```{note}
-When `adaptive=True` and both `min_output_dim` and `max_output_dim` are set, `output_dim` has
-no effect at all: the window comes entirely from the two bounds. `output_dim` only matters in
-adaptive mode when one of the bounds is left unset, where it fills in for the missing one.
+B-, M-, and I-splines can fit fewer columns than `min_output_dim` when there are too few
+distinct input values for the requested knots. Use `output_dims_` or `total_output_dim_`
+after fitting a `Preprocessor` to size a downstream model.
 ```
 
 ```python
@@ -70,6 +69,8 @@ from pretab import Preprocessor
 
 pre = Preprocessor(
     numerical_method="rbf",
+  target_aware=True,
+  placement_strategy="cart",
     adaptive=True,
     min_output_dim=4,
     max_output_dim=12,
@@ -115,6 +116,84 @@ switching to `target_aware=False` also means passing `placement_strategy="unifor
 
 Target-aware placement is a supervised decision and carries leakage considerations. See
 [Target awareness](target_awareness.md).
+
+## Choose a task and validate the target
+
+Set `task="classification"` when `y` contains class labels, such as whether a home sold.
+Use `task="regression"` for numeric outcomes such as sale prices. `Preprocessor` defaults
+to regression and never infers the task from `y`.
+
+Use `task_validation` to catch a clear mismatch before fitting the target-aware representation:
+
+- `"off"` (default) skips the consistency check. Use it to preserve existing behavior or
+  silence this diagnostic for an intentional configuration.
+- `"warn"` emits a `ConfigWarning` and lets fitting proceed. The estimator may still reject
+  the target, and a Python warnings-as-errors filter can stop the fit at the warning.
+- `"raise"` stops the fit with `InvalidParamError`. Use it when a clear mismatch should
+  fail the pipeline.
+
+For example, a classifier for sale status should receive class labels, not sale prices:
+
+```python
+import numpy as np
+import pandas as pd
+
+from pretab import Preprocessor
+from pretab.exceptions import InvalidParamError
+
+homes = pd.DataFrame({"listing_views": np.arange(32)})
+sale_status = np.where(homes["listing_views"] >= 16, "sold", "not sold")
+sale_price = np.linspace(120_000.25, 450_000.75, len(homes))
+
+pre = Preprocessor(
+    numerical_method="rbf", output_dim=3, task="classification", task_validation="raise"
+)
+try:
+    pre.fit(homes, sale_price)
+except InvalidParamError as error:
+    assert "target type 'continuous'" in str(error)
+else:
+    raise AssertionError("Expected the classifier's continuous target to be rejected")
+
+pre.fit(homes, sale_status)
+```
+
+The check also catches nonnumeric class labels used for target-aware regression. It does not
+apply to representations that ignore `y`. Missing, multilabel, and other multi-output targets
+are left to the usual input checks. Silence does not mean a target shape is supported.
+
+```{note}
+Few distinct integer values do not tell you which task to use. Daily order counts of `0`,
+`1`, and `2` can be regression outcomes, while the same values can label three classes.
+The diagnostic leaves both interpretations open. Numeric-looking strings can also be
+ambiguous. It does not rewrite `y` or the configured task.
+```
+
+`RepresentationSearchCV` defaults its preprocessing task to classification when the
+downstream estimator is a classifier and no `task` was passed in `preprocessor_params`.
+An explicitly supplied preprocessing task takes precedence. Set `task_validation` on
+the search and in `preprocessor_params` independently:
+
+```python
+from sklearn.linear_model import LogisticRegression
+
+from pretab import RepresentationSearchCV
+
+search = RepresentationSearchCV(
+    LogisticRegression(),
+    methods=["rbf"],
+    cv=3,
+    preprocessor_params={"output_dim": 3, "task_validation": "raise"},
+    task_validation="raise",
+).fit(homes, sale_status)
+assert search.best_preprocessor_.task == "classification"
+```
+
+`CrossFittedTransformer` also accepts `task_validation` for its own task, which determines
+the splitter. Turning the check off on a wrapper does not turn off its inner estimator's
+policy. It also does not disable task-string validation or leakage warnings. A consistency
+check answers whether the target fits the task; it does not prevent leakage. Use a pipeline
+or cross-fitting to keep target-aware preprocessing within the training data for each split.
 
 ## Resolution and placement are independent
 
