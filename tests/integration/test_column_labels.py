@@ -7,7 +7,9 @@ scikit-learn's ColumnTransformer, silently swapping columns.
 """
 
 import warnings
+from copy import deepcopy
 from typing import cast
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
@@ -16,7 +18,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import make_pipeline
 
-from pretab import Preprocessor
+from pretab import Preprocessor, RepresentationConfig
+from pretab.compose.inspection import refit_block_representation
 from pretab.core.supervised import CrossFittedTransformer
 from pretab.exceptions import PretabDataError
 
@@ -33,6 +36,415 @@ def _passthrough(**kwargs):
 
 def _blocks(out):
     return cast("dict[str, np.ndarray]", out)
+
+
+@pytest.mark.parametrize("input_kind", ["pandas", "numpy", "polars"])
+@pytest.mark.parametrize("typed", [False, True], ids=["mapping", "value"])
+@pytest.mark.parametrize("reverse_settings", [False, True], ids=["forward", "reversed"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse"])
+def test_mixed_structured_inputs_keep_feature_order(input_kind, typed, reverse_settings, output_format):
+    from scipy import sparse
+
+    frame = pd.DataFrame(
+        {
+            "feature_0": np.resize([3, 1, 2, 1], 80),
+            "feature_1": np.arange(18, 98),
+            "feature_2": np.resize([1, 0], 80),
+            "feature_3": np.arange(80),
+            "feature_4": np.resize([10, 20, 30, 10], 80),
+        }
+    )
+    settings = {
+        "feature_0": "one-hot",
+        "feature_1": {"method": "rbf", "output_dim": 2, "params": {"gamma": 0.25}},
+        "feature_2": "int",
+        "feature_3": "rbf",
+        "feature_4": {"method": "one-hot", "params": {"drop": "first", "sparse_output": False}},
+    }
+    parameters = {
+        "numerical_method": "none",
+        "output_dim": 3,
+        "target_aware": False,
+        "placement_strategy": "uniform",
+        "scaling": "none",
+        "cat_cutoff": 5,
+        "random_state": 17,
+    }
+    reference = Preprocessor(feature_preprocessing=settings, **parameters).fit(frame)
+    expected = reference.transform(frame, return_array=True)
+    entries = list(settings.items())[::-1] if reverse_settings else list(settings.items())
+    overrides = {
+        feature: RepresentationConfig.from_dict(options) if typed and isinstance(options, dict) else options
+        for feature, options in entries
+    }
+    if input_kind == "polars":
+        polars = pytest.importorskip("polars")
+        incoming = polars.DataFrame(frame.to_dict(orient="list"))
+    elif input_kind == "numpy":
+        incoming = frame.to_numpy()
+    else:
+        incoming = frame
+    original = deepcopy(incoming)
+    preprocessor = Preprocessor(feature_preprocessing=overrides, output_format=output_format, **parameters)
+    transformed = preprocessor.fit_transform(incoming)
+    assert not isinstance(transformed, dict)
+    assert sparse.issparse(transformed) == (output_format == "sparse")
+    actual = transformed.toarray() if sparse.issparse(transformed) else np.asarray(transformed)
+    np.testing.assert_array_equal(actual, expected)
+    assert preprocessor.numerical_features_ == ["feature_1", "feature_3"]
+    assert preprocessor.categorical_features_ == ["feature_0", "feature_2", "feature_4"]
+    dimensions = {"feature_1": 2, "feature_3": 3, "feature_0": 3, "feature_2": 1, "feature_4": 2}
+    assert preprocessor.output_dims_ == dimensions
+    assert list(preprocessor.output_dims_) == list(dimensions)
+    assert preprocessor.total_output_dim_ == 11
+    assert preprocessor.get_feature_info(verbose=False) == reference.get_feature_info(verbose=False)
+    assert preprocessor.get_feature_lineage() == reference.get_feature_lineage()
+    np.testing.assert_array_equal(preprocessor.get_feature_names_out(), reference.get_feature_names_out())
+    blocks = preprocessor.transform(incoming, return_array=False)
+    assert isinstance(blocks, dict)
+    assert list(blocks) == ["num_feature_1", "num_feature_3", "cat_feature_0", "cat_feature_2", "cat_feature_4"]
+    assert [np.shape(block)[1] for block in blocks.values()] == list(dimensions.values())
+    stacked = np.hstack([block.toarray() if sparse.issparse(block) else np.asarray(block) for block in blocks.values()])
+    np.testing.assert_array_equal(stacked, expected)
+    if isinstance(incoming, np.ndarray):
+        with pytest.raises(PretabDataError, match="X has 4 features, but Preprocessor is expecting 5"):
+            preprocessor.transform(incoming[:, :-1])
+        np.testing.assert_array_equal(incoming, original)
+    else:
+        if isinstance(incoming, pd.DataFrame):
+            reordered = incoming.iloc[:, ::-1]
+            assert isinstance(original, pd.DataFrame)
+            pd.testing.assert_frame_equal(incoming, original)
+        else:
+            reordered = incoming.select(incoming.columns[::-1])
+            assert incoming.equals(original)
+        result = preprocessor.transform(reordered, return_array=True)
+        assert not isinstance(result, dict)
+        np.testing.assert_array_equal(result.toarray() if sparse.issparse(result) else np.asarray(result), expected)
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("labels", ["string", "integer"])
+@pytest.mark.parametrize("missing_indices", [(0,), (1,), (0, 1)])
+@pytest.mark.parametrize("input_kind", ["pandas", "dict"])
+def test_missing_group_sources_name_fitted_group_and_original_labels(
+    int_labelled, method, labels, missing_indices, input_kind
+):
+    frame = int_labelled if labels == "integer" else int_labelled.set_axis(["north", "east"], axis=1)
+    sources = list(frame.columns[::-1])
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    preprocessor = Preprocessor(
+        numerical_method="none",
+        target_aware=False,
+        placement_strategy="uniform",
+        feature_groups={"location": {"columns": sources, "representation": representation}},
+    ).fit(frame)
+    preprocessor.set_params(feature_groups=None)
+    missing = tuple(sources[index] for index in missing_indices)
+    incoming = frame.drop(columns=list(missing))
+    original = incoming.copy(deep=True)
+    values = incoming.to_dict(orient="list") if input_kind == "dict" else incoming
+    with pytest.raises(PretabDataError) as failure:
+        preprocessor.transform(values)
+    assert "group 'group_location'" in str(failure.value)
+    assert f"missing sources {missing!r}" in str(failure.value)
+    pd.testing.assert_frame_equal(incoming, original)
+
+
+def _grouped_input_processor(method, columns, **kwargs):
+    representation = (
+        {"method": method, "output_dim": 3, "degree": 2}
+        if method == "tensorspline"
+        else {"method": method, "n_components": 3, "landmark_strategy": "subsample", "random_state": 0}
+    )
+    return Preprocessor(
+        numerical_method="none",
+        target_aware=False,
+        placement_strategy="uniform",
+        missing_policy="separate_state",
+        feature_groups={"location": {"columns": columns, "representation": representation}},
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("input_kind", ["pandas", "numpy", "polars"])
+@pytest.mark.parametrize("output_format", ["dense", "sparse", "auto"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_grouped_inputs_preserve_order_missing_state_and_values(method, input_kind, output_format, dtype):
+    from scipy import sparse
+
+    frame = pd.DataFrame(
+        np.random.default_rng(42).normal(size=(40, 3)), columns=pd.Index(["feature_0", "feature_1", "feature_2"])
+    )
+    frame.iloc[7, 0] = np.nan
+    sources = ["feature_1", "feature_0"]
+    expected_preprocessor = _grouped_input_processor(method, sources, dtype=dtype).fit(frame)
+    expected = expected_preprocessor.transform(frame)
+    if input_kind == "polars":
+        polars = pytest.importorskip("polars")
+        incoming = polars.DataFrame(frame.to_dict(orient="list")).fill_nan(None)
+    else:
+        incoming = frame.to_numpy() if input_kind == "numpy" else frame
+    original = deepcopy(incoming)
+    preprocessor = _grouped_input_processor(method, sources, output_format=output_format, dtype=dtype)
+    transformed = preprocessor.fit_transform(incoming)
+    assert not isinstance(transformed, dict)
+    assert sparse.issparse(transformed) == (preprocessor.output_format_ == "sparse")
+    assert transformed.dtype == dtype
+    values = transformed.toarray() if sparse.issparse(transformed) else np.asarray(transformed)
+    np.testing.assert_array_equal(values, expected)
+    np.testing.assert_array_equal(preprocessor.get_feature_names_out(), expected_preprocessor.get_feature_names_out())
+    assert preprocessor.get_feature_info(verbose=False) == expected_preprocessor.get_feature_info(verbose=False)
+    assert preprocessor.get_feature_lineage() == expected_preprocessor.get_feature_lineage()
+    assert list(preprocessor.output_dims_) == ["feature_2", "group_location"]
+    fingerprint = preprocessor.fingerprint_
+    blocks = preprocessor.transform(incoming, return_array=False)
+    assert isinstance(blocks, dict)
+    assert list(blocks) == ["num_feature_2", "group_location"]
+    assert all(sparse.issparse(block) == (preprocessor.output_format_ == "sparse") for block in blocks.values())
+    stacked = np.hstack([block.toarray() if sparse.issparse(block) else np.asarray(block) for block in blocks.values()])
+    np.testing.assert_array_equal(stacked, expected)
+    np.testing.assert_array_equal(values[:, -2:], frame[sources].isna().astype(dtype))
+    if input_kind == "numpy":
+        assert isinstance(incoming, np.ndarray)
+        for wrong in (incoming[:, :-1], np.column_stack((incoming, np.ones(len(incoming))))):
+            with pytest.raises(PretabDataError, match=r"X has [24] features, but Preprocessor is expecting 3"):
+                preprocessor.transform(wrong)
+        np.testing.assert_array_equal(incoming, original)
+    else:
+        assert not isinstance(incoming, np.ndarray)
+        reordered = (
+            incoming.iloc[:, ::-1] if isinstance(incoming, pd.DataFrame) else incoming.select(incoming.columns[::-1])
+        )
+        result = preprocessor.transform(reordered)
+        assert not isinstance(result, dict)
+        np.testing.assert_array_equal(result.toarray() if sparse.issparse(result) else np.asarray(result), expected)
+        if isinstance(incoming, pd.DataFrame):
+            assert isinstance(original, pd.DataFrame)
+            pd.testing.assert_frame_equal(incoming, original)
+        else:
+            assert incoming.equals(original)
+    assert preprocessor.fingerprint_ == fingerprint
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("input_kind", ["pandas", "dict", "numpy", "list"])
+def test_grouped_integer_labels_keep_named_and_positional_routes(int_labelled, method, input_kind):
+    preprocessor = _grouped_input_processor(method, [0, 1]).fit(int_labelled)
+    expected = preprocessor.transform(int_labelled)
+    reordered = int_labelled.iloc[:, ::-1]
+    incoming = {
+        "pandas": reordered,
+        "dict": reordered.to_dict(orient="list"),
+        "numpy": int_labelled.to_numpy(),
+        "list": int_labelled.to_numpy().tolist(),
+    }[input_kind]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        actual = preprocessor.transform(incoming)
+    assert not caught
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+def test_array_fitted_groups_accept_differently_named_frames_positionally(method):
+    frame = pd.DataFrame(np.random.default_rng(42).normal(size=(40, 3)), columns=pd.Index(["north", "east", "spare"]))
+    preprocessor = _grouped_input_processor(method, ["feature_1", "feature_0"]).fit(frame.to_numpy())
+    expected = preprocessor.transform(frame.to_numpy())
+    with pytest.warns(UserWarning, match="was fitted without feature names"):
+        actual = preprocessor.transform(frame)
+    np.testing.assert_array_equal(actual, expected)
+    with pytest.raises(PretabDataError, match="X has 2 features, but Preprocessor is expecting 3"):
+        preprocessor.transform(frame.iloc[:, :-1])
+
+
+@pytest.mark.parametrize("method", ["tensorspline", "tprs"])
+@pytest.mark.parametrize("input_kind", ["numpy", "list"])
+def test_named_fitted_groups_accept_positional_inputs_with_existing_warning(method, input_kind):
+    frame = pd.DataFrame(np.random.default_rng(42).normal(size=(40, 3)), columns=pd.Index(["north", "east", "spare"]))
+    preprocessor = _grouped_input_processor(method, ["east", "north"]).fit(frame)
+    expected = preprocessor.transform(frame)
+    incoming = frame.to_numpy() if input_kind == "numpy" else frame.to_numpy().tolist()
+    with pytest.warns(UserWarning, match="does not have valid feature names") as caught:
+        actual = preprocessor.transform(incoming)
+    assert len(caught) == 1
+    np.testing.assert_array_equal(actual, expected)
+    wrong = frame.iloc[:, :-1].to_numpy()
+    with pytest.raises(PretabDataError, match="X has 2 features, but Preprocessor is expecting 3"):
+        preprocessor.transform(wrong if input_kind == "numpy" else wrong.tolist())
+
+
+@pytest.fixture(params=["string", "integer"])
+def input_route_frame(request):
+    frame = pd.DataFrame(
+        {1: [True, False, True, False, True, True], 0: [10.0, 20, 30, 40, 50, 60]},
+        index=pd.Index([8, 3, 8, 2, 7, 5]),
+    )
+    if request.param == "string":
+        frame.columns = ["flag", "value"]
+    return frame
+
+
+@pytest.fixture
+def input_route_spies(monkeypatch):
+    def install(preprocessor):
+        align = Mock(wraps=preprocessor._align_input)
+        adapt = Mock(wraps=preprocessor._column_transformer_input)
+        route = Mock()
+        route.attach_mock(align, "align")
+        route.attach_mock(adapt, "adapt")
+        monkeypatch.setattr(preprocessor, "_align_input", align)
+        monkeypatch.setattr(preprocessor, "_column_transformer_input", adapt)
+        return route, align, adapt
+
+    return install
+
+
+@pytest.mark.parametrize("operation", ["fit", "fit_transform"])
+def test_fitting_uses_shared_input_adaptation(input_route_spies, input_route_frame, operation):
+    frame = input_route_frame
+    original = frame.copy(deep=True)
+    preprocessor = _passthrough(categorical_method="int", target_aware=False, placement_strategy="uniform")
+    route, align, adapt = input_route_spies(preprocessor)
+
+    result = getattr(preprocessor, operation)(frame)
+
+    expected_route = ["adapt"] if operation == "fit" else ["adapt", "align", "adapt"]
+    assert [call[0] for call in route.mock_calls] == expected_route
+    assert align.call_count == int(operation == "fit_transform")
+    assert adapt.call_count == (1 if operation == "fit" else 2)
+    for call in adapt.call_args_list:
+        pd.testing.assert_frame_equal(call.args[0], original)
+    assert vars(preprocessor.column_transformer_)["feature_names_in_"].tolist() == [
+        str(label) for label in frame.columns
+    ]
+    if operation == "fit":
+        assert result is preprocessor
+    else:
+        blocks = _blocks(result)
+        np.testing.assert_array_equal(blocks[f"num_{frame.columns[1]}"].ravel(), frame.iloc[:, 1])
+        np.testing.assert_array_equal(blocks[f"cat_{frame.columns[0]}"].ravel(), [2.0, 1.0, 2.0, 1.0, 2.0, 2.0])
+    pd.testing.assert_frame_equal(frame, original)
+
+
+@pytest.mark.parametrize("input_kind", ["frame", "reordered", "array", "list"])
+def test_transform_aligns_before_shared_input_adaptation(input_route_spies, input_route_frame, input_kind):
+    frame = input_route_frame.astype(float) if input_kind == "list" else input_route_frame
+    original = frame.copy(deep=True)
+    preprocessor = _passthrough(categorical_method="int", target_aware=False, placement_strategy="uniform").fit(frame)
+    expected = _blocks(preprocessor.transform(frame))
+    incoming = {
+        "frame": frame,
+        "reordered": frame.iloc[:, ::-1],
+        "array": frame.to_numpy(),
+        "list": frame.to_numpy().tolist(),
+    }[input_kind]
+    original_incoming = deepcopy(incoming)
+    route, align, adapt = input_route_spies(preprocessor)
+
+    if input_kind in ("array", "list") and hasattr(preprocessor, "feature_names_in_"):
+        with pytest.warns(UserWarning, match="does not have valid feature names"):
+            actual = _blocks(preprocessor.transform(incoming))
+    else:
+        actual = _blocks(preprocessor.transform(incoming))
+
+    assert [call[0] for call in route.mock_calls] == ["align", "adapt"]
+    align.assert_called_once()
+    adapt.assert_called_once()
+    assert align.call_args.args[0] is incoming
+    expected_frame = frame.iloc[:, ::-1] if input_kind == "reordered" else frame
+    if input_kind in ("array", "list"):
+        expected_frame = frame.set_axis([str(label) for label in frame.columns], axis=1).reset_index(drop=True)
+    pd.testing.assert_frame_equal(adapt.call_args.args[0], expected_frame)
+    assert list(actual) == list(expected)
+    for name in expected:
+        np.testing.assert_array_equal(actual[name], expected[name])
+    if isinstance(incoming, pd.DataFrame):
+        pd.testing.assert_frame_equal(incoming, original_incoming)
+    else:
+        np.testing.assert_array_equal(incoming, original_incoming)
+    pd.testing.assert_frame_equal(frame, original)
+
+
+@pytest.mark.parametrize("input_kind", ["reordered", "array"])
+def test_fold_refit_aligns_and_adapts_before_routing_to_representations(
+    input_route_spies, input_route_frame, monkeypatch, input_kind
+):
+    frame = pd.concat([input_route_frame] * 10, ignore_index=True)
+    original = frame.copy(deep=True)
+    target = frame.iloc[:, 1].to_numpy() + np.random.default_rng(0).normal(size=len(frame))
+    preprocessor = Preprocessor(
+        numerical_method="ple",
+        categorical_method="int",
+        output_dim=4,
+        adaptive=False,
+        target_aware=True,
+        placement_strategy="cart",
+        scaling="none",
+        random_state=0,
+    ).fit(frame, target)
+    original_output = preprocessor.transform(frame)
+    train = frame.iloc[12:]
+    train_target = target[12:]
+    incoming = train.iloc[:, ::-1] if input_kind == "reordered" else train.to_numpy()
+    route, align, adapt = input_route_spies(preprocessor)
+    refit = Mock(wraps=refit_block_representation)
+    monkeypatch.setattr("pretab.preprocessor.refit_block_representation", refit)
+
+    if input_kind == "array" and hasattr(preprocessor, "feature_names_in_"):
+        with pytest.warns(UserWarning, match="does not have valid feature names"):
+            fold = preprocessor._cross_fit_fold(incoming, train_target)
+    else:
+        fold = preprocessor._cross_fit_fold(incoming, train_target)
+
+    assert [call[0] for call in route.mock_calls] == ["align", "adapt"]
+    align.assert_called_once()
+    adapt.assert_called_once()
+    assert align.call_args.args[0] is incoming
+    refit.assert_called_once()
+    numerical_name = f"num_{frame.columns[1]}"
+    categorical_name = f"cat_{frame.columns[0]}"
+    expected_frame = train.iloc[:, [1]].set_axis([str(frame.columns[1])], axis=1)
+    if input_kind == "array":
+        expected_frame = expected_frame.reset_index(drop=True)
+    assert refit.call_args.args[0] is preprocessor.column_transformer_.named_transformers_[numerical_name]
+    pd.testing.assert_frame_equal(refit.call_args.args[1], expected_frame)
+    assert refit.call_args.args[2] is train_target
+    assert fold.column_transformer_ is not preprocessor.column_transformer_
+    assert fold.column_transformer_.named_transformers_[numerical_name] is not refit.call_args.args[0]
+    assert (
+        fold.column_transformer_.named_transformers_[categorical_name]
+        is preprocessor.column_transformer_.named_transformers_[categorical_name]
+    )
+    np.testing.assert_array_equal(preprocessor.transform(frame), original_output)
+    pd.testing.assert_frame_equal(frame, original)
+
+
+def test_feature_info_uses_fitted_metadata_without_input_routing_or_transform(
+    input_route_spies, input_route_frame, monkeypatch
+):
+    frame = input_route_frame
+    preprocessor = _passthrough(categorical_method="int", target_aware=False, placement_strategy="uniform").fit(frame)
+    expected = preprocessor.get_feature_info(verbose=False)
+    route, align, adapt = input_route_spies(preprocessor)
+    reject_transform = Mock(side_effect=AssertionError("Feature metadata must not transform synthetic input"))
+    monkeypatch.setattr(preprocessor.column_transformer_, "transform", reject_transform)
+
+    actual = preprocessor.get_feature_info(verbose=False)
+
+    assert actual == expected
+    assert list(actual[0]) == [frame.columns[1]]
+    assert list(actual[1]) == [frame.columns[0]]
+    assert actual[2] == {}
+    assert route.mock_calls == []
+    align.assert_not_called()
+    adapt.assert_not_called()
+    reject_transform.assert_not_called()
 
 
 @pytest.mark.parametrize("label", ["_score", "income__log", "__index_level_0__", "trailing__"])

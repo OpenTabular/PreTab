@@ -121,13 +121,13 @@ print(f"MAE: {mean_absolute_error(y_test, pred):.2f}")
 
 ```text
 features: 40
-R2:  0.983
-MAE: 1.78
+R2:  0.977
+MAE: 2.04
 ```
 
 The data and the `Ridge` model are unchanged, but the expressive features let it capture the
-nonlinear structure. The $R^2$ jumps from `0.124` to `0.983` and the mean absolute error drops
-from `11.20` to `1.78`.
+nonlinear structure. The $R^2$ rises from `0.124` to `0.977` and the mean absolute error drops
+from `11.20` to `2.04`.
 
 ```{tip}
 `Preprocessor.transform` returns a single stacked array by default, so it drops straight into
@@ -138,26 +138,23 @@ a plain scikit-learn estimator or `Pipeline`. Pass `output_structure="blocks"` (
 
 ## What actually changed
 
-The `Preprocessor` expands four raw columns into 40 features. Inspect the resolved layout with
-`get_feature_info`:
+The `Preprocessor` expands four raw columns into 40 features. `get_feature_info()` returns
+separate dictionaries for numerical, categorical, and embedding features. Read the fitted
+widths directly from those dictionaries:
 
 ```python
-pre.get_feature_info()
+numerical, categorical, _ = pre.get_feature_info(verbose=False)
+assert {name: info["dimension"] for name, info in numerical.items()} == {
+    "age": 12, "income": 12, "tenure": 12,
+}
+assert categorical["city"]["dimension"] == 4
 ```
 
-```text
-feature  kind         pipeline                        dim   cats
-----------------------------------------------------------------
-age      numerical    imputer -> minmax -> bspline     12      -
-income   numerical    imputer -> minmax -> ple         12      -
-tenure   numerical    imputer -> minmax -> rbf         12      -
-city     categorical  imputer -> onehot -> to_float     4      4
-```
-
-Each numeric column is imputed, scaled, then expanded into a basis the linear model can weight
-independently: 12 spline coefficients for `age`, 12 PLE bins for `income`, and 12 RBF bumps for
-`tenure`, while `city` becomes four one-hot columns. To trace any single output column back to
-its source, use [feature lineage](../core_concepts/outputs_and_inspection.md).
+Each numeric column is imputed, scaled, then expanded into features the linear model can weight
+independently. The categorical pipeline normalizes missing values, imputes them, and produces
+four floating-point one-hot columns. Call `get_feature_info(verbose=True)` to log the fitted
+pipelines and fit-time settings. To trace an output column back to its source, use
+[feature lineage](../core_concepts/outputs_and_inspection.md).
 
 ## Where to go next
 

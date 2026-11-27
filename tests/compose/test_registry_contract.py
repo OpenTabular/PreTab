@@ -65,6 +65,59 @@ def test_arity_valid(name, spec):
 
 
 @pytest.mark.parametrize("name, spec", _SPEC_ITEMS, ids=_SPEC_IDS)
+def test_group_capabilities_are_explicit_and_independent_of_single_column_selection(name, spec):
+    expected = (True, 2, None) if name in {"tensorspline", "tprs"} else (False, 1, 1)
+    assert (spec.group_compatible, spec.min_arity, spec.max_arity) == expected
+    if spec.group_compatible:
+        assert spec.feature_kind == frozenset({"numerical"})
+        assert spec.is_multivariate
+        assert spec.preprocessor_compatible is False
+        assert name not in NUMERICAL_METHODS
+
+
+def test_legacy_positional_spec_uses_group_defaults():
+    spec = TransformerSpec(
+        "legacy",
+        TRANSFORMER_REGISTRY["rbf"].transformer_cls,
+        ("gamma",),
+        frozenset({"numerical"}),
+        "multivariate",
+        "optional",
+        frozenset({"uniform", "cart"}),
+        True,
+        False,
+        None,
+        True,
+        True,
+    )
+
+    assert spec.name == "legacy"
+    assert spec.allowed_args == ("gamma",)
+    assert spec.is_multivariate
+    assert spec.target_aware_capable
+    assert spec.supports_adaptive_resolution
+    assert spec.preprocessor_compatible is False
+    assert spec.optional_dependency is None
+    assert spec.periodic and spec.sparse_output
+    assert (spec.group_compatible, spec.min_arity, spec.max_arity) == (False, 1, 1)
+
+
+@pytest.mark.parametrize("name", ["tensorspline", "tprs", "rff", "nystroem"])
+@pytest.mark.parametrize("n_features", [1, 3])
+def test_group_arity_metadata_does_not_constrain_standalone_inputs(name, n_features):
+    data = np.random.default_rng(0).uniform(size=(40, n_features))
+    options = {"output_dim": 4} if name == "tensorspline" else {"n_components": 4, "random_state": 0}
+    transformer = TRANSFORMER_REGISTRY[name].transformer_cls(**options)
+
+    transformed = transformer.fit_transform(data)
+
+    expected_width = 4**n_features if name == "tensorspline" else 4
+    assert transformed.shape == (40, expected_width)
+    assert transformer.n_features_in_ == n_features
+    assert np.isfinite(transformed).all()
+
+
+@pytest.mark.parametrize("name, spec", _SPEC_ITEMS, ids=_SPEC_IDS)
 def test_target_usage_valid(name, spec):
     assert spec.target_usage in _VALID_TARGET_USAGE
 

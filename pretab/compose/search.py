@@ -13,7 +13,7 @@ from copy import deepcopy
 from typing import cast
 
 import numpy as np
-from sklearn.base import BaseEstimator, clone, is_classifier
+from sklearn.base import BaseEstimator, clone, is_classifier, is_regressor
 from sklearn.metrics import check_scoring
 from sklearn.model_selection import BaseCrossValidator, check_cv
 from sklearn.utils import get_tags
@@ -21,9 +21,17 @@ from sklearn.utils.metaestimators import available_if
 from sklearn.utils.validation import _check_method_params, check_is_fitted
 
 from ..core._typing import PredictorLike
-from ..core.validation import is_polars_frame, polars_to_pandas
-from ..exceptions import InvalidParamError
+from ..core.validation import (
+    _check_task_target_once,
+    _task_target_scope,
+    _TaskValidationMode,
+    _validate_task_validation,
+    is_polars_frame,
+    polars_to_pandas,
+)
+from ..exceptions import InvalidParamError, invalid_param_error
 from ..preprocessor import Preprocessor
+from .registry import NUMERICAL_ALIASES, NUMERICAL_METHODS, resolve_method
 
 __all__ = ["RepresentationSearchCV"]
 
@@ -64,7 +72,12 @@ class RepresentationSearchCV(BaseEstimator):
     estimator : estimator
         Downstream supervised estimator fit on the transformed features.
     methods : sequence of str
-        Candidate ``numerical_method`` values to search over.
+        Candidate ``numerical_method`` values to search over, e.g.
+        ``["minmax", "bspline"]``. Names are resolved like
+        ``Preprocessor(numerical_method=...)`` (aliases and ``None`` included) and
+        checked when :meth:`fit` starts, before any candidate is cross-validated.
+        A single string is rejected instead of being read as a sequence of
+        one-letter names.
     cv : int or cross-validation generator, default=5
         Cross-validation splitting strategy passed to
         :func:`sklearn.model_selection.check_cv`. A group splitter such as
@@ -76,7 +89,8 @@ class RepresentationSearchCV(BaseEstimator):
     preprocessor_params : dict or None, default=None
         Extra keyword arguments forwarded to every :class:`Preprocessor`. When
         ``estimator`` is a classifier, ``task`` defaults to ``"classification"`` so
-        target-aware placement treats ``y`` as class labels.
+        target-aware placement treats ``y`` as class labels. ``numerical_method``
+        cannot be set here: the search sets it to each entry of ``methods``.
     random_state : int or None, default=None
         Seed forwarded to each :class:`Preprocessor`.
 
@@ -101,13 +115,28 @@ class RepresentationSearchCV(BaseEstimator):
         string column names.
     """
 
-    def __init__(self, estimator, methods, *, cv=5, scoring=None, preprocessor_params=None, random_state=None):
+    def __init__(
+        self,
+        estimator,
+        methods,
+        *,
+        cv=5,
+        scoring=None,
+        preprocessor_params=None,
+        random_state=None,
+        task_validation="off",
+    ):
         self.estimator = estimator
         self.methods = methods
         self.cv = cv
         self.scoring = scoring
         self.preprocessor_params = preprocessor_params
         self.random_state = random_state
+        self.task_validation = task_validation
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        self.__dict__.setdefault("task_validation", "off")
 
     def _make_preprocessor(self, method):
         """Build a Preprocessor for ``method`` with the shared parameters.
@@ -120,6 +149,65 @@ class RepresentationSearchCV(BaseEstimator):
         if is_classifier(self.estimator):
             params.setdefault("task", "classification")
         return Preprocessor(numerical_method=method, **params)
+
+    def _validated_methods(self) -> list:
+        """Return ``methods`` as a list, checked before any candidate is fitted.
+
+        A typo would otherwise only surface inside the first fold of that
+        candidate, after every candidate listed before it has been
+        cross-validated, and a single string would be searched letter by letter.
+        """
+        name = type(self).__name__
+        if isinstance(self.methods, str):
+            raise invalid_param_error(
+                name,
+                "methods",
+                self.methods,
+                f"must be a sequence of numerical method names, not a single string; pass [{self.methods!r}] "
+                "to search one method",
+            )
+        methods = list(self.methods)
+        if not methods:
+            raise InvalidParamError("methods must be a non-empty sequence of numerical methods.")
+        for method in methods:
+            # None is Preprocessor's spelling of "none" (leave numerical columns unchanged).
+            known = method is None or (
+                isinstance(method, str)
+                and resolve_method(method, NUMERICAL_METHODS, NUMERICAL_ALIASES) in NUMERICAL_METHODS
+            )
+            if not known:
+                raise invalid_param_error(
+                    name,
+                    "methods",
+                    method,
+                    "every entry must name a numerical preprocessing method",
+                    valid=set(NUMERICAL_METHODS),
+                )
+        if "numerical_method" in (self.preprocessor_params or {}):
+            raise invalid_param_error(
+                name,
+                "preprocessor_params",
+                self.preprocessor_params,
+                "must not set 'numerical_method': the search sets it to each entry of methods",
+            )
+        return methods
+
+    def _preflight_task_targets(self, X, y, methods, *, mode: _TaskValidationMode, classifier, n_samples):
+        inner_mode = dict(self.preprocessor_params or {}).get("task_validation", "off")
+        if mode == "off" and isinstance(inner_mode, str) and inner_mode == "off":
+            return
+        owner = type(self).__name__
+        for method in methods:
+            self._make_preprocessor(method)._preflight_task_target(X, y, outer_mode=mode, owner=owner)
+        if mode != "off" and (classifier or is_regressor(self.estimator)):
+            _check_task_target_once(
+                y,
+                task="classification" if classifier else "regression",
+                mode=mode,
+                estimator=owner,
+                role="representation search",
+                n_samples=n_samples,
+            )
 
     def fit(self, X, y=None, *, groups=None, **fit_params):
         """Search over ``methods`` and refit the best representation on all data.
@@ -151,12 +239,19 @@ class RepresentationSearchCV(BaseEstimator):
         -------
         self : RepresentationSearchCV
             Fitted search.
+
+        Raises
+        ------
+        InvalidParamError
+            If ``methods`` is empty, a single string, or has an entry that does not
+            name a numerical method; if ``preprocessor_params`` sets
+            ``numerical_method``; or if ``y`` is None. Raised before any candidate
+            is fitted.
         """
-        methods = list(self.methods)
-        if not methods:
-            raise InvalidParamError("methods must be a non-empty sequence of numerical methods.")
+        methods = self._validated_methods()
         if y is None:
             raise InvalidParamError("RepresentationSearchCV requires y at fit time; got y=None.")
+        mode = _validate_task_validation(self.task_validation, type(self).__name__)
         y_arr = np.asarray(y).ravel()
         if is_polars_frame(X):
             # Converted once, so every fold's rows carry the dtypes of the whole frame,
@@ -166,7 +261,10 @@ class RepresentationSearchCV(BaseEstimator):
         # As in scikit-learn's searches: per-sample fit params are made indexable
         # so each fold can take its training rows.
         fit_params = _check_method_params(X, params=fit_params)
-        cv = cast(BaseCrossValidator, check_cv(self.cv, y_arr, classifier=is_classifier(self.estimator)))
+        classifier = is_classifier(self.estimator)
+        cv = cast(BaseCrossValidator, check_cv(self.cv, y_arr, classifier=classifier))
+        with _task_target_scope(y) as receipts:
+            self._preflight_task_targets(X, y, methods, mode=mode, classifier=classifier, n_samples=n_samples)
         # Reuse the same held-out rows for every candidate, including splitters
         # whose random state advances on each call to split().
         splits = list(cv.split(np.zeros(n_samples), y_arr, groups))
@@ -179,7 +277,9 @@ class RepresentationSearchCV(BaseEstimator):
             for train_idx, test_idx in splits:
                 pre = self._make_preprocessor(method)
                 est = cast(PredictorLike, clone(self.estimator))
-                x_train = pre.fit_transform(_row_subset(X, train_idx), y_arr[train_idx], return_array=True)
+                train_y = y_arr[train_idx]
+                with _task_target_scope(train_y, receipts.copy()):
+                    x_train = pre.fit_transform(_row_subset(X, train_idx), train_y, return_array=True)
                 fold_params = _check_method_params(X, params=fit_params, indices=train_idx)
                 est.fit(x_train, y_arr[train_idx], **fold_params)
                 scorer = cast("Callable[..., float]", check_scoring(est, scoring=self.scoring))
@@ -195,7 +295,8 @@ class RepresentationSearchCV(BaseEstimator):
         self.best_method_ = best_method
         self.best_score_ = best_score
         self.best_preprocessor_ = self._make_preprocessor(best_method)
-        x_all = self.best_preprocessor_.fit_transform(X, y_arr, return_array=True)
+        with _task_target_scope(y_arr, receipts.copy()):
+            x_all = self.best_preprocessor_.fit_transform(X, y_arr, return_array=True)
         self.best_estimator_ = cast(PredictorLike, clone(self.estimator)).fit(x_all, y_arr, **fit_params)
         self.n_features_in_ = self.best_preprocessor_.n_features_in_
         # scikit-learn convention: feature names are recorded only for input whose

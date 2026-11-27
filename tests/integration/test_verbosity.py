@@ -229,6 +229,47 @@ def test_set_verbosity_sets_logger_level():
     assert logger.level == logging.INFO
 
 
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [
+        (-1, logging.WARNING),
+        (0, logging.WARNING),
+        (3, logging.DEBUG),
+        (4, logging.DEBUG),
+        (10, logging.DEBUG),
+        (True, logging.INFO),
+        (False, logging.WARNING),
+    ],
+)
+def test_set_verbosity_clamps_out_of_range_levels(level, expected):
+    """A level outside 0-3 fell back to INFO: 4 logged less than 3, and -1 more than 0."""
+    set_verbosity(level)
+    assert logging.getLogger("pretab").level == expected
+
+
+def test_configure_logging_clamps_out_of_range_levels():
+    with _root_handlers():
+        configure_logging(7)
+        assert logging.getLogger("pretab").level == logging.DEBUG
+        configure_logging(-3)
+        assert logging.getLogger("pretab").level == logging.WARNING
+
+
+def test_verbose_above_three_logs_like_three(caplog, sample_data):
+    """Preprocessor(verbose=4) dropped the level-2 table and level-3 details."""
+    X, y = sample_data
+
+    def records(verbose):
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG, logger="pretab"):
+            Preprocessor(verbose=verbose).fit(X, y)
+        return [(record.levelno, record.getMessage().split(" in ")[0]) for record in caplog.records]
+
+    level_three = records(3)
+    assert any(level == logging.DEBUG for level, _ in level_three)
+    assert records(4) == level_three
+
+
 @contextlib.contextmanager
 def _root_handlers(*handlers):
     """Run with exactly ``handlers`` on the root logger (none: a plain Python process).

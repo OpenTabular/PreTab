@@ -35,7 +35,7 @@ compose standalone representations with scikit-learn transformers and estimators
 
 :::{grid-item-card} 🧠 Smart defaults
 Automatic feature-type detection (numerical vs. categorical) with support for
-`pandas.DataFrame`, `polars.DataFrame` and `numpy.ndarray` inputs.
+`pandas.DataFrame`, eager `polars.DataFrame` and `numpy.ndarray` inputs.
 :::
 
 ::::
@@ -47,49 +47,45 @@ import numpy as np
 import pandas as pd
 from pretab import Preprocessor
 
+rng = np.random.default_rng(0)
 df = pd.DataFrame({
-    "age": np.random.randint(18, 65, size=100),
-    "income": np.random.normal(60_000, 15_000, size=100).astype(int),
-    "city": np.random.choice(["Berlin", "Munich", "Hamburg"], size=100),
+    "age": rng.integers(18, 65, size=100),
+    "income": rng.normal(60_000, 15_000, size=100).astype(int),
+    "city": rng.choice(["Berlin", "Munich", "Hamburg"], size=100),
 })
-y = np.random.randn(100)
+y = rng.standard_normal(100)
 
 # One strategy per feature type: PLE for numerics, integer codes for categoricals
-pre = Preprocessor(numerical_method="ple", categorical_method="int")
-X = pre.fit_transform(df, y)          # single stacked, model-ready array
-X.shape
-# (100, 15)
+pre = Preprocessor(numerical_method="ple", categorical_method="int", task="regression")
+X = pre.fit_transform(df, y)
+assert X.shape == (100, 15)
+assert len(pre.get_feature_lineage()) == X.shape[1]
 ```
 
-`Preprocessor` detects the column types, fits a strategy per column, and returns a single
-stacked, model-ready array by default, so it drops straight into a plain
-`sklearn.pipeline.Pipeline`; pass `output_structure="blocks"` for a dict of per-feature blocks
-instead. Inspect the resolved layout at any time with `get_feature_info(verbose=True)`:
-
-```text
-feature  kind         pipeline                        dim   cats
-----------------------------------------------------------------
-age      numerical    imputer -> minmax -> ple          7      -
-income   numerical    imputer -> minmax -> ple          7      -
-city     categorical  imputer -> continuous_ordinal     1      4
-```
+`Preprocessor` detects column types and returns one array by default. Pass
+`output_structure="blocks"` to get a dictionary of feature blocks instead. After fitting,
+`get_feature_lineage()` traces each output column back to its input.
 
 ### Mix strategies per column
 
-Columns rarely want the same treatment. Pass a `feature_preprocessing` map to give each
-column its own strategy, and a single `fit` still returns one coherent feature set:
+Use `feature_preprocessing` to choose a different strategy for each column. The output
+still has one row per input sample:
 
 ```python
-pre = Preprocessor(feature_preprocessing={
-    "age": "ple",       # piecewise-linear encoding
-    "income": "rbf",    # radial-basis expansion
-    "city": "one-hot",  # one-hot categorical
-})
+pre = Preprocessor(
+    feature_preprocessing={
+        "age": "ple",
+        "income": "rbf",
+        "city": "one-hot",
+    },
+    task="regression",
+)
 X = pre.fit_transform(df, y)
-
-X.shape
-# (100, 17)
+assert X.shape == (100, 17)
 ```
+
+See [What's new in PreTab 1.1](getting_started/overview.md#whats-new-in-pretab-11)
+for per-feature widths, grouped splines, and other 1.1 changes.
 
 ## Get started
 

@@ -6,9 +6,10 @@ ramps, sigmoids) or project it onto a deterministic Fourier basis. Together they
 threshold, and periodic structure with a per-column, `Preprocessor`-selectable transformer.
 
 ```{important}
-As with splines, `output_dim` (or `n_frequencies` for the Fourier map) is the number of output
-columns **per input feature**. A `(n_samples, 3)` input with `output_dim=10` produces
-`(n_samples, 30)` output.
+For fixed-width RBF, ReLU, sigmoid, and tanh expansions, `output_dim` counts output columns
+**per input feature**: three inputs with `output_dim=10` produce 30 columns. Fourier counts
+frequencies instead: three inputs with `n_frequencies=10` produce 60 sine and cosine columns,
+or 63 columns when `include_original=True`.
 ```
 
 ## Radial basis functions
@@ -42,10 +43,12 @@ Constructor highlights: `output_dim`, `gamma=1.0` (bump width; larger is narrowe
 ```
 
 ```{warning}
-`target_aware=True` places centers using a supervised tree over `(X, y)`. Fitting it directly
-on your full training set (outside a `Pipeline` or `pretab.CrossFittedTransformer`) raises a
-`LeakageWarning`, because the center placement has already seen the labels you would then train
-on. The same applies to ReLU, sigmoid, and tanh below whenever `target_aware=True`.
+`target_aware=True` places centers using a supervised tree over `(X, y)`. A standalone fit with
+`y` emits `LeakageWarning`. For evaluation, split before fitting or cross-validate the whole
+pipeline. A plain pipeline still uses the training rows' targets to place their centers;
+wrap the expansion in `pretab.CrossFittedTransformer` for out-of-fold training features.
+This also applies to ReLU, sigmoid, and tanh whenever `target_aware=True`. See
+[Target awareness](../core_concepts/target_awareness.md).
 ```
 
 ## ReLU, sigmoid, and tanh expansions
@@ -107,8 +110,9 @@ from pretab.transformers import FourierFeatureTransformer
 
 X = np.linspace(0, 1, 50).reshape(-1, 1)
 t = FourierFeatureTransformer(n_frequencies=5, frequency_strategy="harmonic")
-t.fit_transform(X).shape
-# (50, 10): 2 columns (sin, cos) per frequency
+encoded = t.fit_transform(X)
+assert encoded.shape == (50, 10)
+np.testing.assert_allclose(encoded[0], encoded[-1], atol=1e-12)
 ```
 
 Constructor highlights: `n_frequencies=5`, `frequency_strategy="harmonic"`,
@@ -121,9 +125,10 @@ the base frequency (1x, 2x, 3x, ...); the alternative spacing is useful when the
 a clean harmonic series.
 
 ```{tip}
-Use `FourierFeatureTransformer` when you want the model to work across a set of frequencies
-without committing to a single known period. If the period is known (hour of day, month of
-year), the direct [periodic encoder](numerical_encoding.md#periodic-encoding) is usually simpler.
+Use `FourierFeatureTransformer` for a range-based frequency basis. The fitted range sets the
+base frequency; it is not an estimate of the signal's period. For example, the harmonic map
+repeats every 23 units if fitted on hours 0 through 23. To encode a 24-hour cycle, use
+the [periodic encoder](numerical_encoding.md#periodic-encoding) with `period=24`.
 ```
 
 ## Where to go next
